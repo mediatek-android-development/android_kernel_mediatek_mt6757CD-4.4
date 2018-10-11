@@ -1,0 +1,22 @@
+#include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/mmc/mt6757-msdc.h>
+#include <dt-bindings/clock/mt6757-clk.h>
+#include <dt-bindings/pinctrl/mt6757-pinfunc.h>
+#include <generated/autoconf.h>
+
+/ {
+	rsee {
+		compatible = "rongcard,rsee-tz";
+		method = "smc";
+	};
+	spi0-clk {
+		compatible = "rsee,peri-clk";
+		clkname = "main";
+		clocks = <&infrasys INFRACFG_AO_SPI0_CG>;
+		clock-names = "main";
+		clock-frequency = <109000000>;
+		clock-div = <1>;
+	};
+};
+

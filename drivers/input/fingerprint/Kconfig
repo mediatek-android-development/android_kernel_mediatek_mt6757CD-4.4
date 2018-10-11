@@ -1,0 +1,59 @@
+#
+#Fingerprint
+#
+menu "Fingerprint support"
+	depends on INPUT
+
+config MTK_FINGERPRINT_SUPPORT
+	bool "Mediatek Fingerprint"
+	default n
+	---help---
+	Fingerprint mtk driver enable/disable in the kernel.
+	Say Y here if you want to use mediatek fingerprint driver,
+	fingerprint driver will support fingerprint function
+
+if MTK_FINGERPRINT_SUPPORT
+config MTK_FINGERPRINT_SELECT
+	string "sensor type"
+	default "SW9651"        # [liguanxiong] defalut is sw9651
+
+
+if MTK_FINGERPRINT_SELECT = "FPC1145"
+config FPC_FINGERPRINT
+	bool "FPC Fingerprint"
+	default y
+	---help---
+	FPC fingerprint FPC's 102x/104x device.
+endif
+
+if MTK_FINGERPRINT_SELECT = "GF318M"
+config GOODIX_FINGERPRINT
+	bool "Goodix Fingerprint"
+	default y
+	---help---
+	Goodix Fingerprint chip GF316M/GF318M/GF3118M/GF518M/GF5118M/GF516M/GF816M/GF3208/GF5216 TEE driver
+
+config GOODIX_SENSOR_TYPE
+	string "SENSOR_TYPE"
+	default "GF318M"
+	---help---
+	Must input sensor type, or default is GF316M GF318M GF3118M GF518M GF5118M GF516M GF816M GF3208 GF5216
+endif
+# [liguanxiong start] Add for secondary fingerprint module sunwave sw9251
+if MTK_FINGERPRINT_SELECT = "SW9251" || MTK_FINGERPRINT_SELECT = "tplink_mult_sensor"
+config SUNWAVE_FINGERPRINT_SW9251
+	bool "Sunwave Fingerprint SW9251"
+	default y
+	---help---
+	Sunwave Fingerprint chip SW9251 REE driver
+endif
+if MTK_FINGERPRINT_SELECT = "SW9651"
+config SUNWAVE_FINGERPRINT_SW9651
+	bool "Sunwave Fingerprint SW9651"
+	default y
+	---help---
+	Sunwave Fingerprint chip SW9651 TEE driver
+endif
+# [liguanxiong end]
+endif
+endmenu

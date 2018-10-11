@@ -1,0 +1,3 @@
+config TP_HW_VERSION
+	bool "support hw version"
+	default n

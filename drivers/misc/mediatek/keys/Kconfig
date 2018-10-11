@@ -1,0 +1,4 @@
+config CUSTOM_KERNEL_MUTE_SWITCH
+	bool "CUSTOM_KERNEL_MUTE_SWITCH"
+	help
+	  null.

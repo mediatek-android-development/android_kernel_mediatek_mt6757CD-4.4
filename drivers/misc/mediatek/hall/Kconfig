@@ -1,0 +1,4 @@
+config CUSTOM_KERNEL_HALL
+	bool "CUSTOM_KERNEL_HALL"
+	help
+	  null.
