@@ -40,8 +40,8 @@
  * @map: pointer to array of button types
  */
 struct synaptics_dsx_cap_button_map {
-    unsigned int nbuttons;
-    unsigned int *map;
+	unsigned int nbuttons;
+	unsigned int *map;
 };
 
 /*
@@ -64,23 +64,23 @@ struct synaptics_dsx_cap_button_map {
  * @cap_button_map: pointer to 0d button map
  */
 struct synaptics_dsx_platform_data {
-    bool x_flip;
-    bool y_flip;
-    bool swap_axes;
-    int irq_gpio;
-    int power_gpio;
-    int power_on_state;
-    int reset_gpio;
-    int reset_on_state;
-    unsigned long irq_flags;
-    unsigned int panel_x;
-    unsigned int panel_y;
-    unsigned int power_delay_ms;
-    unsigned int reset_delay_ms;
-    unsigned int reset_active_ms;
-    unsigned char *regulator_name;
-    int (*gpio_config)(int gpio, bool configure, int dir, int state);
-    struct synaptics_dsx_cap_button_map *cap_button_map;
+	bool x_flip;
+	bool y_flip;
+	bool swap_axes;
+	int irq_gpio;
+	int power_gpio;
+	int power_on_state;
+	int reset_gpio;
+	int reset_on_state;
+	unsigned long irq_flags;
+	unsigned int panel_x;
+	unsigned int panel_y;
+	unsigned int power_delay_ms;
+	unsigned int reset_delay_ms;
+	unsigned int reset_active_ms;
+	unsigned char *regulator_name;
+	int (*gpio_config)(int gpio, bool configure, int dir, int state);
+	struct synaptics_dsx_cap_button_map *cap_button_map;
 };
 
 #endif

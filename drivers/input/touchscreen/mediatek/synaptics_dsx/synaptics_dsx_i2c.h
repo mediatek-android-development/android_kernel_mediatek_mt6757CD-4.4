@@ -116,13 +116,13 @@ extern unsigned char g_log_enable;
 #define MASK_1BIT 0x01
 
 enum exp_fn {
-    RMI_DEV = 0,
-    RMI_F54,
-    RMI_FW_UPDATER,
-    RMI_PROXIMITY,
-    RMI_ACTIVE_PEN,
-    RMI_GESTURE,
-    RMI_LAST,
+	RMI_DEV = 0,
+	RMI_F54,
+	RMI_FW_UPDATER,
+	RMI_PROXIMITY,
+	RMI_ACTIVE_PEN,
+	RMI_GESTURE,
+	RMI_LAST,
 };
 
 /*
@@ -136,20 +136,20 @@ enum exp_fn {
  * @fn_number: function number
  */
 struct synaptics_rmi4_fn_desc {
-    union {
-        struct {
-            unsigned char query_base_addr;
-            unsigned char cmd_base_addr;
-            unsigned char ctrl_base_addr;
-            unsigned char data_base_addr;
-            unsigned char intr_src_count:3;
-            unsigned char reserved_1:2;
-            unsigned char fn_version:2;
-            unsigned char reserved_2:1;
-            unsigned char fn_number;
-        } __packed;
-        unsigned char data[6];
-    };
+	union {
+		struct {
+			unsigned char query_base_addr;
+			unsigned char cmd_base_addr;
+			unsigned char ctrl_base_addr;
+			unsigned char data_base_addr;
+			unsigned char intr_src_count:3;
+			unsigned char reserved_1:2;
+			unsigned char fn_version:2;
+			unsigned char reserved_2:1;
+			unsigned char fn_number;
+		} __packed;
+		unsigned char data[6];
+	};
 };
 
 /*
@@ -160,10 +160,10 @@ struct synaptics_rmi4_fn_desc {
  * @data_base: 16-bit base address for data registers
  */
 struct synaptics_rmi4_fn_full_addr {
-    unsigned short query_base;
-    unsigned short cmd_base;
-    unsigned short ctrl_base;
-    unsigned short data_base;
+	unsigned short query_base;
+	unsigned short cmd_base;
+	unsigned short ctrl_base;
+	unsigned short data_base;
 };
 
 /*
@@ -171,7 +171,7 @@ struct synaptics_rmi4_fn_full_addr {
  * @data38_offset: offset to F11_2D_DATA38 register
  */
 struct synaptics_rmi4_f11_extra_data {
-    unsigned char data38_offset;
+	unsigned char data38_offset;
 };
 
 /*
@@ -184,13 +184,13 @@ struct synaptics_rmi4_f11_extra_data {
  * @ctrl20_offset: offset to F12_2D_CTRL20 register
  */
 struct synaptics_rmi4_f12_extra_data {
-    unsigned char data1_offset;
-    unsigned char data4_offset;
-    unsigned char data15_offset;
-    unsigned char data15_size;
-    unsigned char data15_data[(F12_FINGERS_TO_SUPPORT + 7) / 8];
-    unsigned char ctrl20_offset;
-    unsigned char ctrl27_offset;
+	unsigned char data1_offset;
+	unsigned char data4_offset;
+	unsigned char data15_offset;
+	unsigned char data15_size;
+	unsigned char data15_data[(F12_FINGERS_TO_SUPPORT + 7) / 8];
+	unsigned char ctrl20_offset;
+	unsigned char ctrl27_offset;
 };
 
 /*
@@ -207,16 +207,16 @@ struct synaptics_rmi4_f12_extra_data {
  * @extra: pointer to extra data
  */
 struct synaptics_rmi4_fn {
-    unsigned char fn_number;
-    unsigned char num_of_data_sources;
-    unsigned char num_of_data_points;
-    unsigned char intr_reg_num;
-    unsigned char intr_mask;
-    struct synaptics_rmi4_fn_full_addr full_addr;
-    struct list_head link;
-    int data_size;
-    void *data;
-    void *extra;
+	unsigned char fn_number;
+	unsigned char num_of_data_sources;
+	unsigned char num_of_data_points;
+	unsigned char intr_reg_num;
+	unsigned char intr_mask;
+	struct synaptics_rmi4_fn_full_addr full_addr;
+	struct list_head link;
+	int data_size;
+	void *data;
+	void *extra;
 };
 
 /*
@@ -231,17 +231,17 @@ struct synaptics_rmi4_fn {
  * @support_fn_list: linked list for function handlers
  */
 struct synaptics_rmi4_device_info {
-    unsigned int version_major;
-    unsigned int version_minor;
-    unsigned char manufacturer_id;
-    unsigned char product_props;
-    unsigned char product_info[PRODUCT_INFO_SIZE];
-    unsigned char date_code[SYNAPTICS_RMI4_DATE_CODE_SIZE];
-    unsigned short tester_id;
-    unsigned short serial_number;
-    unsigned char product_id_string[PRODUCT_ID_SIZE + 1];
-    unsigned char build_id[BUILD_ID_SIZE];
-    struct list_head support_fn_list;
+	unsigned int version_major;
+	unsigned int version_minor;
+	unsigned char manufacturer_id;
+	unsigned char product_props;
+	unsigned char product_info[PRODUCT_INFO_SIZE];
+	unsigned char date_code[SYNAPTICS_RMI4_DATE_CODE_SIZE];
+	unsigned short tester_id;
+	unsigned short serial_number;
+	unsigned char product_id_string[PRODUCT_ID_SIZE + 1];
+	unsigned char build_id[BUILD_ID_SIZE];
+	struct list_head support_fn_list;
 };
 
 /*
@@ -273,148 +273,148 @@ struct synaptics_rmi4_device_info {
  * @irq_enable: pointer to irq enable function
  */
 struct synaptics_rmi4_data {
-    struct i2c_client *i2c_client;
-    struct input_dev *input_dev;
-    const struct synaptics_dsx_platform_data *board;
-    struct synaptics_rmi4_device_info rmi4_mod_info;
-    struct regulator *regulator;
-    struct mutex rmi4_reset_mutex;
-    struct mutex rmi4_io_ctrl_mutex;
-    struct mutex rmi4_exp_init_mutex;
+	struct i2c_client *i2c_client;
+	struct input_dev *input_dev;
+	const struct synaptics_dsx_platform_data *board;
+	struct synaptics_rmi4_device_info rmi4_mod_info;
+	struct regulator *regulator;
+	struct mutex rmi4_reset_mutex;
+	struct mutex rmi4_io_ctrl_mutex;
+	struct mutex rmi4_exp_init_mutex;
 #ifdef CONFIG_HAS_EARLYSUSPEND
-    struct early_suspend early_suspend;
+	struct early_suspend early_suspend;
 #endif
-    unsigned char i2c_addr;
-    unsigned char current_page;
-    unsigned char button_0d_enabled;
-    unsigned char full_pm_cycle;
-    unsigned char num_of_rx;
-    unsigned char num_of_tx;
-    unsigned char num_of_fingers;
-    unsigned char max_touch_width;
-    unsigned char report_enable;
-    unsigned char no_sleep_setting;
-    unsigned char intr_mask[MAX_INTR_REGISTERS];
-    unsigned char *button_txrx_mapping;
-    unsigned short num_of_intr_regs;
-    unsigned short f01_query_base_addr;
-    unsigned short f01_cmd_base_addr;
-    unsigned short f01_ctrl_base_addr;
-    unsigned short f01_data_base_addr;
-    unsigned int firmware_id;
-    unsigned int config_id;
-    int irq;
-    int sensor_max_x;
-    int sensor_max_y;
-    bool flash_prog_mode;
-    bool irq_enabled;
-    bool touch_stopped;
-    bool fingers_on_2d;
-    bool sensor_sleep;
-    bool stay_awake;
-    bool f11_wakeup_gesture;
-    bool f12_wakeup_gesture;
-    bool enable_wakeup_gesture;
-    bool staying_awake;
-    bool ext_afe_button;
-    unsigned char gesture_detection[F12_GESTURE_DETECTION_LEN];
-    int (*i2c_read)(struct synaptics_rmi4_data *pdata, unsigned short addr,
-            unsigned char *data, unsigned short length);
-    int (*i2c_write)(struct synaptics_rmi4_data *pdata, unsigned short addr,
-            unsigned char *data, unsigned short length);
-    int (*irq_enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
-    int (*reset_device)(struct synaptics_rmi4_data *rmi4_data);
-    void (*sleep_enable)(struct synaptics_rmi4_data *rmi4_data,
-            bool enable);
+	unsigned char i2c_addr;
+	unsigned char current_page;
+	unsigned char button_0d_enabled;
+	unsigned char full_pm_cycle;
+	unsigned char num_of_rx;
+	unsigned char num_of_tx;
+	unsigned char num_of_fingers;
+	unsigned char max_touch_width;
+	unsigned char report_enable;
+	unsigned char no_sleep_setting;
+	unsigned char intr_mask[MAX_INTR_REGISTERS];
+	unsigned char *button_txrx_mapping;
+	unsigned short num_of_intr_regs;
+	unsigned short f01_query_base_addr;
+	unsigned short f01_cmd_base_addr;
+	unsigned short f01_ctrl_base_addr;
+	unsigned short f01_data_base_addr;
+	unsigned int firmware_id;
+	unsigned int config_id;
+	int irq;
+	int sensor_max_x;
+	int sensor_max_y;
+	bool flash_prog_mode;
+	bool irq_enabled;
+	bool touch_stopped;
+	bool fingers_on_2d;
+	bool sensor_sleep;
+	bool stay_awake;
+	bool f11_wakeup_gesture;
+	bool f12_wakeup_gesture;
+	bool enable_wakeup_gesture;
+	bool staying_awake;
+	bool ext_afe_button;
+	unsigned char gesture_detection[F12_GESTURE_DETECTION_LEN];
+	int (*i2c_read)(struct synaptics_rmi4_data *pdata, unsigned short addr,
+			unsigned char *data, unsigned short length);
+	int (*i2c_write)(struct synaptics_rmi4_data *pdata, unsigned short addr,
+			unsigned char *data, unsigned short length);
+	int (*irq_enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
+	int (*reset_device)(struct synaptics_rmi4_data *rmi4_data);
+	void (*sleep_enable)(struct synaptics_rmi4_data *rmi4_data,
+			bool enable);
 };
 
 struct synaptics_rmi4_exp_fn {
-    enum exp_fn fn_type;
-    int (*init)(struct synaptics_rmi4_data *rmi4_data);
-    void (*remove)(struct synaptics_rmi4_data *rmi4_data);
-    void (*reset)(struct synaptics_rmi4_data *rmi4_data);
-    void (*reinit)(struct synaptics_rmi4_data *rmi4_data);
-    void (*early_suspend)(struct synaptics_rmi4_data *rmi4_data);
-    void (*suspend)(struct synaptics_rmi4_data *rmi4_data);
-    void (*resume)(struct synaptics_rmi4_data *rmi4_data);
-    void (*late_resume)(struct synaptics_rmi4_data *rmi4_data);
-    void (*attn)(struct synaptics_rmi4_data *rmi4_data,
-            unsigned char intr_mask);
+	enum exp_fn fn_type;
+	int (*init)(struct synaptics_rmi4_data *rmi4_data);
+	void (*remove)(struct synaptics_rmi4_data *rmi4_data);
+	void (*reset)(struct synaptics_rmi4_data *rmi4_data);
+	void (*reinit)(struct synaptics_rmi4_data *rmi4_data);
+	void (*early_suspend)(struct synaptics_rmi4_data *rmi4_data);
+	void (*suspend)(struct synaptics_rmi4_data *rmi4_data);
+	void (*resume)(struct synaptics_rmi4_data *rmi4_data);
+	void (*late_resume)(struct synaptics_rmi4_data *rmi4_data);
+	void (*attn)(struct synaptics_rmi4_data *rmi4_data,
+			unsigned char intr_mask);
 };
 
 struct synaptics_rmi4_access_ptr {
-    int (*read)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
-            unsigned char *data, unsigned short length);
-    int (*write)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
-            unsigned char *data, unsigned short length);
-    int (*enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
+	int (*read)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
+			unsigned char *data, unsigned short length);
+	int (*write)(struct synaptics_rmi4_data *rmi4_data, unsigned short addr,
+			unsigned char *data, unsigned short length);
+	int (*enable)(struct synaptics_rmi4_data *rmi4_data, bool enable);
 };
 
 static inline int synaptics_rmi4_reg_read(
-        struct synaptics_rmi4_data *rmi4_data,
-        unsigned short addr,
-        unsigned char *data,
-        unsigned short len)
+		struct synaptics_rmi4_data *rmi4_data,
+		unsigned short addr,
+		unsigned char *data,
+		unsigned short len)
 {
-    return rmi4_data->i2c_read(rmi4_data, addr, data, len);
+	return rmi4_data->i2c_read(rmi4_data, addr, data, len);
 }
 
 static inline int synaptics_rmi4_reg_write(
-        struct synaptics_rmi4_data *rmi4_data,
-        unsigned short addr,
-        unsigned char *data,
-        unsigned short len)
+		struct synaptics_rmi4_data *rmi4_data,
+		unsigned short addr,
+		unsigned char *data,
+		unsigned short len)
 {
-    return rmi4_data->i2c_write(rmi4_data, addr, data, len);
+	return rmi4_data->i2c_write(rmi4_data, addr, data, len);
 }
 
 
 
 void synaptics_rmi4_new_function(struct synaptics_rmi4_exp_fn *exp_fn_module,
-        bool insert);
+		bool insert);
 
 int synaptics_fw_updater(const unsigned char *fw_data);
 
 static inline ssize_t synaptics_rmi4_show_error(struct device *dev,
-        struct device_attribute *attr, char *buf)
+		struct device_attribute *attr, char *buf)
 {
-    dev_warn(dev, "%s Attempted to read from write-only attribute %s\n",
-            __func__, attr->attr.name);
-    return -EPERM;
+	dev_warn(dev, "%s Attempted to read from write-only attribute %s\n",
+			__func__, attr->attr.name);
+	return -EPERM;
 }
 
 static inline ssize_t synaptics_rmi4_store_error(struct device *dev,
-        struct device_attribute *attr, const char *buf, size_t count)
+		struct device_attribute *attr, const char *buf, size_t count)
 {
-    dev_warn(dev, "%s Attempted to write to read-only attribute %s\n",
-            __func__, attr->attr.name);
-    return -EPERM;
+	dev_warn(dev, "%s Attempted to write to read-only attribute %s\n",
+			__func__, attr->attr.name);
+	return -EPERM;
 }
 
 static inline int secure_memcpy(unsigned char *dest, unsigned int dest_size,
-        const unsigned char *src, unsigned int src_size,
-        unsigned int count)
+		const unsigned char *src, unsigned int src_size,
+		unsigned int count)
 {
-    if (dest == NULL || src == NULL)
-        return -EINVAL;
+	if (dest == NULL || src == NULL)
+		return -EINVAL;
 
-    if (count > dest_size || count > src_size)
-        return -EINVAL;
+	if (count > dest_size || count > src_size)
+		return -EINVAL;
 
-    memcpy((void *)dest, (const void *)src, count);
+	memcpy((void *)dest, (const void *)src, count);
 
-    return 0;
+	return 0;
 }
 
 static inline void batohs(unsigned short *dest, unsigned char *src)
 {
-    *dest = src[1] * 0x100 + src[0];
+	*dest = src[1] * 0x100 + src[0];
 }
 
 static inline void hstoba(unsigned char *dest, unsigned short src)
 {
-    dest[0] = src % 0x100;
-    dest[1] = src / 0x100;
+	dest[0] = src % 0x100;
+	dest[1] = src / 0x100;
 }
 
 #endif
