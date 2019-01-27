@@ -34,6 +34,12 @@ LCM_DSI_MODE_CON lcm_dsi_mode;
 #endif
 
 LCM_DRIVER *lcm_driver_list[] = {
+#if defined(TD4310_TFT60_HXGD_LFHD)
+	&td4310_tft60_hxgd_lfhd_lcm_drv,
+#endif
+#if defined(TD4310_AUO60_WCL_LFHD)
+	&td4310_auo60_wcl_lfhd_lcm_drv,
+#endif
 #if defined(OTM1284A_HD720_DSI_VDO_TM)
 	&otm1284a_hd720_dsi_vdo_tm_lcm_drv,
 #endif
@@ -1026,8 +1032,15 @@ LCM_DRIVER *lcm_driver_list[] = {
 	&nt36672_fhdp_dsi_vdo_tianma_nt50358_lcm_drv,
 #endif
 
-#if defined(OPPO_TIANMA_TD4310_FHDP_DSI_VDO_NT50358)
-	&oppo_tianma_td4310_fhdp_dsi_vdo_nt50358_lcm_drv,
+#if defined(TD4310_FHD_DSI_VDO_CHUANGWEI_MALATA)
+	&td4310_fhd_dsi_vdo_chuangwei_malata_lcm_drv,
+#endif
+#if defined(OPPO_TIANMA_TD4310_FHDP_DSI_VDO_RT5081)
+	&oppo_tianma_td4310_fhdp_dsi_vdo_rt5081_lcm_drv,
+#endif
+
+#if defined(HCT_TD4310_DSI_VDO_FHD_AUO_60_BY)
+	&hct_td4310_dsi_vdo_fhd_auo_60_by_lcm_drv,
 #endif
 };
 

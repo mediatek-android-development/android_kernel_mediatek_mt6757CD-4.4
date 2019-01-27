@@ -46,4 +46,20 @@ config TOUCHSCREEN_MTK_FT8716
 	  module will be called.
 source "drivers/input/touchscreen/mediatek/FT8716/Kconfig"
 
+source "drivers/input/touchscreen/mediatek/gn_nt36xxx/Kconfig"
+
+config TOUCHSCREEN_MTK_SYNAPTICS
+	tristate "synaptics_dsx"
+	depends on I2C
+	help
+	  Say Y here if you have a synaptics_dsx
+	  connected to your system.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called synaptics_dsx.
+
+source "drivers/input/touchscreen/mediatek/synaptics_dsx/Kconfig"
+
 endif

@@ -264,6 +264,10 @@ extern LCM_DRIVER nt35695B_fhd_dsi_cmd_auo_nt50358_hdp_lcm_drv;
 extern LCM_DRIVER nt35695B_fhd_dsi_cmd_auo_nt50358_qhd_lcm_drv;
 extern LCM_DRIVER nt35695B_fhd_dsi_cmd_auo_rt5081_lcm_drv;
 extern LCM_DRIVER nt35695B_fhd_dsi_vdo_auo_rt5081_lcm_drv;
+extern LCM_DRIVER td4310_tft60_hxgd_lfhd_lcm_drv;
+extern LCM_DRIVER td4310_auo60_wcl_lfhd_lcm_drv;
+extern LCM_DRIVER oppo_tianma_td4310_fhdp_dsi_vdo_rt5081_lcm_drv;
+extern LCM_DRIVER hct_td4310_dsi_vdo_fhd_auo_60_by_lcm_drv;
 
 /* [liliwen] Add ft8716 */
 extern LCM_DRIVER ft8716_fhd_dsi_vdo_rt5081_lcm_drv;
@@ -271,7 +275,7 @@ extern LCM_DRIVER ft8716_fhd_dsi_vdo_rt5081_lcm_drv;
 extern LCM_DRIVER nt35695B_fhd_dsi_vdo_auo_rt5081_hdp_lcm_drv;
 extern LCM_DRIVER nt36672_fhdp_dsi_vdo_tianma_nt50358_lcm_drv;
 
-extern LCM_DRIVER oppo_tianma_td4310_fhdp_dsi_vdo_nt50358_lcm_drv;
+extern LCM_DRIVER td4310_fhd_dsi_vdo_chuangwei_malata_lcm_drv;
 #ifdef BUILD_LK
 extern void mdelay(unsigned long msec);
 #endif
