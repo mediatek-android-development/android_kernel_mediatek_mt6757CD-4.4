@@ -9,6 +9,7 @@ ifeq ($(CONFIG_MTK_SCP_SENSORHUB_V1),y)
 obj-$(CONFIG_MTK_MAGHUB)        +=  maghub/
 else
 obj-$(CONFIG_MTK_AKM09911_NEW)   +=  akm09911-new/
+obj-$(CONFIG_MTK_QMCX983)	+=  qmcX983/
 # [yanlin start] Porting sensors
 obj-$(CONFIG_MTK_AKM09916_NEW)   +=  akm09916-new/
 # [yanlin end]
