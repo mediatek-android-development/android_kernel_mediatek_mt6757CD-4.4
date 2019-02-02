@@ -1,0 +1,7 @@
+config FINGERPRINT_GT556
+	bool "gf5216(goodix fingerprint sensor)  for dewav"
+	default n
+	help
+	It support different type sensor
+	in this platform. If this option
+	is set, it will support fingerprint gf3208 silead sensor .

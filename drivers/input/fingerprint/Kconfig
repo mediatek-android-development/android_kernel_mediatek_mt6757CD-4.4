@@ -13,31 +13,17 @@ config MTK_FINGERPRINT_SUPPORT
 	fingerprint driver will support fingerprint function
 
 if MTK_FINGERPRINT_SUPPORT
-config MTK_FINGERPRINT_SELECT
-	string "sensor type"
-	default "GX556"
+
+config GX556_FINGERPRINT
+	tristate "goodix gx556 Fingerprint"
+	default n
 
 
-if MTK_FINGERPRINT_SELECT = "FPC1145"
-config FPC_FINGERPRINT
-	bool "FPC Fingerprint"
-	default y
-	---help---
-	FPC fingerprint FPC's 102x/104x device.
-endif
-
-if MTK_FINGERPRINT_SELECT = "GX556" ||  MTK_FINGERPRINT_SELECT = "GF5216"
 config GOODIX_FINGERPRINT
 	bool "Goodix Fingerprint"
-	default y
+	default n
 	---help---
 	Goodix Fingerprint chip GF316M/GX556/GF3118M/GF518M/GF5118M/GF516M/GF816M/GF3208/GF3206/GF3266/GF3288/GF5206/GF5216/GF5208 TEE driver
 
-config GOODIX_SENSOR_TYPE
-	string "SENSOR_TYPE"
-	default "GF318M"
-	---help---
-	Must input sensor type, or default is GF316M GF318M GF3118M GX556 GF5118M GF516M GF816M GF3208 GF5216
-endif
 endif
 endmenu
