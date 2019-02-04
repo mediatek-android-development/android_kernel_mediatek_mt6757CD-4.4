@@ -5,8 +5,8 @@
 #include <linux/notifier.h>
 #include <linux/pm.h>
 
-
-#include "../../../../spi/mediatek/mt6757/mtk_spi.h"
+#include "mtk_spi.h"
+//#include "../../../../spi/mediatek/mt6757/mtk_spi.h"
 
 /**********************************************************/
 /**********************GF ops****************************/

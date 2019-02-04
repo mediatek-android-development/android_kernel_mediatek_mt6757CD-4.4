@@ -109,7 +109,7 @@ struct mt_chip_conf {
 	enum spi_tckdly tckdly;
 };
 
-void secspi_enable_clk(struct spi_device *spidev);
+//void secspi_enable_clk(struct spi_device *spidev);
 #ifdef CONFIG_TRUSTONIC_TEE_SUPPORT
 int secspi_session_open(u32 spinum);
 int secspi_execute(u32 cmd, tciSpiMessage_t *param);
