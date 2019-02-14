@@ -61,7 +61,9 @@ else
 
 obj-y      += sub_lens.o
 obj-$(CONFIG_MTK_LENS_FM50AF_SUPPORT)      += common/fm50af/
+obj-$(CONFIG_MTK_LENS_BU24228GWLAF_SUPPORT)    += common/bu24228gwlaf/
 obj-$(CONFIG_MTK_LENS_BU6424AF_SUPPORT)    += common/bu6424af/
+obj-$(CONFIG_MTK_LENS_BU64245GWZAF_SUPPORT)  += common/bu64245gwzaf/
 obj-$(CONFIG_MTK_LENS_BU6429AF_SUPPORT)    += common/bu6429af/
 obj-$(CONFIG_MTK_LENS_DW9714AF_SUPPORT)    += common/dw9714af/
 obj-$(CONFIG_MTK_LENS_DW9814AF_SUPPORT)    += common/dw9814af/

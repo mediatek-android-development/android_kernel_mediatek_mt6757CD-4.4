@@ -30,9 +30,9 @@
 #define AFDRV_AK7371AF "AK7371AF"
 #define AFDRV_BU63165AF "BU63165AF"
 #define AFDRV_BU6424AF "BU6424AF"
-#define AFDRV_BU64748AF "BU64748AF"
 #define AFDRV_BU6429AF "BU6429AF"
 #define AFDRV_BU64745GWZAF "BU64745GWZAF"
+#define AFDRV_BU64747GWZAF "BU64747GWZAF"
 #define AFDRV_DW9714A "DW9714A"
 #define AFDRV_DW9714AF "DW9714AF"
 #define AFDRV_DW9718AF "DW9718AF"
@@ -44,7 +44,6 @@
 #define AFDRV_LC898122AF "LC898122AF"
 #define AFDRV_LC898212AF "LC898212AF"
 #define AFDRV_LC898212XDAF "LC898212XDAF"
-#define AFDRV_LC898212XDAF_TVC700 "LC898212XDAF_TVC700"
 #define AFDRV_LC898212XDAF_F "LC898212XDAF_F"
 #define AFDRV_LC898214AF "LC898214AF"
 #define AFDRV_MT9P017AF "MT9P017AF"
@@ -90,20 +89,12 @@ typedef struct {
 typedef struct {
 	u8 uEnable;
 	u8 uDrvName[32];
-	int (*pAF_SetI2Cclient)(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened);
+	void (*pAF_SetI2Cclient)(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened);
 	long (*pAF_Ioctl)(struct file *a_pstFile, unsigned int a_u4Command, unsigned long a_u4Param);
 	int (*pAF_Release)(struct inode *a_pstInode, struct file *a_pstFile);
 } stAF_DrvList;
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-struct vcm_factory_fops {
-	int (*vcm_enable)(struct i2c_client *i2c_client, int on);
-	int (*vcm_pos_set)(struct i2c_client *i2c_client, int pos);
-	int (*vcm_pos_get)(struct i2c_client *i2c_client, int *pos);
-};
-#endif
-/* Add end */
+
 /* Control commnad */
 /* S means "set through a ptr" */
 /* T means "tell by a arg value" */

@@ -32,12 +32,6 @@
 #include "lens_info.h"
 #include "lens_list.h"
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-#include <linux/meizu-sys.h>
-#endif
-/*Add end */
-
 #define AF_DRVNAME "MAINAF"
 
 #if defined(CONFIG_MTK_LEGACY)
@@ -71,17 +65,21 @@ static struct i2c_board_info kd_lens_dev __initdata = {
 #else
 #define LOG_INF(format, args...)
 #endif
-
+#ifdef CONFIG_MTK_LENS_BU64747GWZAF_SUPPORT
+extern int BU64747GWZAF_getHall(void);
+extern int BU64747GWZAF_getCurDet(void);
+extern int BU64747GWZAF_getCurPos(void);
+#endif
 
 static stAF_DrvList g_stAF_DrvList[MAX_NUM_OF_LENS] = {
+	#ifdef CONFIG_MTK_LENS_BU64747GWZAF_SUPPORT
+	{1, AFDRV_BU64747GWZAF, BU64747GWZAF_SetI2Cclient, BU64747GWZAF_Ioctl, BU64747GWZAF_Release},
+	#endif
 	#ifdef CONFIG_MTK_LENS_BU6424AF_SUPPORT
 	{1, AFDRV_BU6424AF, BU6424AF_SetI2Cclient, BU6424AF_Ioctl, BU6424AF_Release},
 	#endif
 	#ifdef CONFIG_MTK_LENS_BU6429AF_SUPPORT
 	{1, AFDRV_BU6429AF, BU6429AF_SetI2Cclient, BU6429AF_Ioctl, BU6429AF_Release},
-	#endif
-	#ifdef CONFIG_MTK_LENS_BU64748AF_SUPPORT
-	{1, AFDRV_BU64748AF, bu64748af_SetI2Cclient, bu64748af_Ioctl, bu64748af_Release},
 	#endif
 	#ifdef CONFIG_MTK_LENS_BU63165AF_SUPPORT
 	{1, AFDRV_BU63165AF, BU63165AF_SetI2Cclient, BU63165AF_Ioctl, BU63165AF_Release},
@@ -103,8 +101,6 @@ static stAF_DrvList g_stAF_DrvList[MAX_NUM_OF_LENS] = {
 	#endif
 	#ifdef CONFIG_MTK_LENS_LC898212XDAF_SUPPORT
 	{1, AFDRV_LC898212XDAF, LC898212XDAF_SetI2Cclient, LC898212XDAF_Ioctl, LC898212XDAF_Release},
-	{1, AFDRV_LC898212XDAF_TVC700, LC898212XD_TVC700_SetI2Cclient,
-		LC898212XD_TVC700_Ioctl, LC898212XD_TVC700_Release},
 	#endif
 	#ifdef CONFIG_MTK_LENS_LC898214AF_SUPPORT
 	{1, AFDRV_LC898214AF, LC898214AF_SetI2Cclient, LC898214AF_Ioctl, LC898214AF_Release},
@@ -135,16 +131,6 @@ static dev_t g_AF_devno;
 static struct cdev *g_pAF_CharDrv;
 static struct class *actuator_class;
 
-#ifdef CONFIG_MEIZU_BSP
-
-extern struct vcm_factory_fops ak7371_main_fops;
-extern struct vcm_factory_fops bu64748_main_fops;
-static struct vcm_factory_fops *af_fops = NULL;
-extern u8 *imx386_primax_otp_buf;
-extern u8 *imx386_sunny_otp_buf;
-static int enable_status;
-#endif
-
 void AF_PowerDown(void)
 {
 	#ifdef CONFIG_MTK_LENS_AK7371AF_SUPPORT
@@ -171,7 +157,8 @@ static long AF_SetMotorName(__user stAF_MotorName * pstMotorName)
 		LOG_INF("Search Motor Name : %s\n", g_stAF_DrvList[i].uDrvName);
 		if (strcmp(stMotorName.uMotorName, g_stAF_DrvList[i].uDrvName) == 0) {
 			g_pstAF_CurDrv = &g_stAF_DrvList[i];
-			i4RetValue = g_pstAF_CurDrv->pAF_SetI2Cclient(g_pstAF_I2Cclient, &g_AF_SpinLock, &g_s4AF_Opened);
+			g_pstAF_CurDrv->pAF_SetI2Cclient(g_pstAF_I2Cclient, &g_AF_SpinLock, &g_s4AF_Opened);
+			i4RetValue = 1;
 			break;
 		}
 	}
@@ -260,155 +247,6 @@ static int AF_Release(struct inode *a_pstInode, struct file *a_pstFile)
 	return 0;
 }
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-static int set_pos;
-static int max_diff_pos;
-static int af_driver_id;
-#define AK7371_AF_ID	0x7371
-#define AK7374_AF_ID	0x7374
-#define BU64748_AF_ID	0x64748
-static ssize_t af_pos_show(struct device *dev,
-		struct device_attribute *attr,char *buf)
-{
-	char *p = buf;
-	int pos;
-	int ret;
-	if (enable_status < 0) {
-		p += sprintf(p, "result=fail, enable_status:%d.\n", enable_status);
-	}else if ((set_pos < 0) || (set_pos > 1023)) {
-		p += sprintf(p, "result=fail, invalid af move position.\n");
-	} else {
-		if (af_fops != NULL) {
-			ret = af_fops->vcm_pos_get(g_pstAF_I2Cclient, &pos);
-
-			p += sprintf(p, "current_af_position=%d\n", pos);
-
-			/* check whether af moveto is ok */
-			switch (af_driver_id) {
-				case AK7371_AF_ID:
-				case AK7374_AF_ID:
-					if ((ret>=0) && (pos >= (set_pos - max_diff_pos)) && (pos <= (set_pos + max_diff_pos)))
-						p += sprintf(p, "result=pass\n");
-					else
-						p += sprintf(p, "result=fail\n");
-					break;
-				case BU64748_AF_ID:
-				default:
-					/* pos type is signed short */
-					if ((ret>=0) && ((pos <= max_diff_pos) || (pos >= (0xFFFF - max_diff_pos))))
-						p += sprintf(p, "result=pass\n");
-					else
-						p += sprintf(p, "result=fail\n");
-					break;
-			}
-		} else {
-			p += sprintf(p, "result=fial, invalid af pos interface, please check af enable.\n");
-		}
-	}
-
-	return (p - buf);
-}
-
-static ssize_t af_pos_store(struct device *dev,
-		struct device_attribute *attr, const char *buf,size_t count)
-{
-	int pos, ret = 0;
-	sscanf(buf, "%d\n", &pos);
-	set_pos = pos;
-
-	if ((pos < 0) || (pos > 1023)) {
-		LOG_INF("%s: invalid af moveto position.\n", __func__);
-		return -EINVAL;
-	}
-
-	if (af_fops != NULL) {
-		ret = af_fops->vcm_pos_set(g_pstAF_I2Cclient, pos);
-		if (ret < 0) {
-			LOG_INF("%s: set af pos failed.\n", __func__);
-			return ret;
-		}
-	} else {
-		LOG_INF("%s: invalid af_fops.\n", __func__);
-	}
-
-	/* wait 33ms for af stable */
-	msleep(33);
-
-	return count;
-}
-
-static ssize_t af_enable_show(struct device *dev,
-		struct device_attribute *attr,char *buf)
-{
-	return 1;
-}
-
-static ssize_t af_enable_store(struct device *dev,
-		struct device_attribute *attr, const char *buf,size_t count)
-{
-	int enable;
-	u8 *otp_buf = NULL;
-	sscanf(buf, "%d\n", &enable);
-
-	if (imx386_primax_otp_buf != NULL){
-		otp_buf = imx386_primax_otp_buf;
-	} else if (imx386_sunny_otp_buf != NULL) {
-		otp_buf = imx386_sunny_otp_buf;
-	}else
-		otp_buf = NULL;
-
-	if (otp_buf == NULL) {
-		LOG_INF("otp data is NULL!\n");
-		return count;
-	}
-	LOG_INF("otp_buf[20] = %d\n",otp_buf[20]);
-	switch (otp_buf[20]) {
-		case 1:
-		case 4:
-			af_fops = &ak7371_main_fops;
-			max_diff_pos = 8;
-			af_driver_id = AK7371_AF_ID;
-			break;
-		case 2:
-			af_fops = &bu64748_main_fops;
-			max_diff_pos = 200;
-			af_driver_id = BU64748_AF_ID;
-			break;
-		default:
-			af_fops = &bu64748_main_fops;
-			max_diff_pos = 200;
-			af_driver_id = BU64748_AF_ID;
-			break;
-	}
-
-	if (af_fops != NULL) {
-		if (enable) {
-			enable_status = af_fops->vcm_enable(g_pstAF_I2Cclient, 1);
-		} else {
-			enable_status = af_fops->vcm_enable(g_pstAF_I2Cclient, 0);
-		}
-	}
-
-	return count;
-}
-
-static struct device_attribute dev_attr_af_pos = {
-
-	.attr = {.name = "af_pos", .mode = 0644},
-	.show = af_pos_show,
-	.store= af_pos_store,
-};
-
-static struct device_attribute dev_attr_af_enable = {
-
-	.attr = {.name = "af_enable", .mode = 0644},
-	.show = af_enable_show,
-	.store= af_enable_store,
-};
-#endif
-/* Add end */
-
 static const struct file_operations g_stAF_fops = {
 	.owner = THIS_MODULE,
 	.open = AF_Open,
@@ -418,12 +256,6 @@ static const struct file_operations g_stAF_fops = {
 	.compat_ioctl = AF_Ioctl_Compat,
 #endif
 };
-
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-static struct device *vcm_device = NULL;
-#endif
-/* Add end */
 
 static inline int Register_AF_CharDrv(void)
 {
@@ -474,13 +306,6 @@ static inline int Register_AF_CharDrv(void)
 	if (NULL == vcm_device)
 		return -EIO;
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-	device_create_file(vcm_device, &dev_attr_af_enable);
-	device_create_file(vcm_device, &dev_attr_af_pos);
-	meizu_sysfslink_register_name(vcm_device, "cam_af");
-#endif
-/* Add end */
 	LOG_INF("End\n");
 	return 0;
 }
@@ -488,12 +313,7 @@ static inline int Register_AF_CharDrv(void)
 static inline void Unregister_AF_CharDrv(void)
 {
 	LOG_INF("Start\n");
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-	device_remove_file(vcm_device, &dev_attr_af_enable);
-	device_remove_file(vcm_device, &dev_attr_af_pos);
-#endif
-/* Add end */
+
 	/* Release char driver */
 	cdev_del(g_pAF_CharDrv);
 
@@ -534,11 +354,6 @@ static struct i2c_driver AF_i2c_driver = {
 
 static int AF_i2c_remove(struct i2c_client *client)
 {
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-	Unregister_AF_CharDrv();
-#endif
-/* Add end */
 	return 0;
 }
 

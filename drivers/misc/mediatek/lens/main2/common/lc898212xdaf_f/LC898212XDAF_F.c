@@ -105,13 +105,6 @@ static int s4EEPROM_ReadReg_LC898212XDAF_F(u16 addr, u8 *data)
 	return i4RetValue;
 }
 
-static void s4AF_WriteReg(unsigned short addr, unsigned char data)
-{
-	u8 puSendCmd[2] = {(u8)(addr & 0xFF), (u8)(data & 0xFF)};
-
-	s4AF_WriteReg_LC898212XDAF_F(puSendCmd, sizeof(puSendCmd), AF_I2C_SLAVE_ADDR);
-}
-
 static int convertAF_DAC(short ReadData)
 {
 	int DacVal = ((ReadData - Hall_Min) * (Max_Pos - Min_Pos)) /
@@ -260,8 +253,7 @@ static void LC898212XD_init(void)
 		}
 	}
 
-	if (strncmp(CONFIG_ARCH_MTK_PROJECT, "k57v1", 5) == 0 ||
-		strncmp(CONFIG_ARCH_MTK_PROJECT, "k57pv1", 6) == 0) {
+	if (strncmp(CONFIG_ARCH_MTK_PROJECT, "k57v1", 5) == 0) {
 
 		s4EEPROM_ReadReg_LC898212XDAF_F(0x0F63, &val2);
 		s4EEPROM_ReadReg_LC898212XDAF_F(0x0F64, &val1);
@@ -322,23 +314,8 @@ static void LC898212XD_init(void)
 		Hall_Max = Temp;
 	}
 
-	if (Hall_Max == 0 && Hall_Min == 0) {
-		Hall_Min = 0xA800;
-		Hall_Max = 0x5800;
-	}
-
-	if (Hall_Off == 0 && Hall_Bias == 0) {
-		Hall_Off = 0x80;
-		Hall_Bias = 0x80;
-	}
-
 	LOG_INF("=====LC898212XD:=init=hall_max:0x%x==hall_min:0x%x====halloff:0x%x, hallbias:0x%x===\n",
 	     Hall_Max, Hall_Min, Hall_Off, Hall_Bias);
-
-	/* Wake up */
-	s4AF_WriteReg(0x80, 0x68);
-	s4AF_WriteReg(0x80, 0x64);
-	s4AF_WriteReg(0x95, 0x00);
 
 	LC898212XDAF_F_MONO_init(Hall_Off, Hall_Bias);
 }
@@ -561,11 +538,6 @@ int LC898212XDAF_F_Release(struct inode *a_pstInode, struct file *a_pstFile)
 
 	if (*g_pAF_Opened == 2) {
 		LOG_INF("Wait\n");
-
-		/* Sleep In */
-		s4AF_WriteReg(0x95, 0x80);
-		s4AF_WriteReg(0x80, 0x68);
-		s4AF_WriteReg(0x80, 0x69);
 
 		msleep(20);
 	}

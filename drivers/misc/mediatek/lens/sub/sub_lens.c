@@ -64,10 +64,21 @@ static struct i2c_board_info kd_lens_dev __initdata = {
 #define LOG_INF(format, args...)
 #endif
 
+#ifdef CONFIG_MTK_LENS_BU24228GWLAF_SUPPORT
+extern ssize_t  OIS_Switch_show (struct device *dev, struct device_attribute *attr, char *buf);
+extern ssize_t  OIS_Switch_store(struct device *dev,
+		struct device_attribute *attr, const char *buf, size_t count);
+#endif
 
 static stAF_DrvList g_stAF_DrvList[MAX_NUM_OF_LENS] = {
+	#ifdef CONFIG_MTK_LENS_BU24228GWLAF_SUPPORT
+	{1, AFDRV_BU24228GWLAF, BU24228GWLAF_SetI2Cclient, BU24228GWLAF_Ioctl, BU24228GWLAF_Release},
+	#endif
 	#ifdef CONFIG_MTK_LENS_BU6424AF_SUPPORT
 	{1, AFDRV_BU6424AF, BU6424AF_SetI2Cclient, BU6424AF_Ioctl, BU6424AF_Release},
+	#endif
+	#ifdef CONFIG_MTK_LENS_BU64245GWZAF_SUPPORT
+	{1, AFDRV_BU64245GWZAF, BU64245GWZAF_SetI2Cclient, BU64245GWZAF_Ioctl, BU64245GWZAF_Release},
 	#endif
 	#ifdef CONFIG_MTK_LENS_BU6429AF_SUPPORT
 	{1, AFDRV_BU6429AF, BU6429AF_SetI2Cclient, BU6429AF_Ioctl, BU6429AF_Release},
@@ -97,6 +108,10 @@ static struct i2c_client *g_pstAF_I2Cclient;
 static dev_t g_AF_devno;
 static struct cdev *g_pAF_CharDrv;
 static struct class *actuator_class;
+
+#ifdef CONFIG_MTK_LENS_BU24228GWLAF_SUPPORT
+static DEVICE_ATTR(OIS_Switch, 0644, OIS_Switch_show, OIS_Switch_store);
+#endif
 
 static long AF_SetMotorName(__user stAF_MotorName *pstMotorName)
 {
@@ -259,6 +274,10 @@ static inline int Register_AF_CharDrv(void)
 
 	if (NULL == vcm_device)
 		return -EIO;
+
+#ifdef CONFIG_MTK_LENS_BU24228GWLAF_SUPPORT
+	device_create_file(vcm_device, &dev_attr_OIS_Switch);
+#endif
 
 	LOG_INF("End\n");
 	return 0;

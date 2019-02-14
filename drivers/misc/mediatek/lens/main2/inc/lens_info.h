@@ -89,20 +89,11 @@ typedef struct {
 typedef struct {
 	u8 uEnable;
 	u8 uDrvName[32];
-	int (*pAF_SetI2Cclient)(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened);
+	void (*pAF_SetI2Cclient)(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened);
 	long (*pAF_Ioctl)(struct file *a_pstFile, unsigned int a_u4Command, unsigned long a_u4Param);
 	int (*pAF_Release)(struct inode *a_pstInode, struct file *a_pstFile);
 } stAF_DrvList;
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-struct vcm_factory_fops {
-	int (*vcm_enable)(struct i2c_client *i2c_client, int on);
-	int (*vcm_pos_set)(struct i2c_client *i2c_client, int pos);
-	int (*vcm_pos_get)(struct i2c_client *i2c_client, int *pos);
-};
-#endif
-/* Add end */
 
 /* Control commnad */
 /* S means "set through a ptr" */

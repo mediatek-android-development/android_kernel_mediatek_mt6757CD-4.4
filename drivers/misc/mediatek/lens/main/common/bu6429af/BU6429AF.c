@@ -37,8 +37,7 @@
 #endif
 
 /* if use ISRC mode, should modify variables in init_setting */
-/* #define USE_ISRC_MODE_S5K2P8_SENSOR */
-#define USE_ISRC_MODE_IMX386_SENSOR
+#define USE_ISRC_MODE_S5K2P8_SENSOR
 
 static struct i2c_client *g_pstAF_I2Cclient;
 static int *g_pAF_Opened;
@@ -113,7 +112,7 @@ static int s4AF_WriteReg(u16 a_u2Data)
 {
 	int i4RetValue = 0;
 
-	#if defined(USE_ISRC_MODE_S5K2P8_SENSOR) || defined(USE_ISRC_MODE_IMX386_SENSOR)
+	#ifdef USE_ISRC_MODE_S5K2P8_SENSOR
 	char puSendCmd[2] = {(char)(((a_u2Data >> 8) & 0x03) | 0xC4), (char)(a_u2Data & 0xFF)};
 	#else
 	char puSendCmd[2] = {(char)(((a_u2Data >> 8) & 0x03) | 0xC0), (char)(a_u2Data & 0xFF)};
@@ -270,22 +269,6 @@ static inline int moveAF(unsigned long a_u4Position)
 
 	if (*g_pAF_Opened == 1) {
 		unsigned short InitPos;
-
-		#ifdef USE_ISRC_MODE_IMX386_SENSOR
-		char puSendCmd[2];
-
-		puSendCmd[0] = (char)(0xD0);
-		puSendCmd[1] = (char)(0xC8);
-		i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2);
-
-		puSendCmd[0] = (char)(0xC8);
-		puSendCmd[1] = (char)(0x01);
-		i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2);
-
-		puSendCmd[0] = (char)(0xC6);
-		puSendCmd[1] = (char)(0x00);
-		i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2);
-		#endif
 
 		ret = s4AF_ReadReg(&InitPos);
 		#ifdef USE_ISRC_MODE_S5K2P8_SENSOR
