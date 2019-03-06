@@ -362,7 +362,7 @@ static int AF_i2c_probe(struct i2c_client *client, const struct i2c_device_id *i
 {
 	int i4RetValue = 0;
 
-	LOG_INF("Start\n");
+	LOG_INF("AF_i2c_probe Start\n");
 
 	/* Kirby: add new-style driver { */
 	g_pstAF_I2Cclient = client;
@@ -386,6 +386,8 @@ static int AF_i2c_probe(struct i2c_client *client, const struct i2c_device_id *i
 
 static int AF_probe(struct platform_device *pdev)
 {
+	LOG_INF("MAIN AF_probe Start\n");
+	
 	return i2c_add_driver(&AF_i2c_driver);
 }
 
@@ -425,6 +427,8 @@ static struct platform_device g_stAF_device = {
 
 static int __init MAINAF_i2C_init(void)
 {
+	LOG_INF("MAINAF_i2C_init Start\n");
+	
 	#if I2C_CONFIG_SETTING == 1
 	i2c_register_board_info(LENS_I2C_BUSNUM, &kd_lens_dev, 1);
 	#endif
