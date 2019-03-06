@@ -51,4 +51,4 @@ obj-y += $(custom_kernel_imgsensor_by_platform)
 obj-y += $(custom_kernel_imgsensor_by_project)
 
 $(info imgsensor drv by platform $(platform_drv))
-$(info imgsensor drv by project $(project_drv))
+#$(info imgsensor drv by project $(project_drv))
