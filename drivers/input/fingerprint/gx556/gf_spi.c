@@ -55,7 +55,7 @@
 #define GF_SPIDEV_NAME     "goodix,fingerprint"
 /*device name after register in charater*/
 #define GF_DEV_NAME            "goodix_fp"
-#define	GF_INPUT_NAME	    "qwerty"	/*"goodix_fp" */
+#define	GF_INPUT_NAME	    "gf-input"	/*"goodix_fp" */
 #define SPI_DEV_NAME        "spidev"
 
 #define	CHRD_DRIVER_NAME	"goodix_fp_spi"
@@ -362,7 +362,7 @@ static SPI_SPEED trans_spi_speed(unsigned int speed)
 		spi_speed = SPEED_4MHZ;
 	}
 
-	//printk("%s , speed_in=%l, speed_out=%l\n", __func__, speed, spi_speed);
+	printk("%s , speed_in=%d, speed_out=%d\n",__func__, speed, spi_speed);
 	return spi_speed;
 }
 
@@ -842,7 +842,7 @@ static int gf_open(struct inode *inode, struct file *filp)
 			gf_print("Succeed to open device. irq = %d, users:%d\n",
 			       gf_dev->spi->irq, gf_dev->users);
             if (gf_dev->users == 1){
-                //gf_enable_irq(gf_dev);
+                gf_enable_irq(gf_dev);
             }
 		}
 	} else {
@@ -1086,7 +1086,7 @@ int gf_read_chip_id(struct gf_dev *pdev)
 
     gf_spi_read_word(pdev, 0x0142, &val);
     gf_print("goodix-chip id: 0x%x \n", val);
-    if((val >> 4) == (0x12a1 >> 4)) {
+    if(val == 0x0) {
         return 0;
     }
         printk(KERN_ERR"3goodix-chip id: 0x%x \n", val);

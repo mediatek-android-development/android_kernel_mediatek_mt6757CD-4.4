@@ -24,7 +24,7 @@ int gf_parse_dts(struct gf_dev* pdev)
     FUNC_ENTRY();
 
 	if(pdev->spi->dev.of_node == NULL) {
-        pdev->spi->dev.of_node = of_find_compatible_node(NULL, NULL, "mediatek,goodix");
+        pdev->spi->dev.of_node = of_find_compatible_node(NULL, NULL, "mediatek,fingerprint");
 	}
 	
     if(pdev->spi->dev.of_node) {
@@ -96,19 +96,6 @@ int gf_parse_dts(struct gf_dev* pdev)
             dev_err(&pdev->spi->dev, " Cannot find fp pinctrl fp_enable_low!\n");
             return ret;
         }
-        pdev->fp_enable1v8_high = pinctrl_lookup_state(pdev->pinctrl1, "fp_enable1v8_high");
-        if (IS_ERR(pdev->fp_enable1v8_high)) {
-            ret = PTR_ERR(pdev->fp_enable1v8_high);
-            dev_err(&pdev->spi->dev, " Cannot find fp pinctrl fp_enable1v8_high!\n");
-            return ret;
-        }
-        pdev->fp_enable1v8_low = pinctrl_lookup_state(pdev->pinctrl1, "fp_enable1v8_low");
-        if (IS_ERR(pdev->fp_enable1v8_low)) {
-            ret = PTR_ERR(pdev->fp_enable1v8_low);
-            dev_err(&pdev->spi->dev, " Cannot find fp pinctrl fp_enable1v8_low!\n");
-            return ret;
-        }
-
 
     }
     else {
@@ -285,12 +272,10 @@ void gf_power_output(struct gf_dev *pdev, int level)
 	if (level)
         {
 		pinctrl_select_state(pdev->pinctrl1, pdev->fp_enable_high);
-		pinctrl_select_state(pdev->pinctrl1, pdev->fp_enable1v8_high);
         }
 	else
         {
 		pinctrl_select_state(pdev->pinctrl1, pdev->fp_enable_low);
-		pinctrl_select_state(pdev->pinctrl1, pdev->fp_enable1v8_low);
         }
 	mutex_unlock(&gf_set_gpio_mutex);
 }
