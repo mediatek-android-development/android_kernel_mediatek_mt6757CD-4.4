@@ -417,7 +417,7 @@ void sdio_execute_dvfs_autok(struct msdc_host *host)
 	sdio_autok_wait_dvfs_ready();
 
 	/* Set sdio busy and wait eMMC access done */
-	sdio_autok_busy = 1;
+	atomic_set(&sdio_autok_busy, 1);
 	for (;;) {
 		if (!sdc_is_busy())
 			break;
@@ -463,7 +463,7 @@ void sdio_execute_dvfs_autok(struct msdc_host *host)
 		pr_err("vcorefs_request_dvfs_opp@OPPI_UNREQ fail!\n");
 
 	/* Clear sdio busy after sdio autok done. */
-	sdio_autok_busy = 0;
+	atomic_set(&sdio_autok_busy, 0);
 	host->is_autok_done = 1;
 	complete(&host->autok_done);
 }
@@ -533,7 +533,7 @@ void msdc_dump_autok(struct msdc_host *host)
 	int bit_pos, byte_pos, start;
 	char buf[65];
 
-	pr_err("[AUTOK]VER : 0x%02x%02x%02x%02x\r\n",
+	pr_info("[AUTOK]VER : 0x%02x%02x%02x%02x\r\n",
 		host->autok_res[0][AUTOK_VER3],
 		host->autok_res[0][AUTOK_VER2],
 		host->autok_res[0][AUTOK_VER1],
@@ -550,7 +550,7 @@ void msdc_dump_autok(struct msdc_host *host)
 				buf[j] = 'O';
 		}
 		buf[j] = '\0';
-		pr_err("[AUTOK]CMD Rising \t: %s\r\n", buf);
+		pr_info("[AUTOK]CMD Rising \t: %s\r\n", buf);
 
 		start = CMD_SCAN_F0;
 		for (j = 0; j < 64; j++) {
@@ -562,7 +562,7 @@ void msdc_dump_autok(struct msdc_host *host)
 				buf[j] = 'O';
 		}
 		buf[j] = '\0';
-		pr_err("[AUTOK]CMD Falling \t: %s\r\n", buf);
+		pr_info("[AUTOK]CMD Falling \t: %s\r\n", buf);
 
 		start = DAT_SCAN_R0;
 		for (j = 0; j < 64; j++) {
@@ -574,7 +574,7 @@ void msdc_dump_autok(struct msdc_host *host)
 				buf[j] = 'O';
 		}
 		buf[j] = '\0';
-		pr_err("[AUTOK]DAT Rising \t: %s\r\n", buf);
+		pr_info("[AUTOK]DAT Rising \t: %s\r\n", buf);
 
 		start = DAT_SCAN_F0;
 		for (j = 0; j < 64; j++) {
@@ -586,7 +586,7 @@ void msdc_dump_autok(struct msdc_host *host)
 				buf[j] = 'O';
 		}
 		buf[j] = '\0';
-		pr_err("[AUTOK]DAT Falling \t: %s\r\n", buf);
+		pr_info("[AUTOK]DAT Falling \t: %s\r\n", buf);
 
 		start = DS_SCAN_0;
 		for (j = 0; j < 64; j++) {
@@ -598,15 +598,15 @@ void msdc_dump_autok(struct msdc_host *host)
 				buf[j] = 'O';
 		}
 		buf[j] = '\0';
-		pr_err("[AUTOK]DS Window \t: %s\r\n", buf);
+		pr_info("[AUTOK]DS Window \t: %s\r\n", buf);
 
-		pr_err("[AUTOK]CMD [EDGE:%d CMD_FIFO_EDGE:%d DLY1:%d DLY2:%d]\r\n",
+		pr_info("[AUTOK]CMD [EDGE:%d CMD_FIFO_EDGE:%d DLY1:%d DLY2:%d]\r\n",
 			host->autok_res[i][0], host->autok_res[i][1], host->autok_res[i][5], host->autok_res[i][7]);
-		pr_err("[AUTOK]DAT [RDAT_EDGE:%d RD_FIFO_EDGE:%d WD_FIFO_EDGE:%d]\r\n",
+		pr_info("[AUTOK]DAT [RDAT_EDGE:%d RD_FIFO_EDGE:%d WD_FIFO_EDGE:%d]\r\n",
 			host->autok_res[i][2], host->autok_res[i][3], host->autok_res[i][4]);
-		pr_err("[AUTOK]DAT [LATCH_CK:%d DLY1:%d DLY2:%d]\r\n",
+		pr_info("[AUTOK]DAT [LATCH_CK:%d DLY1:%d DLY2:%d]\r\n",
 			host->autok_res[i][13], host->autok_res[i][9], host->autok_res[i][11]);
-		pr_err("[AUTOK]DS  [DLY1:%d DLY2:%d DLY3:%d]\r\n",
+		pr_info("[AUTOK]DS  [DLY1:%d DLY2:%d DLY3:%d]\r\n",
 			host->autok_res[i][14], host->autok_res[i][16], host->autok_res[i][18]);
 	}
 }

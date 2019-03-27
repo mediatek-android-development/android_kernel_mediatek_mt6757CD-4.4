@@ -64,7 +64,8 @@ struct tick_sched {
 	ktime_t				idle_entrytime_wo_cpuoffline;
 	ktime_t				idle_sleeptime_wo_cpuoffline;
 	ktime_t				iowait_sleeptime_wo_cpuoffline;
-	int				cpu_plug_off_flag;
+	unsigned long			next_jiffies;
+	int             cpu_plug_off_flag;
 #endif
 };
 

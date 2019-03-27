@@ -11,14 +11,10 @@
  * GNU General Public License for more details.
  */
 
-#ifndef __MT_SPM_REG_H___
-#define __MT_SPM_REG_H___
+#ifndef _COMMON_MTK_SPM_VCORE_DVFS_H
+#define _COMMON_MTK_SPM_VCORE_DVFS_H
 
-#if defined(CONFIG_MACH_MT6755)
-
-#include "spm_v2/mt_spm_vcore_dvfs_mt6755.h"
-
-#elif defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 
 #include "spm_v2/mtk_spm_vcore_dvfs_mt6757.h"
 
@@ -26,7 +22,23 @@
 
 #include "spm_v2/mt_spm_vcore_dvfs_mt6797.h"
 
+#elif defined(CONFIG_MACH_MT6799)
+
+#include "spm_v3/mtk_spm_vcore_dvfs.h"
+
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6739)
+
+#include "spm_v4/mtk_spm_vcore_dvfs.h"
+
+#elif defined(CONFIG_MACH_MT6759)
+
+#include "spm_v3/mtk_spm_vcore_dvfs_mt6759.h"
+
+#elif defined(CONFIG_MACH_MT6758)
+
+#include "spm_v3/mtk_spm_vcore_dvfs_mt6758.h"
+
 #endif
 
-#endif /* __MT_SPM_REG_H___ */
+#endif /* _COMMON_MTK_SPM_VCORE_DVFS_H */
 

@@ -78,6 +78,7 @@
 #define MSDC_PAD_TUNE0   0xf0
 #define PAD_DS_TUNE      0x188
 #define EMMC50_CFG0      0x208
+#define SDC_FIFO_CFG	 0x228
 
 /*--------------------------------------------------------------------------*/
 /* Register Mask                                                            */
@@ -237,6 +238,9 @@
 #define EMMC50_CFG_CRCSTS_EDGE    (0x1 << 3)   /* RW */
 #define EMMC50_CFG_CFCSTS_SEL     (0x1 << 4)   /* RW */
 
+#define SDC_FIFO_CFG_WRVALIDSEL   (0x1 << 24)  /* RW */
+#define SDC_FIFO_CFG_RDVALIDSEL   (0x1 << 25)  /* RW */
+
 #define REQ_CMD_EIO  (0x1 << 0)
 #define REQ_CMD_TMO  (0x1 << 1)
 #define REQ_DAT_ERR  (0x1 << 2)
@@ -314,6 +318,7 @@ struct mt81xx_mmc_compatible {
 	bool pad_tune0;
 	bool async_fifo;
 	bool data_tune;
+	bool busy_check;
 };
 
 struct msdc_delay_phase {
@@ -349,6 +354,7 @@ struct msdc_host {
 
 	struct clk *src_clk;	/* msdc source clock */
 	struct clk *h_clk;      /* msdc h_clk */
+	struct clk *src_clk_cg; /* msdc source clock control gate */
 	u32 mclk;		/* mmc subsystem clock frequency */
 	u32 src_clk_freq;	/* source clock frequency */
 	u32 sclk;		/* SD/MS bus clock frequency */
@@ -370,6 +376,7 @@ static const struct mt81xx_mmc_compatible mt8135_compat = {
 	.pad_tune0 = false,
 	.async_fifo = false,
 	.data_tune = false,
+	.busy_check = false,
 };
 
 static const struct mt81xx_mmc_compatible mt8163_compat = {
@@ -377,6 +384,7 @@ static const struct mt81xx_mmc_compatible mt8163_compat = {
 	.pad_tune0 = true,
 	.async_fifo = true,
 	.data_tune = true,
+	.busy_check = false,
 };
 
 static const struct mt81xx_mmc_compatible mt8167_compat = {
@@ -384,6 +392,7 @@ static const struct mt81xx_mmc_compatible mt8167_compat = {
 	.pad_tune0 = true,
 	.async_fifo = true,
 	.data_tune = true,
+	.busy_check = true,
 };
 
 static const struct mt81xx_mmc_compatible mt8173_compat = {
@@ -391,6 +400,7 @@ static const struct mt81xx_mmc_compatible mt8173_compat = {
 	.pad_tune0 = false,
 	.async_fifo = false,
 	.data_tune = false,
+	.busy_check = false,
 };
 
 static const struct mt81xx_mmc_compatible mt2701_compat = {
@@ -398,6 +408,7 @@ static const struct mt81xx_mmc_compatible mt2701_compat = {
 	.pad_tune0 = true,
 	.async_fifo = true,
 	.data_tune = true,
+	.busy_check = false,
 };
 
 static const struct of_device_id msdc_of_ids[] = {
@@ -586,6 +597,7 @@ static void msdc_set_timeout(struct msdc_host *host, u32 ns, u32 clks)
 
 static void msdc_gate_clock(struct msdc_host *host)
 {
+	clk_disable_unprepare(host->src_clk_cg);
 	clk_disable_unprepare(host->src_clk);
 	clk_disable_unprepare(host->h_clk);
 }
@@ -594,6 +606,7 @@ static void msdc_ungate_clock(struct msdc_host *host)
 {
 	clk_prepare_enable(host->h_clk);
 	clk_prepare_enable(host->src_clk);
+	clk_prepare_enable(host->src_clk_cg);
 	while (!(readl(host->base + MSDC_CFG) & MSDC_CFG_CKSTB))
 		cpu_relax();
 }
@@ -658,7 +671,10 @@ static void msdc_set_mclk(struct msdc_host *host, unsigned char timing, u32 hz)
 	 * As src_clk/HCLK use the same bit to gate/ungate,
 	 * So if want to only gate src_clk, need gate its parent(mux).
 	 */
-	clk_disable_unprepare(clk_get_parent(host->src_clk));
+	if (host->src_clk_cg)
+		clk_disable_unprepare(host->src_clk_cg);
+	else
+		clk_disable_unprepare(clk_get_parent(host->src_clk));
 	if (host->dev_comp->clk_div_bits == 8)
 		sdr_set_field(host->base + MSDC_CFG,
 				MSDC_CFG_CKMOD | MSDC_CFG_CKDIV,
@@ -667,7 +683,10 @@ static void msdc_set_mclk(struct msdc_host *host, unsigned char timing, u32 hz)
 		sdr_set_field(host->base + MSDC_CFG,
 				MSDC_CFG_CKMOD_EXTRA | MSDC_CFG_CKDIV_EXTRA,
 				(mode << 12) | (div % 0xfff));
-	clk_prepare_enable(clk_get_parent(host->src_clk));
+	if (host->src_clk_cg)
+		clk_prepare_enable(host->src_clk_cg);
+	else
+		clk_prepare_enable(clk_get_parent(host->src_clk));
 
 	while (!(readl(host->base + MSDC_CFG) & MSDC_CFG_CKSTB))
 		cpu_relax();
@@ -893,7 +912,13 @@ static bool msdc_cmd_done(struct msdc_host *host, int events,
 	}
 
 	if (!sbc_error && !(events & MSDC_INT_CMDRDY)) {
-		msdc_reset_hw(host);
+		if (cmd->opcode != MMC_SEND_TUNING_BLOCK &&
+		    cmd->opcode != MMC_SEND_TUNING_BLOCK_HS200)
+			/*
+			 * should not clear fifo/interrupt as the tune data
+			 * may have alreay come.
+			 */
+			msdc_reset_hw(host);
 		if (cmd->flags & MMC_RSP_CRC && events & MSDC_INT_RSPCRCERR) {
 			cmd->error = -EILSEQ;
 			host->error |= REQ_CMD_EIO;
@@ -1003,7 +1028,11 @@ static void msdc_start_command(struct msdc_host *host,
 static void msdc_cmd_next(struct msdc_host *host,
 		struct mmc_request *mrq, struct mmc_command *cmd)
 {
-	if (cmd->error || (mrq->sbc && mrq->sbc->error))
+	if ((cmd->error &&
+	    !(cmd->error == -EILSEQ &&
+	      (cmd->opcode == MMC_SEND_TUNING_BLOCK ||
+	       cmd->opcode == MMC_SEND_TUNING_BLOCK_HS200))) ||
+		(mrq->sbc && mrq->sbc->error))
 		msdc_request_done(host, mrq);
 	else if (cmd == mrq->sbc)
 		msdc_start_command(host, mrq, mrq->cmd);
@@ -1303,6 +1332,9 @@ static void msdc_init_hw(struct msdc_host *host)
 	writel(0, host->base + MSDC_IOCON);
 	writel(0x403c0046, host->base + MSDC_PATCH_BIT);
 	writel(0xffff0089, host->base + MSDC_PATCH_BIT1);
+	if (host->dev_comp->busy_check)
+		sdr_clr_bits(host->base + MSDC_PATCH_BIT1, (1 << 7));
+
 	sdr_set_bits(host->base + EMMC50_CFG0, EMMC50_CFG_CFCSTS_SEL);
 
 	if (host->dev_comp->async_fifo) {
@@ -1336,6 +1368,12 @@ static void msdc_init_hw(struct msdc_host *host)
 
 	/* Configure to default data timeout */
 	sdr_set_field(host->base + SDC_CFG, SDC_CFG_DTOC, 3);
+
+	/*write data  valid only that host have whole block len data in fifo */
+	sdr_clr_bits(host->base + SDC_FIFO_CFG, SDC_FIFO_CFG_WRVALIDSEL);
+
+	/*read data valid only that host have enough space for storing a block length data */
+	sdr_clr_bits(host->base + SDC_FIFO_CFG, SDC_FIFO_CFG_RDVALIDSEL);
 
 	host->def_tune_para.iocon = readl(host->base + MSDC_IOCON);
 	host->def_tune_para.pad_tune = readl(host->base + MSDC_PAD_TUNE);
@@ -1742,6 +1780,11 @@ static int msdc_drv_probe(struct platform_device *pdev)
 		ret = PTR_ERR(host->h_clk);
 		goto host_free;
 	}
+
+	/*source clock control gate is optional clock*/
+	host->src_clk_cg = devm_clk_get(&pdev->dev, "source_cg");
+	if (IS_ERR(host->src_clk_cg))
+		host->src_clk_cg = NULL;
 
 	host->irq = platform_get_irq(pdev, 0);
 	if (host->irq < 0) {

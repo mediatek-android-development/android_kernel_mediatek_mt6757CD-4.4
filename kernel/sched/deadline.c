@@ -741,7 +741,7 @@ static void update_curr_dl(struct rq *rq)
 	curr->se.exec_start = rq_clock_task(rq);
 	cpuacct_charge(curr, delta_exec);
 
-	sched_rt_avg_update(rq, delta_exec);
+	sched_dl_avg_update(rq, delta_exec);
 
 	dl_se->runtime -= dl_se->dl_yielded ? 0 : delta_exec;
 	if (dl_runtime_exceeded(dl_se)) {
@@ -1771,12 +1771,11 @@ static void switched_to_dl(struct rq *rq, struct task_struct *p)
 #ifdef CONFIG_SMP
 		if (p->nr_cpus_allowed > 1 && rq->dl.overloaded)
 			queue_push_tasks(rq);
-#else
+#endif
 		if (dl_task(rq->curr))
 			check_preempt_curr_dl(rq, p, 0);
 		else
 			resched_curr(rq);
-#endif
 	}
 }
 

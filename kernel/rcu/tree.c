@@ -2661,6 +2661,7 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 #ifdef CONFIG_MTK_RCU_MONITOR
 	struct rcu_invoke_log_entry *e = NULL;
 	ktime_t start, end;
+	int     dstlen;
 #endif
 
 	/* If no callbacks are ready, just return. */
@@ -2701,7 +2702,11 @@ static void rcu_do_batch(struct rcu_state *rsp, struct rcu_data *rdp)
 #ifdef CONFIG_MTK_RCU_MONITOR
 		e = rcu_invoke_log_add();
 		if (e != NULL) {
-			strcpy(e->rcuname, rsp->name);
+			dstlen = strlen(rsp->name);
+			if (dstlen >= MAX_SERVICE_NAME_LEN)
+				dstlen = MAX_SERVICE_NAME_LEN-1;
+
+			strncpy(e->rcuname, rsp->name, dstlen);
 			e->rhp = (unsigned long)list;
 			e->func = (unsigned long)list->func;
 			e->gpnum = rsp->gpnum;
@@ -3069,6 +3074,7 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func,
 	struct rcu_data *rdp;
 #ifdef CONFIG_MTK_RCU_MONITOR
 	struct rcu_callback_log_entry *e;
+	int    dstlen;
 #endif
 
 	WARN_ON_ONCE((unsigned long)head & 0x1); /* Misaligned rcu_head! */
@@ -3124,8 +3130,15 @@ __call_rcu(struct rcu_head *head, rcu_callback_t func,
 #ifdef CONFIG_MTK_RCU_MONITOR
 	e = rcu_callback_log_add();
 	if (e != NULL) {
-		strcpy(e->rcuname, rsp->name);
-		strcpy(e->comm, current->comm);
+		dstlen = strlen(rsp->name);
+		if (dstlen >= MAX_SERVICE_NAME_LEN)
+			dstlen = MAX_SERVICE_NAME_LEN-1;
+		strncpy(e->rcuname, rsp->name, dstlen);
+
+		dstlen = strlen(current->comm);
+		if (dstlen >= TASK_COMM_LEN)
+			dstlen = TASK_COMM_LEN-1;
+		strncpy(e->comm, current->comm, dstlen);
 		e->rhp = (unsigned long)head;
 		e->func = (unsigned long)func;
 		e->gpnum = rsp->gpnum;

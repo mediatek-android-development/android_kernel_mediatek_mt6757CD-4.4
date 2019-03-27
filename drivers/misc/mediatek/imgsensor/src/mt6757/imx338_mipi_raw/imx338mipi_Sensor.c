@@ -262,7 +262,7 @@ static imgsensor_info_struct imgsensor_info = {
 	.ae_ispGain_delay_frame = 2,	/* isp gain delay frame for AE cycle */
 	.ihdr_support = 0,	/* 1, support; 0,not support */
 	.ihdr_le_firstline = 0,	/* 1,le first ; 0, se first */
-	.temperature_support = 1,  /*1, support; 0,not support*/
+/*	.temperature_support = 1, */ /*1, support; 0,not support*/
 	.sensor_mode_num = 10,	/* support sensor mode num */
 
 	.cap_delay_frame = 1,	/* enter capture delay frame num */
@@ -1347,7 +1347,6 @@ static void sensor_init(void)
 	LOG_INF("E\n");
 	imx338_table_write_cmos_sensor(addr_data_pair_init_imx338,
 				       sizeof(addr_data_pair_init_imx338) / sizeof(kal_uint16));
-	write_cmos_sensor(0x0138, 0x01); /*enable temperature sensor, TEMP_SEN_CTL:*/
 	LOG_INF("Exit\n");
 }				/*    sensor_init  */
 
@@ -2066,7 +2065,7 @@ static kal_uint32 get_info(MSDK_SCENARIO_ID_ENUM scenario_id,
 	sensor_info->AEISPGainDelayFrame = imgsensor_info.ae_ispGain_delay_frame;
 	sensor_info->IHDR_Support = imgsensor_info.ihdr_support;
 	sensor_info->IHDR_LE_FirstLine = imgsensor_info.ihdr_le_firstline;
-	sensor_info->TEMPERATURE_SUPPORT = imgsensor_info.temperature_support;
+/*	sensor_info->TEMPERATURE_SUPPORT = imgsensor_info.temperature_support;*/
 	sensor_info->SensorModeNum = imgsensor_info.sensor_mode_num;
 	sensor_info->PDAF_Support = 2;	/*0: NO PDAF, 1: PDAF Raw Data mode, 2:PDAF VC mode */
 #if defined(IMX338_ZHDR)
@@ -2530,7 +2529,7 @@ static kal_uint32 get_sensor_temperature(void)
 	else
 		temperature_convert = 0;
 
-	LOG_INF("temperature_convert(%d), get_temperature(%d)\n", temperature_convert, temperature);
+	/* LOG_INF("temperature_convert(%d), get_temperature(%d)\n", temperature_convert, temperature);*/
 	return temperature_convert;
 }
 
@@ -2549,7 +2548,7 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 	SET_SENSOR_AWB_GAIN *pSetSensorAWB = (SET_SENSOR_AWB_GAIN *) feature_para;
 	MSDK_SENSOR_REG_INFO_STRUCT *sensor_reg_data = (MSDK_SENSOR_REG_INFO_STRUCT *) feature_para;
 
-	LOG_INF("feature_id = %d\n", feature_id);
+	/*LOG_INF("feature_id = %d\n", feature_id);*/
 	switch (feature_id) {
 	case SENSOR_FEATURE_GET_PERIOD:
 		*feature_return_para_16++ = imgsensor.line_length;

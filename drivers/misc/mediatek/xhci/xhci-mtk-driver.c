@@ -29,16 +29,16 @@
 #include <linux/list.h>
 #include <linux/atomic.h>
 
-#include "xhci-mtk-driver.h"
+#include <xhci-mtk-driver.h>
 #ifdef CONFIG_PROJECT_PHY
 #include <mtk-phy-asic.h>
 #endif
+
 #if CONFIG_MTK_GAUGE_VERSION == 30
 #include <mt-plat/mtk_battery.h>
 #else
 #include <mt-plat/battery_meter.h>
 #endif
-
 
 #include <mt-plat/charger_class.h>
 #ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
@@ -48,23 +48,6 @@
 #define RET_SUCCESS 0
 #define RET_FAIL 1
 
-#ifdef CONFIG_TCPC_CLASS
-#include "tcpm.h"
-#include <linux/workqueue.h>
-#include <linux/mutex.h>
-static struct notifier_block otg_nb;
-static bool usbc_otg_attached;
-static struct tcpc_device *otg_tcpc_dev;
-static struct workqueue_struct *otg_tcpc_power_workq;
-static struct workqueue_struct *otg_tcpc_workq;
-static struct work_struct tcpc_otg_power_work;
-static struct work_struct tcpc_otg_work;
-static bool usbc_otg_power_enable;
-static bool usbc_otg_enable;
-static struct mutex tcpc_otg_lock;
-static struct mutex tcpc_otg_pwr_lock;
-static bool tcpc_boost_on;
-#endif /* CONFIG_TCPC_CLASS */
 
 #if CONFIG_MTK_GAUGE_VERSION == 30
 static struct charger_device *primary_charger;
@@ -79,6 +62,7 @@ enum dualrole_state {
 
 static enum dualrole_state mtk_dualrole_stat = DUALROLE_DEVICE;
 static struct switch_dev mtk_otg_state;
+static bool boost_on;
 
 u32 xhci_debug_level = K_ALET | K_CRIT | K_ERR | K_WARNIN;
 
@@ -89,7 +73,7 @@ bool mtk_is_charger_4_vol(void)
 #if defined(CONFIG_USBIF_COMPLIANCE) || defined(CONFIG_POWER_EXT)
 	return false;
 #else
-	int vol = battery_meter_get_charger_voltage();
+	int vol =  battery_meter_get_charger_voltage();
 
 	mtk_xhci_mtk_printk(K_DEBUG, "voltage(%d)\n", vol);
 
@@ -99,6 +83,7 @@ bool mtk_is_charger_4_vol(void)
 
 static void mtk_enable_otg_mode(void)
 {
+	boost_on = true;
 #if CONFIG_MTK_GAUGE_VERSION == 30
 	charger_dev_enable_otg(primary_charger, true);
 	charger_dev_set_boost_current_limit(primary_charger, 1500000);
@@ -118,6 +103,7 @@ static void mtk_disable_otg_mode(void)
 #else
 	set_chr_enable_otg(0x0);
 #endif
+	boost_on = false;
 }
 
 static int mtk_xhci_hcd_init(void)
@@ -133,16 +119,118 @@ static int mtk_xhci_hcd_init(void)
 	return 0;
 }
 
+#if CONFIG_MTK_GAUGE_VERSION == 30
+
+struct usbotg_boost_manager {
+	struct platform_device *pdev;
+	struct gtimer otg_kthread_gtimer;
+	struct workqueue_struct *otg_boost_workq;
+	struct work_struct kick_work;
+	struct charger_device *primary_charger;
+	unsigned int polling_interval;
+	bool polling_enabled;
+};
+static struct usbotg_boost_manager *g_info;
+
+
+void enable_boost_polling(bool poll_en)
+{
+	if (g_info) {
+		if (poll_en) {
+			gtimer_start(&g_info->otg_kthread_gtimer, g_info->polling_interval);
+			g_info->polling_enabled = true;
+		} else {
+			g_info->polling_enabled = false;
+			gtimer_stop(&g_info->otg_kthread_gtimer);
+		}
+	}
+}
+
+static void usbotg_boost_kick_work(struct work_struct *work)
+{
+
+	struct usbotg_boost_manager *usb_boost_manager =
+		container_of(work, struct usbotg_boost_manager, kick_work);
+
+	mtk_xhci_mtk_printk(K_ALET, "usbotg_boost_kick_work\n");
+
+	charger_dev_kick_wdt(usb_boost_manager->primary_charger);
+
+	if (usb_boost_manager->polling_enabled == true)
+		gtimer_start(&usb_boost_manager->otg_kthread_gtimer, usb_boost_manager->polling_interval);
+}
+
+static int usbotg_gtimer_func(struct gtimer *data)
+{
+	struct usbotg_boost_manager *usb_boost_manager =
+		container_of(data, struct usbotg_boost_manager, otg_kthread_gtimer);
+
+	queue_work(usb_boost_manager->otg_boost_workq, &usb_boost_manager->kick_work);
+	return 0;
+}
+
+static int usbotg_boost_manager_probe(struct platform_device *pdev)
+{
+	struct usbotg_boost_manager *info = NULL;
+	struct device *dev = &pdev->dev;
+	struct device_node *node = dev->of_node;
+
+	info = devm_kzalloc(&pdev->dev, sizeof(struct usbotg_boost_manager), GFP_KERNEL);
+	if (!info)
+		return -ENOMEM;
+
+	if (of_property_read_u32(node, "boost_period", (u32 *) &info->polling_interval))
+		info->polling_interval = 30;
+
+	platform_set_drvdata(pdev, info);
+	info->pdev = pdev;
+
+	info->primary_charger = get_charger_by_name("primary_chg");
+	if (!info->primary_charger) {
+		pr_info("%s: get primary charger device failed\n", __func__);
+		return -ENODEV;
+	}
+
+	gtimer_init(&info->otg_kthread_gtimer, &info->pdev->dev, "otg_boost");
+	info->otg_kthread_gtimer.callback = usbotg_gtimer_func;
+
+	info->otg_boost_workq = create_singlethread_workqueue("otg_boost_workq");
+	INIT_WORK(&info->kick_work, usbotg_boost_kick_work);
+	g_info = info;
+	return 0;
+}
+
+static int usbotg_boost_manager_remove(struct platform_device *pdev)
+{
+	return 0;
+}
+
+static const struct of_device_id usbotg_boost_manager_of_match[] = {
+	{.compatible = "mediatek,usb_boost_manager"},
+	{},
+};
+MODULE_DEVICE_TABLE(of, usbotg_boost_manager_of_match);
+static struct platform_driver boost_manager_driver = {
+	.remove = usbotg_boost_manager_remove,
+	.probe = usbotg_boost_manager_probe,
+	.driver = {
+		   .name = "usb_boost_manager",
+		   .of_match_table = usbotg_boost_manager_of_match,
+		   },
+};
+
+#endif
+
+
+
+#ifdef CONFIG_USBIF_COMPLIANCE
+
+#else
 static void mtk_xhci_wakelock_init(void)
 {
 	wake_lock_init(&mtk_xhci_wakelock, WAKE_LOCK_SUSPEND, "xhci.wakelock");
-#ifdef CONFIG_USB_C_SWITCH
-#ifndef CONFIG_TCPC_CLASS
-	typec_host_driver.priv_data = NULL;
-	register_typec_switch_callback(&typec_host_driver);
-#endif /* if not CONFIG_TCPC_CLASS */
-#endif
 }
+#endif
 
 void mtk_xhci_wakelock_lock(void)
 {
@@ -162,8 +250,88 @@ static void mtk_xhci_hcd_cleanup(void)
 {
 	xhci_mtk_unregister_plat();
 }
+static struct delayed_work host_plug_test_work;
+static int host_plug_test_enable; /* default disable */
+module_param(host_plug_test_enable, int, 0644);
+static int host_plug_in_test_period_ms = 5000;
+module_param(host_plug_in_test_period_ms, int, 0644);
+static int host_plug_out_test_period_ms = 5000;
+module_param(host_plug_out_test_period_ms, int, 0644);
+static int host_test_vbus_off_time_us = 3000;
+module_param(host_test_vbus_off_time_us, int, 0644);
+static int host_test_vbus_only = 1;
+module_param(host_test_vbus_only, int, 0644);
+static int host_plug_test_triggered;
+static int host_req;
+static struct wake_lock host_test_wakelock;
+static int _mtk_xhci_driver_load(bool vbus_on);
+static void _mtk_xhci_driver_unload(bool vbus_off);
+static void do_host_plug_test_work(struct work_struct *data)
+{
+	static ktime_t ktime_begin, ktime_end;
+	static s64 diff_time;
+	static int host_on;
+	static int wake_lock_inited;
 
-int mtk_xhci_driver_load(bool vbus_on)
+	if (!wake_lock_inited) {
+		mtk_xhci_mtk_printk(K_ALET, "%s wake_lock_init\n", __func__);
+		wake_lock_init(&host_test_wakelock, WAKE_LOCK_SUSPEND, "host.test.lock");
+		wake_lock_inited = 1;
+	}
+
+	host_plug_test_triggered = 1;
+	/* sync global status */
+	mb();
+	wake_lock(&host_test_wakelock);
+	mtk_xhci_mtk_printk(K_ALET, "BEGIN");
+	ktime_begin = ktime_get();
+
+	host_on  = 1;
+	while (1) {
+		if (!host_req && host_on) {
+			mtk_xhci_mtk_printk(K_ALET, "about to exit, host_on<%d>\n", host_on);
+			break;
+		}
+		msleep(50);
+
+		ktime_end = ktime_get();
+		diff_time = ktime_to_ms(ktime_sub(ktime_end, ktime_begin));
+		if (host_on && diff_time >= host_plug_in_test_period_ms) {
+			host_on = 0;
+			mtk_xhci_mtk_printk(K_ALET, "OFF\n");
+
+			ktime_begin = ktime_get();
+
+			/* simulate plug out */
+			mtk_disable_otg_mode();
+			udelay(host_test_vbus_off_time_us);
+
+			if (!host_test_vbus_only)
+				_mtk_xhci_driver_unload(true);
+		} else if (!host_on && diff_time >= host_plug_out_test_period_ms) {
+			host_on = 1;
+			mtk_xhci_mtk_printk(K_ALET, "ON\n");
+
+			ktime_begin = ktime_get();
+			if (!host_test_vbus_only)
+				_mtk_xhci_driver_load(true);
+
+			mtk_enable_otg_mode();
+			msleep(100);
+		}
+	}
+
+	/* from ON to OFF state */
+	msleep(1000);
+	_mtk_xhci_driver_unload(true);
+
+	host_plug_test_triggered = 0;
+	wake_unlock(&host_test_wakelock);
+	mtk_xhci_mtk_printk(K_ALET, "END\n");
+}
+
+
+static int _mtk_xhci_driver_load(bool vbus_on)
 {
 	int ret = 0;
 
@@ -190,6 +358,9 @@ int mtk_xhci_driver_load(bool vbus_on)
 	if (vbus_on)
 		mtk_enable_otg_mode();
 
+	if (host_plug_test_enable && !host_plug_test_triggered)
+		schedule_delayed_work(&host_plug_test_work, 0);
+
 	return 0;
 
 _err:
@@ -201,15 +372,10 @@ _err:
 	return ret;
 }
 
-void mtk_xhci_disable_vbus(void)
-{
-	mtk_disable_otg_mode();
-}
-
-
-void mtk_xhci_driver_unload(bool vbus_off)
+static void _mtk_xhci_driver_unload(bool vbus_off)
 {
 	mtk_xhci_hcd_cleanup();
+
 	if (vbus_off)
 		mtk_disable_otg_mode();
 
@@ -229,7 +395,43 @@ void mtk_xhci_driver_unload(bool vbus_off)
 	mtk_dualrole_stat = DUALROLE_DEVICE;
 }
 
-void mtk_xhci_switch_init(void)
+int mtk_xhci_driver_load(bool vbus_on)
+{
+	static int host_plug_test_work_inited;
+
+	host_req = 1;
+
+	if (!host_plug_test_work_inited) {
+		INIT_DELAYED_WORK(&host_plug_test_work, do_host_plug_test_work);
+		host_plug_test_work_inited = 1;
+	}
+
+	if (host_plug_test_triggered)
+		return 0;
+
+	return _mtk_xhci_driver_load(vbus_on);
+}
+void mtk_xhci_driver_unload(bool vbus_off)
+{
+	host_req = 0;
+
+	if (host_plug_test_triggered)
+		return;
+
+	_mtk_xhci_driver_unload(vbus_off);
+}
+
+void mtk_xhci_disable_vbus(void)
+{
+	mtk_disable_otg_mode();
+}
+
+void mtk_xhci_enable_vbus(void)
+{
+	mtk_enable_otg_mode();
+}
+
+static void mtk_xhci_switch_init(void)
 {
 	mtk_otg_state.name = "otg_state";
 	mtk_otg_state.index = 0;
@@ -246,261 +448,18 @@ void mtk_xhci_switch_init(void)
 bool mtk_is_host_mode(void)
 {
 #ifdef CONFIG_TCPC_CLASS
-	return tcpc_boost_on;
+	return boost_on;
 #else
 	return (mtk_dualrole_stat == DUALROLE_HOST) ? true : false;
 #endif /* CONFIG_TCPC_CLASS */
 }
 
-#ifdef CONFIG_TCPC_CLASS
-int tcpc_otg_enable(void)
-{
-	int ret = 0;
-
-	if (!usbc_otg_attached) {
-		/* mtk_idpin_cur_stat = IDPIN_IN_HOST; */
-		ret = mtk_xhci_driver_load(false);
-		if (!ret) {
-			mtk_xhci_wakelock_lock();
-			switch_set_state(&mtk_otg_state, 1);
-		}
-		usbc_otg_attached = true;
-	}
-	return ret;
-}
-
-int tcpc_otg_disable(void)
-{
-	if (usbc_otg_attached) {
-		/* USB PLL Force settings */
-		usb20_pll_settings(true, false);
-		mtk_xhci_driver_unload(false);
-		switch_set_state(&mtk_otg_state, 0);
-		mtk_xhci_wakelock_unlock();
-		/* mtk_idpin_cur_stat = IDPIN_OUT; */
-		usbc_otg_attached = false;
-	}
-	return 0;
-}
-
-static void tcpc_otg_work_call(struct work_struct *work)
-{
-	bool enable;
-
-	mutex_lock(&tcpc_otg_lock);
-	enable = usbc_otg_enable;
-	mutex_unlock(&tcpc_otg_lock);
-
-	if (enable)
-		tcpc_otg_enable();
-	else
-		tcpc_otg_disable();
-}
-
-static void tcpc_otg_power_work_call(struct work_struct *work)
-{
-	mutex_lock(&tcpc_otg_pwr_lock);
-	if (usbc_otg_power_enable) {
-		if (!tcpc_boost_on) {
-			mtk_enable_otg_mode();
-			tcpc_boost_on = true;
-		}
-	} else {
-		if (tcpc_boost_on) {
-			mtk_disable_otg_mode();
-			tcpc_boost_on = false;
-		}
-	}
-	mutex_unlock(&tcpc_otg_pwr_lock);
-}
-#endif /* CONFIG_TCPC_CLASS */
-
-#ifdef CONFIG_TCPC_CLASS
-static int otg_tcp_notifier_call(struct notifier_block *nb,
-		unsigned long event, void *data)
-{
-	struct tcp_notify *noti = data;
-
-	switch (event) {
-	case TCP_NOTIFY_SOURCE_VBUS:
-		pr_info("%s source vbus = %dmv\n",
-				__func__, noti->vbus_state.mv);
-		mutex_lock(&tcpc_otg_pwr_lock);
-		usbc_otg_power_enable = (noti->vbus_state.mv) ? true : false;
-		mutex_unlock(&tcpc_otg_pwr_lock);
-		queue_work(otg_tcpc_power_workq, &tcpc_otg_power_work);
-		break;
-	case TCP_NOTIFY_TYPEC_STATE:
-		if (noti->typec_state.new_state == TYPEC_ATTACHED_SRC) {
-			pr_info("%s OTG Plug in\n", __func__);
-			mutex_lock(&tcpc_otg_lock);
-			usbc_otg_enable = true;
-			mutex_unlock(&tcpc_otg_lock);
-		} else if (noti->typec_state.old_state == TYPEC_ATTACHED_SRC &&
-				noti->typec_state.new_state == TYPEC_UNATTACHED) {
-			pr_info("%s OTG Plug out\n", __func__);
-			mutex_lock(&tcpc_otg_lock);
-			usbc_otg_enable = false;
-			mutex_unlock(&tcpc_otg_lock);
-		}
-		queue_work(otg_tcpc_workq, &tcpc_otg_work);
-		break;
-	}
-	return NOTIFY_OK;
-}
-#endif /* CONFIG_TCPC_CLASS */
-
-
-#if CONFIG_MTK_GAUGE_VERSION == 30
-
-struct usbotg_boost_manager {
-	struct platform_device *pdev;
-	struct fgtimer otg_kthread_fgtimer;
-	struct workqueue_struct *otg_boost_workq;
-	struct work_struct kick_work;
-	struct charger_device *primary_charger;
-	unsigned int polling_interval;
-	bool polling_enabled;
-};
-static struct usbotg_boost_manager *g_info;
-
-
-void enable_boost_polling(bool poll_en)
-{
-	if (g_info) {
-		if (poll_en) {
-			fgtimer_start(&g_info->otg_kthread_fgtimer, g_info->polling_interval);
-			g_info->polling_enabled = true;
-		} else {
-			g_info->polling_enabled = false;
-			fgtimer_stop(&g_info->otg_kthread_fgtimer);
-		}
-	}
-}
-
-static void usbotg_boost_kick_work(struct work_struct *work)
-{
-
-	struct usbotg_boost_manager *usb_boost_manager =
-		container_of(work, struct usbotg_boost_manager, kick_work);
-
-	mtk_xhci_mtk_printk(K_ALET, "usbotg_boost_kick_work\n");
-
-	charger_dev_kick_wdt(usb_boost_manager->primary_charger);
-
-	if (usb_boost_manager->polling_enabled == true)
-		fgtimer_start(&usb_boost_manager->otg_kthread_fgtimer, usb_boost_manager->polling_interval);
-}
-
-static int usbotg_fgtimer_func(struct fgtimer *data)
-{
-	struct usbotg_boost_manager *usb_boost_manager =
-		container_of(data, struct usbotg_boost_manager, otg_kthread_fgtimer);
-
-	queue_work(usb_boost_manager->otg_boost_workq, &usb_boost_manager->kick_work);
-	return 0;
-}
-
-static int usbotg_boost_manager_probe(struct platform_device *pdev)
-{
-	struct usbotg_boost_manager *info = NULL;
-
-	info = devm_kzalloc(&pdev->dev, sizeof(struct usbotg_boost_manager), GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
-
-	platform_set_drvdata(pdev, info);
-	info->pdev = pdev;
-	info->primary_charger = get_charger_by_name("primary_chg");
-	if (!info->primary_charger) {
-		pr_err("%s: get primary charger device failed\n", __func__);
-		return -ENODEV;
-	}
-
-	fgtimer_init(&info->otg_kthread_fgtimer, &info->pdev->dev, "otg_boost");
-	info->otg_kthread_fgtimer.callback = usbotg_fgtimer_func;
-	info->polling_interval = 30;
-	info->otg_boost_workq = create_singlethread_workqueue("otg_boost_workq");
-	INIT_WORK(&info->kick_work, usbotg_boost_kick_work);
-	g_info = info;
-	return 0;
-}
-
-static int usbotg_boost_manager_remove(struct platform_device *pdev)
-{
-	return 0;
-}
-
-static const struct of_device_id usbotg_boost_manager_of_match[] = {
-	{.compatible = "mediatek,usb_boost_manager"},
-	{},
-};
-MODULE_DEVICE_TABLE(of, usbotg_boost_manager_of_match);
-static struct platform_driver boost_manager_driver = {
-	.remove = usbotg_boost_manager_remove,
-	.probe = usbotg_boost_manager_probe,
-	.driver = {
-		   .name = "usb_boost_manager",
-		   .of_match_table = usbotg_boost_manager_of_match,
-		   },
-};
-#endif
-
-
 
 #ifdef CONFIG_USBIF_COMPLIANCE
-static int __init xhci_hcd_init(void)
-{
-#ifdef CONFIG_TCPC_CLASS
-	int ret;
-#endif /* CONFIG_TCPC_CLASS */
 
-	mtk_xhci_wakelock_init();
-	mtk_xhci_switch_init();
-#if CONFIG_MTK_GAUGE_VERSION == 30
-	primary_charger = get_charger_by_name("primary_chg");
-	if (!primary_charger) {
-		pr_err("%s: get primary charger device failed\n", __func__);
-		return -ENODEV;
-	}
-	platform_driver_register(&boost_manager_driver);
-#endif
-
-#ifdef CONFIG_TCPC_CLASS
-	mutex_init(&tcpc_otg_lock);
-	mutex_init(&tcpc_otg_pwr_lock);
-	otg_tcpc_workq = create_singlethread_workqueue("tcpc_otg_workq");
-	otg_tcpc_power_workq = create_singlethread_workqueue("tcpc_otg_power_workq");
-	INIT_WORK(&tcpc_otg_power_work, tcpc_otg_power_work_call);
-	INIT_WORK(&tcpc_otg_work, tcpc_otg_work_call);
-	otg_tcpc_dev = tcpc_dev_get_by_name("type_c_port0");
-	if (!otg_tcpc_dev) {
-		pr_err("%s get tcpc device type_c_port0 fail\n", __func__);
-		return -ENODEV;
-	}
-
-	otg_nb.notifier_call = otg_tcp_notifier_call;
-	ret = register_tcp_dev_notifier(otg_tcpc_dev, &otg_nb);
-	if (ret < 0) {
-		pr_err("%s register tcpc notifer fail\n", __func__);
-		return -EINVAL;
-	}
-#endif /* CONFIG_TCPC_CLASS */
-
-	return 0;
-}
-late_initcall(xhci_hcd_init);
-
-static void __exit xhci_hcd_cleanup(void)
-{
-}
-module_exit(xhci_hcd_cleanup);
 #else
 static int __init xhci_hcd_init(void)
 {
-#ifdef CONFIG_TCPC_CLASS
-	int ret;
-#endif /* CONFIG_TCPC_CLASS */
 	mtk_xhci_wakelock_init();
 	mtk_xhci_switch_init();
 
@@ -513,26 +472,6 @@ static int __init xhci_hcd_init(void)
 	platform_driver_register(&boost_manager_driver);
 #endif
 
-#ifdef CONFIG_TCPC_CLASS
-	mutex_init(&tcpc_otg_lock);
-	mutex_init(&tcpc_otg_pwr_lock);
-	otg_tcpc_workq = create_singlethread_workqueue("tcpc_otg_workq");
-	otg_tcpc_power_workq = create_singlethread_workqueue("tcpc_otg_power_workq");
-	INIT_WORK(&tcpc_otg_power_work, tcpc_otg_power_work_call);
-	INIT_WORK(&tcpc_otg_work, tcpc_otg_work_call);
-	otg_tcpc_dev = tcpc_dev_get_by_name("type_c_port0");
-	if (!otg_tcpc_dev) {
-		pr_err("%s get tcpc device type_c_port0 fail\n", __func__);
-		return -ENODEV;
-	}
-
-	otg_nb.notifier_call = otg_tcp_notifier_call;
-	ret = register_tcp_dev_notifier(otg_tcpc_dev, &otg_nb);
-	if (ret < 0) {
-		pr_err("%s register tcpc notifer fail\n", __func__);
-		return -EINVAL;
-	}
-#endif /* CONFIG_TCPC_CLASS */
 	return 0;
 }
 

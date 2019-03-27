@@ -20,11 +20,13 @@
 #include <linux/reboot.h>
 #include <mt-plat/mtk_reboot.h>
 #include <mt-plat/mtk_rtc.h>
+#include <asm/system_misc.h>
+#include <linux/console.h>
 
 static int wd_cpu_hot_plug_on_notify(int cpu);
 static int wd_cpu_hot_plug_off_notify(int cpu);
-static int spmwdt_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode);
-static int thermal_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode);
+static int spmwdt_mode_config(enum wk_req_en en, enum wk_req_mode mode);
+static int thermal_mode_config(enum wk_req_en en, enum wk_req_mode mode);
 static int confirm_hwreboot(void);
 static void resume_notify(void);
 static void suspend_notify(void);
@@ -39,9 +41,9 @@ static int wd_restart(enum wd_restart_type type);
 static int set_mode(enum ext_wdt_mode mode);
 static int wd_dram_reserved_mode(bool enabled);
 static int wd_mcu_cache_preserve(bool enabled);
-static int thermal_direct_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode);
-static int debug_key_eint_config(WD_REQ_CTL en, WD_REQ_MODE mode);
-static int debug_key_sysrst_config(WD_REQ_CTL en, WD_REQ_MODE mode);
+static int thermal_direct_mode_config(enum wk_req_en en, enum wk_req_mode mode);
+static int debug_key_eint_config(enum wk_req_en en, enum wk_req_mode mode);
+static int debug_key_sysrst_config(enum wk_req_en en, enum wk_req_mode mode);
 static int dfd_count_en(int value);
 static int dfd_thermal1_dis(int value);
 static int dfd_thermal2_dis(int value);
@@ -211,7 +213,7 @@ static int disable_all_wd(void)
 	return 0;
 }
 
-static int spmwdt_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int spmwdt_mode_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -237,7 +239,7 @@ static int spmwdt_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
 	return res;
 }
 
-static int thermal_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int thermal_mode_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -263,7 +265,7 @@ static int thermal_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
 	return res;
 }
 
-static int thermal_direct_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int thermal_direct_mode_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -317,7 +319,7 @@ static int wd_mcu_cache_preserve(bool enabled)
 	return ret;
 }
 
-static int debug_key_eint_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int debug_key_eint_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -338,7 +340,7 @@ static int debug_key_eint_config(WD_REQ_CTL en, WD_REQ_MODE mode)
 	return res;
 }
 
-static int debug_key_sysrst_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int debug_key_sysrst_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -456,7 +458,7 @@ static int disable_all_wd(void)
 	return 0;
 }
 
-static int spmwdt_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int spmwdt_mode_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -464,7 +466,7 @@ static int spmwdt_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
 	return res;
 }
 
-static int thermal_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int thermal_mode_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -488,7 +490,7 @@ static int wd_mcu_cache_preserve(bool enabled)
 	return res;
 }
 
-static int thermal_direct_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int thermal_direct_mode_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -515,7 +517,7 @@ static int thermal_direct_mode_config(WD_REQ_CTL en, WD_REQ_MODE mode)
 	return res;
 }
 
-static int debug_key_eint_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int debug_key_eint_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -536,7 +538,7 @@ static int debug_key_eint_config(WD_REQ_CTL en, WD_REQ_MODE mode)
 	return res;
 }
 
-static int debug_key_sysrst_config(WD_REQ_CTL en, WD_REQ_MODE mode)
+static int debug_key_sysrst_config(enum wk_req_en en, enum wk_req_mode mode)
 {
 	int res = 0;
 
@@ -634,6 +636,11 @@ void arch_reset(char mode, const char *cmd)
 	res = get_wd_api(&wd_api);
 	pr_alert("arch_reset: cmd = %s\n", cmd ? : "NULL");
 	dump_stack();
+	if (console_trylock())
+		pr_err("we can get console_sem\n");
+	else
+		pr_err("we cannot get console_sem\n");
+	console_unlock();
 	if (cmd && !strcmp(cmd, "charger")) {
 		/* do nothing */
 	} else if (cmd && !strcmp(cmd, "recovery")) {
@@ -645,7 +652,7 @@ void arch_reset(char mode, const char *cmd)
 		rtc_mark_kpoc();
 #endif
 	} else {
-		reboot = WD_SW_RESET_BYPASS_PWR_KEY;
+		reboot = 1;
 	}
 
 	if (res)
@@ -666,7 +673,8 @@ static int mtk_arch_reset_handle(struct notifier_block *this, unsigned long mode
 static int __init mtk_arch_reset_init(void)
 {
 	int ret;
-	pm_power_off = mt_power_off;
+
+	arm_pm_restart = NULL;
 	mtk_restart_handler.notifier_call = mtk_arch_reset_handle;
 	mtk_restart_handler.priority = 128;
 	pr_alert("\n register_restart_handler- 0x%p, Notify call: - 0x%p\n",

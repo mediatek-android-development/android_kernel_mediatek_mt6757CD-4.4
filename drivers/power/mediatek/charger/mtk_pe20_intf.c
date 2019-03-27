@@ -23,11 +23,6 @@
 
 static int pe20_set_mivr(struct charger_manager *pinfo, int uV);
 
-/* [lidebiao start] Add for FactoryKit test */
-int pe20_vbus = 0;
-bool is_set = false;
-/* [lidebiao end] */
-
 /* Unit of the following functions are uV, uA */
 static inline u32 pe20_get_vbus(void)
 {
@@ -49,18 +44,13 @@ int mtk_pe20_reset_ta_vchr(struct charger_manager *pinfo)
 	int ret = 0, chr_volt = 0;
 	u32 retry_cnt = 0;
 	struct mtk_pe20 *pe20 = &pinfo->pe2;
-	bool chg2_chip_enabled = false;
 
 	chr_debug("%s: starts\n", __func__);
 
 	/* Reset TA's charging voltage */
 	do {
-		if (pinfo->chg2_dev) {
-			charger_dev_is_chip_enabled(pinfo->chg2_dev,
-				&chg2_chip_enabled);
-			if (chg2_chip_enabled)
-				charger_dev_enable(pinfo->chg2_dev, false);
-		}
+		if (pinfo->chg2_dev)
+			charger_dev_enable(pinfo->chg2_dev, false);
 
 		ret = charger_dev_set_ta20_reset(pinfo->chg1_dev);
 		msleep(250);
@@ -108,6 +98,7 @@ static int pe20_enable_hw_vbus_ovp(struct charger_manager *pinfo, bool enable)
 static int pe20_enable_vbus_ovp(struct charger_manager *pinfo, bool enable)
 {
 	int ret = 0;
+	u32 sw_ovp = (enable ? V_CHARGER_MAX : 15000000);
 
 	/* Enable/Disable HW(PMIC) OVP */
 	ret = pe20_enable_hw_vbus_ovp(pinfo, enable);
@@ -116,28 +107,24 @@ static int pe20_enable_vbus_ovp(struct charger_manager *pinfo, bool enable)
 		return ret;
 	}
 
+	/* Enable/Disable SW OVP status */
+	pinfo->data.max_charger_voltage = sw_ovp;
+
 	return ret;
 }
 
 static int pe20_set_mivr(struct charger_manager *pinfo, int uV)
 {
 	int ret = 0;
-	bool chg2_chip_enabled = false;
-
 
 	ret = charger_dev_set_mivr(pinfo->chg1_dev, uV);
 	if (ret < 0)
 		pr_err("%s: failed, ret = %d\n", __func__, ret);
 
 	if (pinfo->chg2_dev) {
-		charger_dev_is_chip_enabled(pinfo->chg2_dev,
-			&chg2_chip_enabled);
-		if (chg2_chip_enabled) {
-			ret = charger_dev_set_mivr(pinfo->chg2_dev, uV);
-			if (ret < 0)
-				pr_info("%s: chg2 failed, ret = %d\n", __func__,
-					ret);
-		}
+		ret = charger_dev_set_mivr(pinfo->chg2_dev, uV);
+		if (ret < 0)
+			pr_notice("%s: chg2 failed, ret = %d\n", __func__, ret);
 	}
 
 	return ret;
@@ -208,7 +195,6 @@ static int __pe20_set_ta_vchr(struct charger_manager *pinfo, u32 chr_volt)
 {
 	int ret = 0;
 	struct mtk_pe20 *pe20 = &pinfo->pe2;
-	bool chg2_chip_enabled = false;
 
 	chr_debug("%s: starts\n", __func__);
 
@@ -218,12 +204,8 @@ static int __pe20_set_ta_vchr(struct charger_manager *pinfo, u32 chr_volt)
 		return -EIO;
 	}
 
-	if (pinfo->chg2_dev) {
-		charger_dev_is_chip_enabled(pinfo->chg2_dev,
-			&chg2_chip_enabled);
-		if (chg2_chip_enabled)
-			charger_dev_enable(pinfo->chg2_dev, false);
-	}
+	if (pinfo->chg2_dev)
+		charger_dev_enable(pinfo->chg2_dev, false);
 
 	ret = charger_dev_send_ta20_current_pattern(pinfo->chg1_dev, chr_volt);
 	if (ret < 0) {
@@ -361,7 +343,7 @@ static void mtk_pe20_check_cable_impedance(struct charger_manager *pinfo)
 	msleep(250);
 
 	if (cable_imp < pinfo->data.cable_imp_threshold) {
-		pe20->aicr_cable_imp = 2500000;	/* [lidebiao] Modify pep20 efficiency table */
+		pe20->aicr_cable_imp = 3200000;
 		pr_err("Normal cable\n");
 	} else {
 		pe20->aicr_cable_imp = 1000000;
@@ -523,9 +505,7 @@ int mtk_pe20_check_charger(struct charger_manager *pinfo)
 	 * SOC is not in range
 	 */
 	if (!pe20->to_check_chr_type ||
-	    /* [lidebiao start] Add pep20 check for non-std ta */
-	    (mt_get_charger_type() != STANDARD_CHARGER && mt_get_charger_type() != NONSTANDARD_CHARGER) ||
-	    /* [lidebiao end] */
+	    mt_get_charger_type() != STANDARD_CHARGER ||
 	    battery_get_bat_soc() < pinfo->data.ta_start_battery_soc ||
 	    battery_get_bat_soc() >= pinfo->data.ta_stop_battery_soc)
 		goto out;
@@ -636,21 +616,11 @@ int mtk_pe20_start_algorithm(struct charger_manager *pinfo)
 		if (i < pe20->idx && vbat > (pe20->profile[i].vbat + 30000))
 			continue;
 
-		/* [lidebiao start] Add for FactoryKit test */
-		if (is_set == true) {
-			if (pe20->vbus != pe20_vbus) {
-				tune = 1;
-				pe20->vbus = pe20_vbus;
-				pr_err("%s: pe20_vbus = %d, pe20->vbus = %d\n", __func__, pe20_vbus, pe20->vbus);
-			}
-		} else {
-			if (pe20->vbus != pe20->profile[i].vchr)
-				tune = 1;
+		if (pe20->vbus != pe20->profile[i].vchr)
+			tune = 1;
 
-			pe20->vbus = pe20->profile[i].vchr;
-			pe20->idx = i;
-		}
-		/* [lidebiao end] */
+		pe20->vbus = pe20->profile[i].vchr;
+		pe20->idx = i;
 
 		if (abs(vbus - pe20->vbus) >= 1000000)
 			tune = 2;
@@ -658,7 +628,7 @@ int mtk_pe20_start_algorithm(struct charger_manager *pinfo)
 		if (tune != 0) {
 			ret = pe20_set_ta_vchr(pinfo, pe20->vbus);
 			if (ret == 0)
-				pe20_set_mivr(pinfo, pe20->vbus - 1000000);	// [lidebiao] Modify MIVR for high voltage charging
+				pe20_set_mivr(pinfo, pe20->vbus - 500000);
 			else
 				pe20_leave(pinfo);
 		}
@@ -709,13 +679,6 @@ void mtk_pe20_set_is_cable_out_occur(struct charger_manager *pinfo, bool out)
 	pr_err("%s: out = %d\n", __func__, out);
 	mutex_lock(&pinfo->pe2.pmic_sync_lock);
 	pinfo->pe2.is_cable_out_occur = out;
-
-	/* [lidebiao start] Add for FactoryKit test */
-	if (out == true) {
-		is_set = false;
-	}
-	/* [lidebiao end] */
-
 	mutex_unlock(&pinfo->pe2.pmic_sync_lock);
 }
 
@@ -735,52 +698,6 @@ bool mtk_pe20_get_is_connect(struct charger_manager *pinfo)
 
 	return pinfo->pe2.is_connect;
 }
-
-/* [lidebiao start] Add for FactoryKit test */
-void mtk_pe20_set_for_vbus(int vbus, bool iset)
-{
-	pe20_vbus = vbus;
-	is_set = iset;
-
-	pr_err("%s: pe20_vbus = %d is_set = %d\n", __func__, pe20_vbus, is_set);
-}
-
-int mtk_pe20_set_to_vbus(struct charger_manager *pinfo, int setvbus)
-{
-	int ret = 0;
-	int vbus;
-	struct mtk_pe20 *pe20 = &pinfo->pe2;
-
-	if (mtk_pe20_get_is_connect(pinfo) == false)
-		return ret;
-
-	mutex_lock(&pe20->access_lock);
-	wake_lock(&pe20->suspend_lock);
-
-	vbus = pe20_get_vbus();
-	pr_info("%s vbus = %d\n", __func__, vbus);
-
-	ret = pe20_check_leave_status(pinfo);
-
-	if (pe20->vbus != setvbus) {
-		pe20->vbus = setvbus;
-		pr_err("%s: setvbus = %d, pe20->vbus = %d\n", __func__, setvbus, pe20->vbus);
-		ret = pe20_set_ta_vchr(pinfo, pe20->vbus);
-		pr_err("%s: ret = %d\n", __func__, ret);
-		if (ret == 0)
-			pe20_set_mivr(pinfo, pe20->vbus - 1000000);	// [lidebiao] Disable charging for Runin test
-		else
-			pe20_leave(pinfo);
-	}
-
-	vbus = pe20_get_vbus();
-	pr_info("%s vbus = %d\n", __func__, vbus);
-	wake_unlock(&pe20->suspend_lock);
-	mutex_unlock(&pe20->access_lock);
-
-	return ret;
-}
-/* [lidebiao end] */
 
 bool mtk_pe20_get_is_enable(struct charger_manager *pinfo)
 {

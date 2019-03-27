@@ -44,6 +44,7 @@ static int pe_enable_hw_vbus_ovp(struct charger_manager *pinfo, bool enable)
 static int pe_enable_vbus_ovp(struct charger_manager *pinfo, bool enable)
 {
 	int ret = 0;
+	u32 sw_ovp = (enable ? V_CHARGER_MAX : 15000000);
 
 	/* Enable/Disable HW(PMIC) OVP */
 	ret = pe_enable_hw_vbus_ovp(pinfo, enable);
@@ -51,6 +52,9 @@ static int pe_enable_vbus_ovp(struct charger_manager *pinfo, bool enable)
 		pr_err("%s: failed, ret = %d\n", __func__, ret);
 		return ret;
 	}
+
+	/* Enable/Disable SW OVP status */
+	pinfo->data.max_charger_voltage = sw_ovp;
 
 	return ret;
 }
@@ -68,21 +72,15 @@ static int pe_enable_charging(struct charger_manager *pinfo, bool enable)
 static int pe_set_mivr(struct charger_manager *pinfo, int uV)
 {
 	int ret = 0;
-	bool chg2_chip_enabled = false;
 
 	ret = charger_dev_set_mivr(pinfo->chg1_dev, uV);
 	if (ret < 0)
 		pr_err("%s: failed, ret = %d\n", __func__, ret);
 
 	if (pinfo->chg2_dev) {
-		charger_dev_is_chip_enabled(pinfo->chg2_dev,
-			&chg2_chip_enabled);
-		if (chg2_chip_enabled) {
-			ret = charger_dev_set_mivr(pinfo->chg2_dev, uV);
-			if (ret < 0)
-				pr_info("%s: chg2 failed, ret = %d\n", __func__,
-					ret);
-		}
+		ret = charger_dev_set_mivr(pinfo->chg2_dev, uV);
+		if (ret < 0)
+			pr_notice("%s: chg2 failed, ret = %d\n", __func__, ret);
 	}
 
 	return ret;
@@ -185,15 +183,10 @@ static int pe_increase_ta_vchr(struct charger_manager *pinfo, u32 vchr_target)
 	int ret = 0;
 	int vchr_before, vchr_after;
 	u32 retry_cnt = 0;
-	bool chg2_chip_enabled = false;
 
 	do {
-		if (pinfo->chg2_dev) {
-			charger_dev_is_chip_enabled(pinfo->chg2_dev,
-				&chg2_chip_enabled);
-			if (chg2_chip_enabled)
-				charger_dev_enable(pinfo->chg2_dev, false);
-		}
+		if (pinfo->chg2_dev)
+			charger_dev_enable(pinfo->chg2_dev, false);
 
 		vchr_before = pe_get_vbus();
 		__pe_increase_ta_vchr(pinfo);
@@ -313,7 +306,6 @@ int mtk_pe_reset_ta_vchr(struct charger_manager *pinfo)
 	u32 retry_cnt = 0;
 	struct mtk_pe *pe = &pinfo->pe;
 	int aicr;
-	bool chg2_chip_enabled = false;
 
 	chr_debug("%s: starts\n", __func__);
 
@@ -321,12 +313,8 @@ int mtk_pe_reset_ta_vchr(struct charger_manager *pinfo)
 	aicr = 70000;
 
 	do {
-		if (pinfo->chg2_dev) {
-			charger_dev_is_chip_enabled(pinfo->chg2_dev,
-				&chg2_chip_enabled);
-			if (chg2_chip_enabled)
-				charger_dev_enable(pinfo->chg2_dev, false);
-		}
+		if (pinfo->chg2_dev)
+			charger_dev_enable(pinfo->chg2_dev, false);
 
 		ret = charger_dev_set_input_current(pinfo->chg1_dev, aicr);
 

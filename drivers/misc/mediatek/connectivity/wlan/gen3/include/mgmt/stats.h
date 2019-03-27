@@ -97,7 +97,7 @@ VOID StatsEnvGetPktDelay(OUT PUINT_8 pucTxRxFlag, OUT PUINT_8 pucTxIpProto, OUT 
 	OUT PUINT_32 pu4TxDelayThreshold, OUT PUINT_8 pucRxIpProto,
 	OUT PUINT_16 pu2RxUdpPort, OUT PUINT_32 pu4RxDelayThreshold);
 
-VOID StatsRxPktInfoDisplay(P_SW_RFB_T prSwRfb);
+VOID StatsRxPktInfoDisplay(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb);
 
 VOID StatsTxPktInfoDisplay(UINT_8 *pPkt);
 

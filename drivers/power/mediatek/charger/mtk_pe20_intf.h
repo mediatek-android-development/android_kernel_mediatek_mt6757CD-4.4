@@ -15,10 +15,10 @@
 #define __MTK_PE20_INTF_H__
 
 /* pe 2.0*/
-typedef struct pe20_profile {
+struct pe20_profile {
 	unsigned int vbat;
 	unsigned int vchr;
-} pe20_profile_t, *p_pe20_profile_t;
+};
 
 struct mtk_pe20 {
 	struct mutex access_lock;
@@ -31,7 +31,7 @@ struct mtk_pe20 {
 	bool is_cable_out_occur; /* Plug out happened while detect PE+20 */
 	bool is_connect;
 	bool is_enabled;
-	pe20_profile_t profile[10];
+	struct pe20_profile profile[10];
 
 	int vbat_orig; /* Measured VBAT before cable impedance measurement */
 	int aicr_cable_imp; /* AICR to set after cable impedance measurement */
@@ -54,12 +54,6 @@ extern void mtk_pe20_set_is_cable_out_occur(struct charger_manager *pinfo, bool 
 extern bool mtk_pe20_get_to_check_chr_type(struct charger_manager *pinfo);
 extern bool mtk_pe20_get_is_connect(struct charger_manager *pinfo);
 extern bool mtk_pe20_get_is_enable(struct charger_manager *pinfo);
-
-/* [lidebiao start] Add for FactoryKit test */
-extern void mtk_pe20_set_for_vbus(int vbus, bool iset);
-extern int mtk_pe20_set_to_vbus(struct charger_manager *pinfo, int setvbus);
-extern bool mtk_pe20_is_connect(void);
-/* [lidebiao end] */
 
 #else /* NOT CONFIG_MTK_PUMP_EXPRESS_PLUS_20_SUPPORT */
 

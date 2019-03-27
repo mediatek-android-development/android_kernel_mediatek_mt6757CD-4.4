@@ -359,7 +359,7 @@ int _ioctl_prepare_present_fence(unsigned long arg)
 		pr_err("[FB Driver]: copy_to_user failed! line:%d\n", __LINE__);
 		ret = -EFAULT;
 	}
-	MMProfileLogEx(ddp_mmp_get_events()->present_fence_get, MMProfileFlagPulse,
+	mmprofile_log_ex(ddp_mmp_get_events()->present_fence_get, MMPROFILE_FLAG_PULSE,
 		       preset_fence_struct.present_fence_fd,
 		       preset_fence_struct.present_fence_index);
 	DISPPR_FENCE("P+/%s%d/L%d/id%d/fd%d\n",
@@ -593,56 +593,6 @@ static int _get_max_layer(unsigned int session_id)
 	return 0;
 }
 
-static int disp_validate_input_params(struct disp_input_config *cfg, int layer_num)
-{
-	if (cfg->layer_id >= layer_num) {
-		disp_aee_print("layer_id=%d > layer_num=%d\n", cfg->layer_id, layer_num);
-		return -1;
-	}
-	if (cfg->layer_enable) {
-		if ((cfg->src_fmt <= 0) || ((cfg->src_fmt >> 8) == 15) ||
-			((cfg->src_fmt >> 8) > (DISP_FORMAT_DIM >> 8))) {
-			disp_aee_print("layer_id=%d,src_fmt=0x%x is invalid color format\n",
-				cfg->layer_id, cfg->src_fmt);
-			return -1;
-		}
-	}
-	return 0;
-}
-
-static int disp_validate_output_params(struct disp_output_config *cfg)
-{
-	if ((cfg->fmt <= 0) || ((cfg->fmt >> 8) == 15) ||
-		((cfg->fmt >> 8) > (DISP_FORMAT_DIM >> 8))) {
-		disp_aee_print("output fmt=0x%x is invalid color format\n", cfg->fmt);
-		return -1;
-	}
-
-	return 0;
-}
-
-static int disp_validate_ioctl_params(struct disp_frame_cfg_t *cfg)
-{
-	int i;
-
-	/* TODO: check session_id */
-
-	if (cfg->input_layer_num > _get_max_layer(cfg->session_id)) {
-		disp_aee_print("sess:0x%x layer_num %d>%d\n", cfg->session_id,
-			cfg->input_layer_num, _get_max_layer(cfg->session_id));
-		return -1;
-	}
-
-	for (i = 0; i < cfg->input_layer_num; i++)
-		if (disp_validate_input_params(&cfg->input_cfg[i], cfg->input_layer_num) != 0)
-			return -1;
-
-	if (cfg->output_en && disp_validate_output_params(&cfg->output_cfg) != 0)
-		return -1;
-
-	return 0;
-}
-
 static int disp_input_get_dirty_roi(struct disp_frame_cfg_t *cfg)
 {
 	int i;
@@ -778,11 +728,6 @@ static int input_config_preprocess(struct disp_frame_cfg_t *cfg)
 					      cfg->input_cfg[i].next_buff_idx, mva_offset,
 					      cfg->input_cfg[i].frm_sequence);
 
-			if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_MEMORY) {
-				mtkfb_update_buf_ticket(session_id, layer_id, cfg->input_cfg[i].next_buff_idx,
-							get_ovl2mem_ticket());
-			}
-
 			disp_sync_put_cached_layer_info(session_id, layer_id, &cfg->input_cfg[i], dst_mva);
 
 			dump_input_cfg_info(&cfg->input_cfg[i], session_id, is_err);
@@ -852,10 +797,6 @@ static int output_config_preprocess(struct disp_frame_cfg_t *cfg)
 		 cfg->output_cfg.pitchUV, cfg->output_cfg.pa, dst_mva,
 		  get_ovl2mem_ticket(), cfg->output_cfg.security);
 
-	if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_MEMORY)
-		mtkfb_update_buf_ticket(session_id, disp_sync_get_output_timeline_id(),
-						cfg->output_cfg.buff_idx, get_ovl2mem_ticket());
-
 	mtkfb_update_buf_info(cfg->session_id,
 			      disp_sync_get_output_interface_timeline_id(),
 			      cfg->output_cfg.buff_idx, 0,
@@ -914,6 +855,7 @@ static int __frame_config(struct frame_queue_t *frame_node)
 		if (!present_fence) {
 			DISPERR("error to get prev_present_fence from fd %d\n",
 				frame_cfg->prev_present_fence_fd);
+			return -EINVAL;
 		}
 	}
 	frame_cfg->prev_present_fence_struct = present_fence;
@@ -947,10 +889,8 @@ static int _ioctl_frame_config(unsigned long arg)
 		return -EINVAL;
 	}
 
-	if (disp_validate_ioctl_params(frame_cfg) != 0)
-		return -EINVAL;
-	else
-		return __frame_config(frame_node);
+	return __frame_config(frame_node);
+
 }
 
 static int _ioctl_wait_all_jobs_done(unsigned long arg)
@@ -1116,10 +1056,10 @@ int _ioctl_set_vsync(unsigned long arg)
 	unsigned int fps = (unsigned int)arg;
 
 /*	if (copy_from_user(&fps, argp, sizeof(unsigned int))) {
-		DISPERR("[FB]: copy_from_user failed! line:%d\n", __LINE__);
-		return -EFAULT;
-	}
-*/
+ *		DISPERR("[FB]: copy_from_user failed! line:%d\n", __LINE__);
+ *		return -EFAULT;
+ *	}
+ */
 	ret = primary_display_force_set_vsync_fps(fps);
 	return ret;
 }

@@ -29,11 +29,11 @@
 /* #pragma GCC optimize ("O0") */
 #define MMP_DEVNAME "mmp"
 
-void MMProfileStart(int start)
+void mmprofile_start(int start)
 {
 }
 
-void MMProfileEnable(int enable)
+void mmprofile_enable(int enable)
 {
 }
 
@@ -107,6 +107,12 @@ long mmprofile_log_meta_bitmap(mmp_event event, mmp_log_type type, mmp_metadata_
 	return 0;
 }
 EXPORT_SYMBOL(mmprofile_log_meta_bitmap);
+
+long mmprofile_log_meta_yuv_bitmap(mmp_event event, mmp_log_type type, mmp_metadata_bitmap_t *pMetaData)
+{
+	return 0;
+}
+EXPORT_SYMBOL(mmprofile_log_meta_yuv_bitmap);
 
 /* Exposed APIs end */
 

@@ -17,14 +17,14 @@
 #undef VCPREFS_TAG
 #define VCPREFS_TAG "[VcoreFS]"
 
-#define vcorefs_crit(fmt, args...)	\
-	pr_crit(VCPREFS_TAG""fmt, ##args)
-#define vcorefs_err(fmt, args...)	\
-	pr_err(VCPREFS_TAG""fmt, ##args)
-#define vcorefs_warn(fmt, args...)	\
-	pr_warn(VCPREFS_TAG""fmt, ##args)
-#define vcorefs_debug(fmt, args...)	\
-	pr_debug(VCPREFS_TAG""fmt, ##args)
+#define vcorefs_crit vcorefs_info
+#define vcorefs_err vcorefs_info
+#define vcorefs_warn vcorefs_info
+#define vcorefs_crit vcorefs_info
+
+#define vcorefs_info(fmt, args...)	\
+	pr_notice(VCPREFS_TAG""fmt, ##args)
+
 
 /* Uses for DVFS Request */
 #define vcorefs_crit_mask(log_mask, kicker, fmt, args...)	\
@@ -60,6 +60,7 @@ enum dvfs_kicker {
 	KIR_CPU,
 	KIR_THERMAL,
 	KIR_FB,
+	KIR_FBT,
 	NUM_KICKER,
 
 	/* internal kicker */

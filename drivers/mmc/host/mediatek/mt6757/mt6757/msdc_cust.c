@@ -714,7 +714,7 @@ void msdc_dump_padctl_by_id(u32 id)
 #endif
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -781,7 +781,7 @@ void msdc_set_ies_by_id(u32 id, int set_ies)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -804,7 +804,7 @@ void msdc_set_smt_by_id(u32 id, int set_smt)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -850,7 +850,7 @@ void msdc_set_tdsel_by_id(u32 id, u32 flag, u32 value)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -897,7 +897,7 @@ void msdc_set_rdsel_by_id(u32 id, u32 flag, u32 value)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -920,7 +920,7 @@ void msdc_get_tdsel_by_id(u32 id, u32 *value)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -950,7 +950,7 @@ void msdc_get_rdsel_by_id(u32 id, u32 *value)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -975,7 +975,7 @@ void msdc_set_sr_by_id(u32 id, int clk, int cmd, int dat, int rst, int ds)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -1018,7 +1018,7 @@ void msdc_get_sr_by_id(u32 id, int *clk, int *cmd, int *dat, int *rst, int *ds)
 		break;
 
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -1055,7 +1055,7 @@ void msdc_set_driving_by_id(u32 id, struct msdc_hw_driving *driving)
 			driving->dat_drv);
 		break;
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -1092,7 +1092,7 @@ void msdc_get_driving_by_id(u32 id, struct msdc_hw_driving *driving)
 			driving->dat_drv);
 		break;
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 }
@@ -1184,7 +1184,7 @@ void msdc_pin_config_by_id(u32 id, u32 mode)
 		}
 		break;
 	default:
-		pr_err("[%s] invalid host->id = %d\n", __func__, id);
+		pr_info("[%s] invalid host->id = %d\n", __func__, id);
 		break;
 	}
 
@@ -1335,8 +1335,19 @@ int msdc_of_parse(struct mmc_host *mmc)
 	/* get cd_gpio and cd_level */
 	if (of_property_read_u32_index(np, "cd-gpios", 1, &cd_gpio) == 0) {
 		if (of_property_read_u8(np, "cd_level", &host->hw->cd_level))
-			pr_err("[msdc%d] cd_level isn't found in device tree\n",
+			pr_notice("[msdc%d] cd_level isn't found in device tree\n",
 				host->id);
+		if (of_property_read_u32(np, "cd-debounce", &cd_debounce) == 0) {
+			pr_notice("[msdc%d] get cd_debounce %d ms\n",
+					host->id, cd_debounce);
+
+			pr_notice("[msdc%d] set gpio %d debounce %d ms\n",
+					host->id, cd_gpio, cd_debounce);
+			ret = gpio_set_debounce(cd_gpio, cd_debounce * 1000);
+			if (ret < 0)
+				pr_notice("[msdc%d] set cd_debounce %d ms error\n",
+						host->id, cd_debounce);
+		}
 	}
 
 	msdc_get_register_settings(host, np);

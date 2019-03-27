@@ -260,17 +260,10 @@ static ssize_t show_pwr_ctrl(const struct pwr_ctrl *pwrctrl, char *buf)
 		pwrctrl->cpu_md_emi_dvfs_req_prot_dis);
 	p += sprintf(p, "dramc_spcmd_apsrc_req_mask_b = %u\n",
 		pwrctrl->dramc_spcmd_apsrc_req_mask_b);
-	p += sprintf(p, "emi_boost_dvfs_req_2_mask_b = %u\n",
-		pwrctrl->emi_boost_dvfs_req_2_mask_b);
-	p += sprintf(p, "emi_bw_dvfs_req_2_mask = %u\n",
-		pwrctrl->emi_bw_dvfs_req_2_mask);
 
 	/* SW_CRTL_EVENT */
 	p += sprintf(p, "sw_ctrl_event_on = %u\n",
 		pwrctrl->sw_ctrl_event_on);
-	/* SW_CRTL_EVENT_2 */
-	p += sprintf(p, "sw_ctrl_event_on_2 = %u\n",
-		pwrctrl->sw_ctrl_event_on_2);
 
 	/* SPM_SW_RSV_6 */
 	p += sprintf(p, "md_srcclkena_0_2d_dvfs_req_mask_b = %u\n",
@@ -368,9 +361,6 @@ static ssize_t show_pwr_ctrl(const struct pwr_ctrl *pwrctrl, char *buf)
 	p += sprintf(p, "disp_req_mask_b = %u\n", pwrctrl->disp_req_mask_b);
 	p += sprintf(p, "disp1_req_mask_b = %u\n", pwrctrl->disp1_req_mask_b);
 	p += sprintf(p, "mfg_req_mask_b = %u\n", pwrctrl->mfg_req_mask_b);
-#if defined(CONFIG_ARCH_MT6797)
-	p += sprintf(p, "disp_od_req_mask_b = %u\n", pwrctrl->disp_od_req_mask_b);
-#endif
 
 	p += sprintf(p, "param1 = 0x%x\n", pwrctrl->param1);
 	p += sprintf(p, "param2 = 0x%x\n", pwrctrl->param2);
@@ -426,11 +416,6 @@ static ssize_t sodi3_ctrl_show(struct kobject *kobj, struct kobj_attribute *attr
 static ssize_t sodi_ctrl_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
 {
 	return show_pwr_ctrl(__spm_sodi.pwrctrl, buf);
-}
-
-static ssize_t mcsodi_ctrl_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
-{
-	return show_pwr_ctrl(__spm_mcsodi.pwrctrl, buf);
 }
 
 static ssize_t mcdi_ctrl_show(struct kobject *kobj, struct kobj_attribute *attr, char *buf)
@@ -665,9 +650,6 @@ static ssize_t store_pwr_ctrl(struct pwr_ctrl *pwrctrl, const char *buf, size_t 
 	/* SW_CRTL_EVENT */
 	else if (!strcmp(cmd, "sw_ctrl_event_on"))
 		pwrctrl->sw_ctrl_event_on = val;
-	/* SW_CRTL_EVENT_2 */
-	else if (!strcmp(cmd, "sw_ctrl_event_on_2"))
-		pwrctrl->sw_ctrl_event_on_2 = val;
 
 	/* SPM_SW_RSV_6 */
 	else if (!strcmp(cmd, "md_srcclkena_0_2d_dvfs_req_mask_b"))
@@ -891,11 +873,6 @@ static ssize_t store_pwr_ctrl(struct pwr_ctrl *pwrctrl, const char *buf, size_t 
 		pwrctrl->emi_boost_dvfs_req_mask_b = val;
 	else if (!strcmp(cmd, "cpu_md_emi_dvfs_req_prot_dis"))
 		pwrctrl->cpu_md_emi_dvfs_req_prot_dis = val;
-#if defined(CONFIG_ARCH_MT6797)
-	else if (!strcmp(cmd, "disp_od_req_mask_b"))
-		pwrctrl->disp_od_req_mask_b = val;
-#endif
-
 	else if (!strcmp(cmd, "conn_mask_b"))
 		pwrctrl->conn_mask_b = val;
 
@@ -953,12 +930,6 @@ static ssize_t sodi_ctrl_store(struct kobject *kobj, struct kobj_attribute *attr
 			       const char *buf, size_t count)
 {
 	return store_pwr_ctrl(__spm_sodi.pwrctrl, buf, count);
-}
-
-static ssize_t mcsodi_ctrl_store(struct kobject *kobj, struct kobj_attribute *attr,
-			       const char *buf, size_t count)
-{
-	return store_pwr_ctrl(__spm_mcsodi.pwrctrl, buf, count);
 }
 
 static ssize_t mcdi_ctrl_store(struct kobject *kobj, struct kobj_attribute *attr,
@@ -1117,7 +1088,6 @@ DEFINE_ATTR_RW(dpidle_ctrl);
 #if !defined(CONFIG_FPGA_EARLY_PORTING)
 DEFINE_ATTR_RW(sodi3_ctrl);
 DEFINE_ATTR_RW(sodi_ctrl);
-DEFINE_ATTR_RW(mcsodi_ctrl);
 DEFINE_ATTR_RW(mcdi_ctrl);
 #endif
 DEFINE_ATTR_RW(talking_ctrl);
@@ -1144,7 +1114,6 @@ static struct attribute *spm_attrs[] = {
 #if !defined(CONFIG_FPGA_EARLY_PORTING)
 	__ATTR_OF(sodi3_ctrl),
 	__ATTR_OF(sodi_ctrl),
-	__ATTR_OF(mcsodi_ctrl),
 	__ATTR_OF(mcdi_ctrl),
 #endif
 	__ATTR_OF(talking_ctrl),

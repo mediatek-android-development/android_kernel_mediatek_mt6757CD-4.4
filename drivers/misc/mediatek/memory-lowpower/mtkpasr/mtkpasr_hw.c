@@ -53,8 +53,14 @@ static unsigned long max_segment_base;
 static unsigned long channel_segnum;		/* Effective segment number per channel (related to max_segment_base) */
 static unsigned int rank_count;
 static unsigned long mtkpasr_segment_bits;	/* 0x0000AABB. BB for rank0, AA for rank1. */
+static unsigned long fullch_segment_bitmask;	/* Bitmask of DRAM segments in a channel */
 static unsigned long total_pfns;		/* Total DRAM size in PFN */
 
+/* Query bitmask of DRAM segments in a channel */
+unsigned long query_channel_segment_bits(void)
+{
+	return fullch_segment_bitmask;
+}
 
 /* Virtual <-> Kernel PFN helpers */
 #define MAX_RANK_PFN	(0x1FFFFF)
@@ -108,6 +114,32 @@ static int __init check_dram_configuration(void)
 	/* Acquire basic DRAM setting */
 	acquire_dram_setting(&pasrdpd);
 
+#ifdef MTK_PASR_FIX_DRAM_CONFIGURATION
+	if (acquire_dram_setting == 0) {
+		/* Phone - dual channel */
+		pasrdpd.channel_nr = 2;
+
+		pasrdpd.channel[0].rank[0].valid_rank = true;
+		pasrdpd.channel[0].rank[0].rank_size = 8;
+		pasrdpd.channel[0].rank[0].segment_nr = 8;
+
+		pasrdpd.channel[0].rank[1].valid_rank = true;
+		pasrdpd.channel[0].rank[1].rank_size = 8;
+		pasrdpd.channel[0].rank[1].segment_nr = 8;
+
+		pasrdpd.channel[1].rank[0].valid_rank = true;
+		pasrdpd.channel[1].rank[0].rank_size = 8;
+		pasrdpd.channel[1].rank[0].segment_nr = 8;
+
+		pasrdpd.channel[1].rank[1].valid_rank = true;
+		pasrdpd.channel[1].rank[1].rank_size = 8;
+		pasrdpd.channel[1].rank[1].segment_nr = 8;
+
+		pasrdpd.channel[2].valid_ch = false;
+		pasrdpd.channel[3].valid_ch = false;
+	}
+#endif
+
 	/* Parse DRAM setting */
 	channel_count = pasrdpd.channel_nr;
 	for (rank = 0; rank < MAX_RANKS; ++rank) {
@@ -140,6 +172,7 @@ static int __init check_dram_configuration(void)
 			}
 			channel_segments <<= 1;
 		}
+
 		/* Have we found a valid rank */
 		if (check_rank_size != 0 && check_segment_num != 0) {
 			rank_info[rank].start_pfn = virt_to_kernel_pfn(start_pfn);
@@ -158,8 +191,13 @@ static int __init check_dram_configuration(void)
 			rank_info[rank].bank_pfn_size = 0;
 			rank_info[rank].channel_segments = 0x0;
 		}
+
 		/* Update total_pfns */
 		total_pfns += rank_pfn;
+
+		/* Update DRAM segment bitmask of a channel */
+		fullch_segment_bitmask =
+			(fullch_segment_bitmask << SEGMENTS_PER_RANK) |	((1 << check_segment_num) - 1);
 	}
 
 	return 0;

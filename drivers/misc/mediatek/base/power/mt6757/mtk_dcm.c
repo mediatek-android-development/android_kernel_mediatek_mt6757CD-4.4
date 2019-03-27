@@ -22,7 +22,7 @@
 #include <linux/ratelimit.h>
 #include <mt-plat/mtk_io.h>
 #include <mt-plat/sync_write.h>
-#include <mach/mtk_secure_api.h>
+#include <mt-plat/mtk_secure_api.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <mtk_dramc.h>
@@ -114,6 +114,69 @@ unsigned long dcm_cci_phys_base;
 #if defined(__KERNEL__)
 static DEFINE_MUTEX(dcm_lock);
 #endif
+
+enum {
+	DCM_NOT_INIT = 0,
+	DCM_INIT_SUCCESS = 1,
+	DCM_INIT_FAIL = 2,
+};
+
+enum {
+	ARMCORE_DCM_OFF = DCM_OFF,
+	ARMCORE_DCM_MODE1 = DCM_ON,
+	ARMCORE_DCM_MODE2 = DCM_ON+1,
+};
+
+enum {
+	INFRA_DCM_OFF = DCM_OFF,
+	INFRA_DCM_ON = DCM_ON,
+};
+
+enum {
+	PERI_DCM_OFF = DCM_OFF,
+	PERI_DCM_ON = DCM_ON,
+};
+
+enum {
+	MCUSYS_DCM_OFF = DCM_OFF,
+	MCUSYS_DCM_ON = DCM_ON,
+};
+
+enum {
+	DRAMC_AO_DCM_OFF = DCM_OFF,
+	DRAMC_AO_DCM_ON = DCM_ON,
+};
+
+enum {
+	DDRPHY_DCM_OFF = DCM_OFF,
+	DDRPHY_DCM_ON = DCM_ON,
+};
+
+enum {
+	EMI_DCM_OFF = DCM_OFF,
+	EMI_DCM_ON = DCM_ON,
+};
+
+enum {
+	STALL_DCM_OFF = DCM_OFF,
+	STALL_DCM_ON = DCM_ON,
+};
+
+enum {
+	GIC_SYNC_DCM_OFF = DCM_OFF,
+	GIC_SYNC_DCM_ON = DCM_ON,
+};
+
+enum {
+	LAST_CORE_DCM_OFF = DCM_OFF,
+	LAST_CORE_DCM_ON = DCM_ON,
+};
+
+enum {
+	RGU_DCM_OFF = DCM_OFF,
+	RGU_DCM_ON = DCM_ON,
+};
+
 static short dcm_initiated = DCM_NOT_INIT;
 static short dcm_debug;
 static unsigned int all_dcm_type = (ARMCORE_DCM_TYPE | MCUSYS_DCM_TYPE | INFRA_DCM_TYPE |
@@ -130,7 +193,7 @@ static unsigned int enhance_dcm_type;
 typedef int (*DCM_FUNC)(int);
 typedef void (*DCM_PRESET_FUNC)(void);
 
-int dcm_armcore(ENUM_ARMCORE_DCM mode)
+int dcm_armcore(int mode)
 {
 	if (mode == ARMCORE_DCM_MODE1) {
 		dcm_infracfg_ao_mcu_armpll_bus_mode1(mode);
@@ -148,7 +211,7 @@ int dcm_armcore(ENUM_ARMCORE_DCM mode)
 	return 0;
 }
 
-int dcm_infra(ENUM_INFRA_DCM on)
+int dcm_infra(int on)
 {
 	/* ASSERT_INFRA_DCMCTL(); */
 
@@ -194,7 +257,7 @@ int dcm_infra_rate(unsigned int fsel, unsigned int sfsel)
 	return 0;
 }
 
-int dcm_peri(ENUM_PERI_DCM on)
+int dcm_peri(int on)
 {
 	dcm_infracfg_ao_dcm_peri_bus(on);
 	return 0;
@@ -236,7 +299,7 @@ int dcm_peri_rate(unsigned int fsel, unsigned int sfsel)
 	return 0;
 }
 
-int dcm_mcusys(ENUM_MCUSYS_DCM on)
+int dcm_mcusys(int on)
 {
 	/* Bypass for ICE cannot attach issue */
 	/* dcm_mp0_cpucfg_dcm_mcu_bus(on); */
@@ -250,17 +313,17 @@ int dcm_mcusys(ENUM_MCUSYS_DCM on)
 	return 0;
 }
 
-int dcm_mcusys_cci_stall(ENUM_MCUSYS_DCM on)
+int dcm_mcusys_cci_stall(int on)
 {
 	return 0;
 }
 
-int dcm_mcusys_sync_dcm(ENUM_MCUSYS_DCM on)
+int dcm_mcusys_sync_dcm(int on)
 {
 	return 0;
 }
 
-int dcm_dramc_ao(ENUM_DRAMC_AO_DCM on)
+int dcm_dramc_ao(int on)
 {
 	dcm_dramc_ch0_top1_dcm_dramc_ch0_pd_ctrl(on);
 	dcm_chn0_emi_dcm_emi_group(on);
@@ -269,20 +332,20 @@ int dcm_dramc_ao(ENUM_DRAMC_AO_DCM on)
 	return 0;
 }
 
-int dcm_ddrphy(ENUM_DDRPHY_DCM on)
+int dcm_ddrphy(int on)
 {
 	dcm_dramc_ch0_top0_ddrphy(on);
 	dcm_dramc_ch1_top0_ddrphy(on);
 	return 0;
 }
 
-int dcm_emi(ENUM_EMI_DCM on)
+int dcm_emi(int on)
 {
 	dcm_emi_dcm_emi_group(on);
 	return 0;
 }
 
-int dcm_stall_enhance(ENUM_STALL_DCM on)
+int dcm_stall_enhance(int on)
 {
 	dcm_mcu_misccfg_stall_dcm_enhance(on);
 	return 0;
@@ -296,27 +359,27 @@ int dcm_stall_preset(void)
 	return 0;
 }
 
-int dcm_stall(ENUM_STALL_DCM on)
+int dcm_stall(int on)
 {
 	dcm_mcu_misccfg_mp0_stall_dcm(on);
 	dcm_mcu_misccfg_mp1_stall_dcm(on);
 	return 0;
 }
 
-int dcm_gic_sync(ENUM_GIC_SYNC_DCM on)
+int dcm_gic_sync(int on)
 {
 	dcm_mcu_misccfg_gic_sync_dcm(on);
 	return 0;
 }
 
-int dcm_last_core(ENUM_LAST_CORE_DCM on)
+int dcm_last_core(int on)
 {
 	dcm_mcu_misccfg_mp0_last_core_dcm(on);
 	dcm_mcu_misccfg_mp1_last_core_dcm(on);
 	return 0;
 }
 
-int dcm_rgu(ENUM_RGU_DCM on)
+int dcm_rgu(int on)
 {
 	dcm_mcu_misccfg_mp0_rgu_dcm(on);
 	dcm_mcu_misccfg_mp1_rgu_dcm(on);
@@ -324,7 +387,7 @@ int dcm_rgu(ENUM_RGU_DCM on)
 }
 
 /*****************************************************/
-typedef struct _dcm {
+struct DCM {
 	int current_state;
 	int saved_state;
 	int disable_refcnt;
@@ -333,9 +396,9 @@ typedef struct _dcm {
 	DCM_PRESET_FUNC preset_func;
 	int typeid;
 	char *name;
-} DCM;
+};
 
-static DCM dcm_array[NR_DCM_TYPE] = {
+static struct DCM dcm_array[NR_DCM_TYPE] = {
 	{
 	 .typeid = ARMCORE_DCM_TYPE,
 	 .name = "ARMCORE_DCM",
@@ -444,7 +507,7 @@ static DCM dcm_array[NR_DCM_TYPE] = {
 void dcm_set_default(unsigned int type)
 {
 	int i;
-	DCM *dcm;
+	struct DCM *dcm;
 
 #ifndef ENABLE_DCM_IN_LK
 #ifdef USING_PR_LOG
@@ -490,7 +553,7 @@ void dcm_set_default(unsigned int type)
 void dcm_set_state(unsigned int type, int state)
 {
 	int i;
-	DCM *dcm;
+	struct DCM *dcm;
 	unsigned int init_dcm_type_pre = init_dcm_type;
 
 #ifdef USING_PR_LOG
@@ -537,7 +600,7 @@ void dcm_set_state(unsigned int type, int state)
 void dcm_disable(unsigned int type)
 {
 	int i;
-	DCM *dcm;
+	struct DCM *dcm;
 	unsigned int init_dcm_type_pre = init_dcm_type;
 
 #ifdef USING_PR_LOG
@@ -579,7 +642,7 @@ void dcm_disable(unsigned int type)
 void dcm_restore(unsigned int type)
 {
 	int i;
-	DCM *dcm;
+	struct DCM *dcm;
 	unsigned int init_dcm_type_pre = init_dcm_type;
 
 #ifdef USING_PR_LOG
@@ -627,7 +690,7 @@ void dcm_restore(unsigned int type)
 void dcm_dump_state(int type)
 {
 	int i;
-	DCM *dcm;
+	struct DCM *dcm;
 
 	dcm_info("\n******** dcm dump state *********\n");
 	for (i = 0, dcm = &dcm_array[0]; i < NR_DCM_TYPE; i++, dcm++) {
@@ -694,7 +757,7 @@ static ssize_t dcm_state_show(struct kobject *kobj, struct kobj_attribute *attr,
 {
 	int len = 0;
 	int i;
-	DCM *dcm;
+	struct DCM *dcm;
 
 	if (dcm_initiated != DCM_INIT_SUCCESS) {
 		dcm_warn_limit("error: due to dcm init fail\n");
@@ -1056,7 +1119,7 @@ int mtk_dcm_init(void)
 		if ((feature >> 22) & 0x1)
 			enhance_dcm_type |= STALL_DCM_TYPE;
 
-		if ((segment == 0x1) && ((feature >> 23) & 0x1)) {
+		if ((segment == 0x1) && (feature >> 23) & 0x1) {
 			init_dcm_type |= LAST_CORE_DCM_TYPE;
 			enhance_dcm_type |= LAST_CORE_DCM_TYPE;
 		}

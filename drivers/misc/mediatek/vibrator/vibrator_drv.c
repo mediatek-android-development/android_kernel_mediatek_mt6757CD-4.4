@@ -27,8 +27,6 @@
 #include <linux/types.h>
 #include <linux/device.h>
 #include <linux/workqueue.h>
-/* [yanlin] Add waklock */
-#include <linux/wakelock.h>
 
 #include "timed_output.h"
 
@@ -135,9 +133,6 @@ static int vibrator_get_time(struct timed_output_dev *dev)
 		return 0;
 }
 
-/* [yanlin] Add wakelock */
-static struct wake_lock vibe_wlock;
-
 static void vibrator_enable(struct timed_output_dev *dev, int value)
 {
 	unsigned long flags;
@@ -145,9 +140,6 @@ static void vibrator_enable(struct timed_output_dev *dev, int value)
 #if 1
 	struct vibrator_hw *hw = mt_get_cust_vibrator_hw();
 #endif
-
-	/* [yanlin] Add wakelock */
-	wake_lock_timeout(&vibe_wlock, msecs_to_jiffies(1000));
 
 	spin_lock_irqsave(&vibe_lock, flags);
 	if (hrtimer_cancel(&vibe_timer))
@@ -191,8 +183,15 @@ static struct timed_output_dev mtk_vibrator = {
 	.enable = vibrator_enable,
 };
 
+static const struct of_device_id vibr_of_ids[] = {
+	{ .compatible = "mediatek,vibrator", },
+	{}
+};
+
 static int vib_probe(struct platform_device *pdev)
 {
+	init_cust_vibrator_dtsi(pdev);
+	vibr_power_set();
 	return 0;
 }
 
@@ -226,8 +225,11 @@ static struct platform_driver vibrator_driver = {
 	.remove = vib_remove,
 	.shutdown = vib_shutdown,
 	.driver = {
-		   .name = VIB_DEVICE,
-		   .owner = THIS_MODULE,
+			.name = VIB_DEVICE,
+			.owner = THIS_MODULE,
+#ifdef CONFIG_OF
+			.of_match_table = vibr_of_ids,
+#endif
 		   },
 };
 
@@ -277,7 +279,6 @@ static int vib_mod_init(void)
 	/* set vibr voltage if needs.  Before MT6320 vibr default voltage=2.8v,
 	 * but in MT6323 vibr default voltage=1.2v
 	 */
-	vibr_power_set();
 	ret = platform_device_register(&vibrator_device);
 	if (ret != 0) {
 		VIB_DEBUG("Unable to register vibrator device (%d)\n", ret);
@@ -305,9 +306,6 @@ static int vib_mod_init(void)
 		VIB_DEBUG("Unable to register vibrator driver (%d)\n", ret);
 		return ret;
 	}
-
-	/* [yanlin] Add wakelock */
-	wake_lock_init(&vibe_wlock, WAKE_LOCK_SUSPEND, "vibe_wakelock");
 
 	ret = device_create_file(mtk_vibrator.dev, &dev_attr_vibr_on);
 	if (ret)
@@ -341,9 +339,6 @@ static void vib_mod_exit(void)
 		  VERSION);
 	if (vibrator_queue)
 		destroy_workqueue(vibrator_queue);
-	/* [yanlin] Add wakelock */
-	wake_lock_destroy(&vibe_wlock);
-
 	VIB_DEBUG("vib_mod_exit Done\n");
 }
 

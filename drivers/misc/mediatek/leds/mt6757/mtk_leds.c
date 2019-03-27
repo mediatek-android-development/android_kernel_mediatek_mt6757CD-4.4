@@ -66,15 +66,6 @@ void mt_pwm_disable(u32 pwm_no, u8 pmic_pad)
 static DEFINE_MUTEX(leds_mutex);
 static DEFINE_MUTEX(leds_pmic_mutex);
 
-/* [yanlin start] Change TP908 Min backlight PWM to 9/1023(0.88%) 10/1023(0.978%) */
-#ifdef CONFIG_TPLINK_PRODUCT_TP908
-#define TP908_MIN_BL_LEVEL_255	2
-#define TP908_MIN_BL_LEVEL_1023	9
-#define TP908_MIN_BL_LEVEL_AAL	((((1 << MT_LED_INTERNAL_LEVEL_BIT_CNT) - 1) * TP908_MIN_BL_LEVEL_255 + 127) / 255)
-#define MTK_ULTRA_DIMMING_SUPPORT
-#endif
-/* [yanlin end] */
-
 /****************************************************************************
  * variables
  ***************************************************************************/
@@ -106,10 +97,9 @@ struct cust_mt65xx_led *pled_dtsi;
  * DEBUG MACROS
  ***************************************************************************/
 static int debug_enable_led_hal = 1;
-/* [yanlin] Change pr_debug to pr_err */
 #define LEDS_DEBUG(format, args...) do { \
 	if (debug_enable_led_hal) {	\
-		pr_err("[LED]"format, ##args);\
+		pr_debug("[LED]"format, ##args);\
 	} \
 } while (0)
 
@@ -219,8 +209,8 @@ struct cust_mt65xx_led *get_cust_led_dtsi(void)
 		}
 
 		for (i = 0; i < MT65XX_LED_TYPE_TOTAL; i++) {
-
 			char node_name[32] = "mediatek,";
+
 			if (strlen(node_name) + strlen(leds_name[i]) + 1 > sizeof(node_name)) {
 				LEDS_DEBUG("buffer for %s%s not enough\n", node_name, leds_name[i]);
 				pled_dtsi[i].mode = 0;
@@ -963,15 +953,6 @@ int mt_mt65xx_led_set_cust(struct cust_mt65xx_led *cust, int level)
 	unsigned int BacklightLevelSupport =
 	    Cust_GetBacklightLevelSupport_byPWM();
 
-	/* [yanlin start] Change TP908 Min backlight PWM to 10/1023 */
-#ifdef CONFIG_TPLINK_PRODUCT_TP908
-	if ((level < TP908_MIN_BL_LEVEL_1023) && (level >= 1)
-			&& (strcmp(cust->name, "lcd-backlight") == 0) ) {
-		level = TP908_MIN_BL_LEVEL_1023;
-	}
-#endif
-	/* [yanlin end] */
-
 	switch (cust->mode) {
 
 	case MT65XX_LED_MODE_PWM:
@@ -1096,22 +1077,6 @@ void mt_mt65xx_led_set(struct led_classdev *led_cdev, enum led_brightness level)
 				    255;
 			}
 			backlight_debug_log(led_data->level, level);
-			/* [yanlin start] Modify min backlight PWM */
-#if defined(CONFIG_TPLINK_PRODUCT_TP908) && !defined(MTK_ULTRA_DIMMING_SUPPORT)
-			if (level != TP908_MIN_BL_LEVEL_255) {
-				disp_pq_notify_backlight_changed((((1 <<
-									 MT_LED_INTERNAL_LEVEL_BIT_CNT)
-									- 1) * level +
-								   127) / 255);
-				disp_aal_notify_backlight_changed((((1 <<
-									 MT_LED_INTERNAL_LEVEL_BIT_CNT)
-									- 1) * level +
-								   127) / 255);
-			} else {
-				disp_pq_notify_backlight_changed(TP908_MIN_BL_LEVEL_1023);
-				disp_aal_notify_backlight_changed(TP908_MIN_BL_LEVEL_1023);
-			}
-#else
 			disp_pq_notify_backlight_changed((((1 <<
 							     MT_LED_INTERNAL_LEVEL_BIT_CNT)
 							    - 1) * level +
@@ -1120,8 +1085,6 @@ void mt_mt65xx_led_set(struct led_classdev *led_cdev, enum led_brightness level)
 							     MT_LED_INTERNAL_LEVEL_BIT_CNT)
 							    - 1) * level +
 							   127) / 255);
-#endif
-			/* [yanlin end] */
 		}
 	}
 #else

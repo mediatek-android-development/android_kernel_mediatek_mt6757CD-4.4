@@ -100,7 +100,6 @@ static struct i2c_board_info kd_eeprom_dev __initdata = { I2C_BOARD_INFO("CAM_CA
 /* 81 is used for V4L driver */
 static dev_t g_EEPROMdevno = MKDEV(EEPROM_DEV_MAJOR_NUMBER, 0);
 static struct cdev *g_pEEPROM_CharDrv;
-
 static struct class *EEPROM_class;
 static atomic_t g_EEPROMatomic;
 /* static DEFINE_SPINLOCK(kdeeprom_drv_lock); */
@@ -111,7 +110,7 @@ static atomic_t g_EEPROMatomic;
 #define Read_NUMofEEPROM 2
 static struct i2c_client *g_pstI2Cclient;
 
-/*static DEFINE_SPINLOCK(g_EEPROMLock);  for SMP */
+static DEFINE_SPINLOCK(g_EEPROMLock); /* for SMP */
 
 
 /*******************************************************************************
@@ -169,11 +168,13 @@ static int iReadEEPROM(u16 a_u2Addr, u32 ui4_length, u8 *a_puBuff)
 		EEPROMDB("[GT24c32a] exceed I2c-mt65xx.c 8 bytes limitation\n");
 		return -1;
 	}
-#ifdef CONFIG_MTK_I2C_EXTENSION
+
 	spin_lock(&g_EEPROMLock); /* for SMP */
+#define I2C_MASK_FLAG           (0x00ff)
+#define I2C_WR_FLAG             (0x1000)
 	g_pstI2Cclient->addr = g_pstI2Cclient->addr & (I2C_MASK_FLAG | I2C_WR_FLAG);
 	spin_unlock(&g_EEPROMLock); /* for SMP */
-#endif
+
 	/* EEPROMDB("[EEPROM] i2c_master_send\n"); */
 	i4RetValue = i2c_master_send(g_pstI2Cclient, puReadCmd, 2);
 	if (i4RetValue != 2) {
@@ -187,11 +188,11 @@ static int iReadEEPROM(u16 a_u2Addr, u32 ui4_length, u8 *a_puBuff)
 		EEPROMDB("[GT24c32a] I2C read data failed!!\n");
 		return -1;
 	}
-#ifdef CONFIG_MTK_I2C_EXTENSION
+
 	spin_lock(&g_EEPROMLock); /* for SMP */
 	g_pstI2Cclient->addr = g_pstI2Cclient->addr & I2C_MASK_FLAG;
 	spin_unlock(&g_EEPROMLock); /* for SMP */
-#endif
+
 	/* EEPROMDB("[GT24c32a] iReadEEPROM done!!\n"); */
 	return 0;
 }

@@ -1623,6 +1623,10 @@ static int read_normal_summaries(struct f2fs_sb_info *sbi, int type)
 
 static int restore_curseg_summaries(struct f2fs_sb_info *sbi)
 {
+	struct f2fs_summary_block *s_sits =
+		CURSEG_I(sbi, CURSEG_COLD_DATA)->sum_blk;
+	struct f2fs_summary_block *s_nats =
+		CURSEG_I(sbi, CURSEG_HOT_DATA)->sum_blk;
 	int type = CURSEG_HOT_DATA;
 	int err;
 
@@ -1648,6 +1652,11 @@ static int restore_curseg_summaries(struct f2fs_sb_info *sbi)
 		if (err)
 			return err;
 	}
+
+	/* sanity check for summary blocks */
+	if (nats_in_cursum(s_nats) > NAT_JOURNAL_ENTRIES ||
+			sits_in_cursum(s_sits) > SIT_JOURNAL_ENTRIES)
+		return -EINVAL;
 
 	return 0;
 }
@@ -2307,7 +2316,7 @@ int build_segment_manager(struct f2fs_sb_info *sbi)
 
 	INIT_LIST_HEAD(&sm_info->discard_list);
 	sm_info->nr_discards = 0;
-	sm_info->max_discards = MAIN_SEGS(sbi) << sbi->log_blocks_per_seg;
+	sm_info->max_discards = 0;
 
 	sm_info->trim_sections = DEF_BATCHED_TRIM_SECTIONS;
 

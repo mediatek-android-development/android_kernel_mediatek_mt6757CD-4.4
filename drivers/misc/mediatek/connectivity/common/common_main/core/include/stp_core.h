@@ -56,7 +56,7 @@ extern UINT32 gStpDbgLvl;
 
 #define STP_DBG_FUNC(fmt, arg...)    do {\
 	if (gStpDbgLvl >= STP_LOG_DBG)\
-		osal_dbg_print(PFX "%s: " fmt, __func__, ##arg);\
+		osal_warn_print(PFX "%s: " fmt, __func__, ##arg);\
 } while (0)
 #define STP_INFO_FUNC(fmt, arg...)   do {\
 	if (gStpDbgLvl >= STP_LOG_INFO)\
@@ -72,7 +72,7 @@ extern UINT32 gStpDbgLvl;
 } while (0)
 #define STP_TRC_FUNC(f)              do {\
 	if (gStpDbgLvl >= STP_LOG_DBG)\
-		osal_dbg_print(PFX "<%s> <%d>\n", __func__, __LINE__);\
+		osal_warn_print(PFX "<%s> <%d>\n", __func__, __LINE__);\
 } while (0)
 
 #define STP_DUMP_PACKET_HEAD(a, b, c)     do {\
@@ -81,7 +81,7 @@ extern UINT32 gStpDbgLvl;
 } while (0)
 #define STP_TRACE_FUNC(fmt, arg...)       do {\
 	if (gStpDbgLvl >= STP_LOG_DBG)\
-		osal_dbg_print(PFX "%s: " fmt, __func__, ##arg);\
+		osal_warn_print(PFX "%s: " fmt, __func__, ##arg);\
 } while (0)
 
 #define STP_MODE_BIT(x) (0x1UL << x)
@@ -92,7 +92,8 @@ extern UINT32 gStpDbgLvl;
 #define MTKSTP_SDIO_MODE          STP_MODE_BIT(4)
 
 #define MTKSTP_BUFFER_SIZE  (16384)
-
+#define PARSER_CORE_DUMP_NUM 200
+#define CORE_DUMP_NUM 100
 /*To check function driver's status by the the interface*/
 /*Operation definition*/
 #define OP_FUNCTION_ACTIVE         0
@@ -200,6 +201,8 @@ typedef struct {
 	UINT8 winspace;		/* current sliding window size */
 	UINT8 expected_rxseq;	/* last rx pkt's seq + 1 */
 	UINT8 retry_times;
+	UINT8 rx_resync;	/* num of 7f7f7f7f before expected_rxseq pkt, indicates if recv series of resync pkt */
+	UINT8 rx_resync_seq;	/* last resync pkg's seq (0xFF if not set), only valid if rx_resync != 0 */
 } mtkstp_sequence_context_struct;
 
 typedef struct {
@@ -212,6 +215,7 @@ typedef struct {
 
 typedef struct {
 	UINT8 inband_rst_set;
+	UINT32 assert_info_cnt;
 	UINT32 rx_counter;	/* size of current processing pkt in rx_buf[] */
 	UINT8 rx_buf[MTKSTP_BUFFER_SIZE];	/* input buffer of STP, room for current processing pkt */
 	UINT32 tx_read;		/* read ptr of tx_buf[] */
@@ -619,9 +623,10 @@ extern INT32 mtk_wcn_stp_logger_ctrl(ENUM_BTIF_DBG_ID flag);
 extern VOID mtk_wcn_stp_ctx_save(VOID);
 extern VOID mtk_wcn_stp_ctx_restore(VOID);
 
-extern INT32 mtk_wcn_stp_wmt_evt_err_trg_assert(VOID);
-extern UINT32 mtk_wcn_stp_get_wmt_evt_err_trg_assert(VOID);
-extern VOID mtk_wcn_stp_set_wmt_evt_err_trg_assert(UINT32 value);
+extern INT32 mtk_wcn_stp_wmt_trg_assert(VOID);
+extern UINT32 mtk_wcn_stp_get_wmt_trg_assert(VOID);
+extern VOID mtk_wcn_stp_set_wmt_trg_assert(UINT32 value);
+extern INT32 mtk_wcn_stp_assert_timeout_handle(VOID);
 extern INT32 mtk_wcn_stp_coredump_timeout_handle(VOID);
 extern VOID mtk_wcn_stp_dbg_pkt_log(INT32 type, INT32 dir);
 
@@ -632,5 +637,9 @@ extern INT32 mtk_wcn_sys_if_rx(UINT8 *data, INT32 size);
 *                              F U N C T I O N S
 ********************************************************************************
 */
+VOID mtk_stp_sdio_retry_flag_ctrl(INT32 flag);
+VOID mtk_stp_dbg_sdio_retry_flag_ctrl(INT32 flag);
+INT32 mtk_stp_sdio_retry_flag_get(VOID);
+VOID mtk_stp_dump_sdio_register(VOID);
 
 #endif				/* _STP_CORE_H_ */

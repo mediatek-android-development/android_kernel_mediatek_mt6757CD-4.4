@@ -49,9 +49,6 @@
 #include <mtk_spm_resource_req_internal.h>
 #include <mtk_cpufreq_hybrid.h>
 
-#if defined(CONFIG_ARCH_MT6797)
-#include <mtk_vcorefs_governor.h>
-#endif
 #if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 #include <mtk_dramc.h>
 #endif
@@ -198,7 +195,7 @@ void __attribute__((weak)) msdc_clk_status(int *status)
 	*status = 0x0;
 }
 
-wake_reason_t __attribute__((weak)) spm_go_to_dpidle(u32 spm_flags, u32 spm_data, u32 sodi_flags)
+unsigned int __attribute__((weak)) spm_go_to_dpidle(u32 spm_flags, u32 spm_data, u32 sodi_flags)
 {
 	return WR_UNKNOWN;
 }
@@ -213,12 +210,12 @@ void __attribute__((weak)) spm_sodi_mempll_pwr_mode(bool pwr_mode)
 
 }
 
-wake_reason_t __attribute__((weak)) spm_go_to_sodi3(u32 spm_flags, u32 spm_data, u32 sodi_flags)
+unsigned int __attribute__((weak)) spm_go_to_sodi3(u32 spm_flags, u32 spm_data, u32 sodi_flags)
 {
 	return WR_UNKNOWN;
 }
 
-wake_reason_t __attribute__((weak)) spm_go_to_sodi(u32 spm_flags, u32 spm_data, u32 sodi_flags)
+unsigned int __attribute__((weak)) spm_go_to_sodi(u32 spm_flags, u32 spm_data, u32 sodi_flags)
 {
 	return WR_UNKNOWN;
 }
@@ -366,28 +363,6 @@ bool                    soidle_by_pass_pg;
 static bool             soidle_by_pass_en;
 static u32              sodi_flags = SODI_FLAG_REDUCE_LOG;
 static int              sodi_by_uptime_count;
-
-
-/* MC-SODI */
-static unsigned int     mcsodi_block_mask[NR_GRPS] = {0x0};
-static unsigned long    mcsodi_cnt[NR_CPUS] = { 0 };
-static unsigned long    mcsodi_block_cnt[NR_REASONS] = {0};
-bool                    mcsodi_by_pass_pg;
-static bool             mcsodi_by_pass_cg;
-static bool             mcsodi_by_pass_en;
-static int              mcsodi_by_uptime_count;
-#ifdef USING_STD_TIMER_OPS
-static unsigned int     mcsodi_time_critera = 100; /* 100us */
-#else
-static unsigned int     mcsodi_time_critera = 1300; /* 100us */
-#endif
-static DEFINE_SPINLOCK(__wfi_lock);
-#if SPM_ALLWFI_PROFILE_RATIO
-static bool all_wfi_start;
-#endif
-static bool mcsodi_start;
-
-
 
 /* DeepIdle */
 static unsigned int     dpidle_block_mask[NR_GRPS] = {0x0};
@@ -549,16 +524,7 @@ void faudintbus_sq2pll(void)
 	clk_writel(CLK_CFG_UPDATE,  1U << 18);
 }
 
-#if defined(CONFIG_ARCH_MT6755)
-static bool mtk_idle_cpu_criteria(void)
-{
-	unsigned int cpu_pwr_stat = 0;
-
-	cpu_pwr_stat = spm_get_cpu_pwr_status();
-
-	return ((cpu_pwr_stat == CPU_0) || (cpu_pwr_stat == CPU_4)) ? true : false;
-}
-#elif defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 static bool mtk_idle_cpu_criteria(void)
 {
 	return ((atomic_read(&is_in_hotplug) == 1) || (num_online_cpus() != 1)) ? false : true;
@@ -1088,137 +1054,6 @@ void soidle_after_wfi(int cpu)
 	soidle_cnt[cpu]++;
 }
 
-
-/************************************************
- * MC-SODI part
- ************************************************/
-static DEFINE_SPINLOCK(mcsodi_condition_mask_spin_lock);
-
-static void enable_mcsodi_by_mask(int grp, unsigned int mask)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&mcsodi_condition_mask_spin_lock, flags);
-	mcsodi_condition_mask[grp] &= ~mask;
-	spin_unlock_irqrestore(&mcsodi_condition_mask_spin_lock, flags);
-}
-
-static void disable_mcsodi_by_mask(int grp, unsigned int mask)
-{
-	unsigned long flags;
-
-	spin_lock_irqsave(&mcsodi_condition_mask_spin_lock, flags);
-	mcsodi_condition_mask[grp] |= mask;
-	spin_unlock_irqrestore(&mcsodi_condition_mask_spin_lock, flags);
-}
-
-void enable_mcsodi_by_bit(int id)
-{
-	int grp = id / 32;
-	unsigned int mask = 1U << (id % 32);
-
-	if (INVALID_GRP_ID(grp))
-		return;
-	enable_mcsodi_by_mask(grp, mask);
-}
-EXPORT_SYMBOL(enable_mcsodi_by_bit);
-
-void disable_mcsodi_by_bit(int id)
-{
-	int grp = id / 32;
-	unsigned int mask = 1U << (id % 32);
-
-	if (INVALID_GRP_ID(grp))
-		return;
-	disable_mcsodi_by_mask(grp, mask);
-}
-EXPORT_SYMBOL(disable_mcsodi_by_bit);
-
-#define CPU_MASK 0x3FC00
-#define mcsodi_set_clk_sta(cpu) spm_write(SPM_BSI_CLK_SR, (1 | (cpu << 8)))
-
-#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
-static bool mtk_idle_single_core(void)
-{
-	u32 sta = CPU_MASK & ~spm_read(CPU_IDLE_STA);
-
-	return ((sta & (sta - 1)) == 0) && (atomic_read(&is_in_hotplug) == 0);
-}
-#else
-static bool mtk_idle_single_core(void)
-{
-	return false;
-}
-#endif
-
-bool mcsodi_can_enter(int cpu)
-{
-	int reason = NR_REASONS;
-	unsigned int next;
-
-	if (mcsodi_by_pass_en == false) {
-		if (spm_get_mcsodi_en() == false) {
-			reason = BY_OTH;
-			goto out;
-		}
-	}
-
-	if (mcsodi_by_pass_cg == false) {
-		/* check cg */
-		memset(mcsodi_block_mask, 0, NR_GRPS * sizeof(unsigned int));
-		if (!cg_check_idle_can_enter(mcsodi_condition_mask, mcsodi_block_mask, MTK_MCSODI)) {
-			mcsodi_set_clk_sta(cpu);
-			reason = BY_CLK;
-			goto out;
-		}
-	}
-
-#ifdef USING_STD_TIMER_OPS
-	t = ktime_to_timespec(tick_nohz_get_sleep_length());
-	next = t.tv_sec * USEC_PER_SEC + t.tv_nsec / NSEC_PER_USEC;
-#else
-	next = localtimer_get_counter();
-#endif
-	if ((int)next < mcsodi_time_critera || (int)next < 0) {
-		mcsodi_set_clk_sta(cpu);
-		reason = BY_TMR;
-		goto out;
-	}
-
-#ifdef CONFIG_SMP
-	if (!mtk_idle_single_core()) {
-		reason = BY_CPU;
-		goto out;
-	}
-#endif
-	if (mcsodi_by_uptime_count != -1) {
-		struct timespec uptime;
-		unsigned long val;
-
-		get_monotonic_boottime(&uptime);
-		val = (unsigned long)uptime.tv_sec;
-		if (val <= 20) {
-			mcsodi_by_uptime_count++;
-			mcsodi_set_clk_sta(cpu);
-			reason = BY_OTH;
-			goto out;
-		} else {
-			idle_warn("MC-SODI: blocking by uptime, count = %d\n", mcsodi_by_uptime_count);
-			mcsodi_by_uptime_count = -1;
-		}
-	}
-out:
-	return mtk_idle_state_pick(IDLE_TYPE_MCSODI, cpu, reason);
-}
-
-static void mcsodi_before_wfi(int cpu)
-{
-}
-
-static void mcsodi_after_wfi(int cpu)
-{
-}
-
 /************************************************
  * multi-core idle part
  ************************************************/
@@ -1409,15 +1244,6 @@ static bool dpidle_can_enter(int cpu)
 		reason = BY_FRM;
 		goto out;
 	}
-
-#if defined(CONFIG_ARCH_MT6797)
-	if (is_vcorefs_feature_enable()) {
-		if (vcorefs_screen_on_lock_dpidle()) {
-			reason = BY_VTG;
-			goto out;
-		}
-	}
-#endif
 
 	/* TODO: check if mtk_cpufreq_earlysuspend_status_get() should be used */
 #if 0
@@ -1702,7 +1528,7 @@ static void go_to_slidle(int cpu)
 {
 	slidle_before_wfi(cpu);
 
-	mb();
+	mb();	/* memory barrier */
 	__asm__ __volatile__("wfi" : : : "memory");
 
 	slidle_after_wfi(cpu);
@@ -1714,55 +1540,19 @@ static void go_to_slidle(int cpu)
  ************************************************/
 static void rgidle_before_wfi(int cpu)
 {
-#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
-#if SPM_ALLWFI_PROFILE_RATIO
-	unsigned long flags;
 
-	spin_lock_irqsave(&__wfi_lock, flags);
-	if (mtk_idle_single_core()) {
-		all_wfi_start = true;
-		mtk_mcsodi_ratio_start(cpu, MCSODI_WFI_RATIO);
-	}
-	spin_unlock_irqrestore(&__wfi_lock, flags);
-#endif
-#endif
 }
 
 static void rgidle_after_wfi(int cpu)
 {
-#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
-	unsigned long flags;
-
-	spin_lock_irqsave(&__wfi_lock, flags);
-#if SPM_ALLWFI_PROFILE_RATIO
-	if (all_wfi_start) {
-		mtk_mcsodi_ratio_stop(cpu, MCSODI_WFI_RATIO);
-		all_wfi_start = false;
-	}
-#endif
-
-	if (mcsodi_start) {
-		spm_leave_mcsodi();
-#if SPM_MCSODI_PROFILE_RATIO
-		mtk_mcsodi_ratio_stop(cpu, MCSODI_RES_RATIO);
-#endif
-		mcsodi_start = false;
-		mcsodi_cnt[cpu]++;
-	} else {
-		rgidle_cnt[cpu]++;
-	}
-
-	spin_unlock_irqrestore(&__wfi_lock, flags);
-#else
 	rgidle_cnt[cpu]++;
-#endif
 }
 
 static noinline void go_to_rgidle(int cpu)
 {
 	rgidle_before_wfi(cpu);
 	isb();
-	mb();
+	mb();	/* memory barrier */
 	__asm__ __volatile__("wfi" : : : "memory");
 
 	rgidle_after_wfi(cpu);
@@ -1778,13 +1568,6 @@ static inline void soidle_pre_handler(void)
 	if ((get_ddr_type() == TYPE_LPDDR4) || (get_ddr_type() == TYPE_LPDDR4X))
 		del_zqcs_timer();
 #endif
-#ifndef CONFIG_MTK_FPGA
-#if defined(CONFIG_ARCH_MT6755)
-	/* stop Mali dvfs_callback timer */
-	if (!mtk_gpu_sodi_entry())
-		idle_warn("not stop GPU timer in SODI\n");
-#endif
-#endif
 
 #ifdef CONFIG_THERMAL
 	/* cancel thermal hrtimer for power saving */
@@ -1798,13 +1581,6 @@ static inline void soidle_post_handler(void)
 #if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 	if ((get_ddr_type() == TYPE_LPDDR4) || (get_ddr_type() == TYPE_LPDDR4X))
 		add_zqcs_timer();
-#endif
-#ifndef CONFIG_MTK_FPGA
-#if defined(CONFIG_ARCH_MT6755)
-	/* restart Mali dvfs_callback timer */
-	if (!mtk_gpu_sodi_exit())
-		idle_warn("not restart GPU timer outside SODI\n");
-#endif
 #endif
 
 #ifdef CONFIG_THERMAL
@@ -1823,9 +1599,6 @@ static u32 slp_spm_SODI3_flags = {
 	#ifdef CONFIG_MTK_ICUSB_SUPPORT
 	SPM_FLAG_DIS_INFRA_PDN |
 	#endif
-	#ifdef CONFIG_ARCH_MT6755
-	SPM_FLAG_DIS_VPROC_VSRAM_DVS |
-	#endif
 	SPM_FLAG_DIS_SYSRAM_SLEEP
 };
 
@@ -1837,17 +1610,8 @@ static u32 slp_spm_SODI_flags = {
 	#ifdef CONFIG_MTK_ICUSB_SUPPORT
 	SPM_FLAG_DIS_INFRA_PDN |
 	#endif
-	#ifdef CONFIG_ARCH_MT6755
-	SPM_FLAG_DIS_VPROC_VSRAM_DVS |
-	#endif
 	SPM_FLAG_DIS_SYSRAM_SLEEP
 };
-
-static u32 slp_spm_MCSODI_flags = {
-	SPM_FLAG_RUN_COMMON_SCENARIO |
-	(1U << 21)
-};
-
 
 #define LEGACY_SLEEP	0
 u32 slp_spm_deepidle_flags = {
@@ -1858,9 +1622,6 @@ u32 slp_spm_deepidle_flags = {
 	#endif
 	SPM_FLAG_DIS_VPROC_VSRAM_DVS
 #else
-	#if defined(CONFIG_ARCH_MT6797)
-	SPM_FLAG_DIS_SYSRAM_SLEEP |
-	#endif
 	#ifdef CONFIG_MTK_ICUSB_SUPPORT
 	SPM_FLAG_DIS_INFRA_PDN
 	#else
@@ -1938,18 +1699,6 @@ static inline int soidle_select_handler(int cpu)
 	return ret;
 }
 
-static inline int mcsodi_select_handler(int cpu)
-{
-	int ret = 0;
-
-	if (idle_switch[IDLE_TYPE_MCSODI]) {
-		if (mcsodi_can_enter(cpu))
-			ret = 1;
-	}
-
-	return ret;
-}
-
 static inline int mcidle_select_handler(int cpu)
 {
 	int ret = 0;
@@ -1988,7 +1737,6 @@ static int (*idle_select_handlers[NR_TYPES]) (int) = {
 	dpidle_select_handler,
 	soidle3_select_handler,
 	soidle_select_handler,
-	mcsodi_select_handler,
 	mcidle_select_handler,
 	slidle_select_handler,
 	rgidle_select_handler,
@@ -2003,10 +1751,12 @@ int mtk_idle_select(int cpu)
 	if (cpu == 0 || cpu == 4)
 		mtk_idle_dump_cnt_in_interval();
 
+	lockdep_off();
 	for (i = 0; i < NR_TYPES; i++) {
 		if (idle_select_handlers[i] (cpu))
 			break;
 	}
+	lockdep_on();
 	/* FIXME: return the corresponding idle state after verification successed */
 	return i;
 }
@@ -2016,12 +1766,14 @@ int dpidle_enter(int cpu)
 	int ret = IDLE_TYPE_DP;
 
 	mtk_idle_ratio_calc_start(IDLE_TYPE_DP, cpu);
+	lockdep_off();
 
 	dpidle_pre_handler();
 #ifndef CONFIG_MTK_FPGA
 	spm_go_to_dpidle(slp_spm_deepidle_flags, (u32)cpu, dpidle_dump_log);
 #endif
 	dpidle_post_handler();
+	lockdep_on();
 
 	mtk_idle_ratio_calc_stop(IDLE_TYPE_DP, cpu);
 
@@ -2074,6 +1826,7 @@ int soidle3_enter(int cpu)
 		soidle3_time = idle_get_current_time_ms();
 
 	mtk_idle_ratio_calc_start(IDLE_TYPE_SO3, cpu);
+	lockdep_off();
 
 	soidle_pre_handler();
 	soidle3_update_flags();
@@ -2089,6 +1842,7 @@ int soidle3_enter(int cpu)
 #endif /* DEFAULT_MMP_ENABLE */
 
 	soidle_post_handler();
+	lockdep_on();
 
 	mtk_idle_ratio_calc_stop(IDLE_TYPE_SO3, cpu);
 
@@ -2125,6 +1879,7 @@ int soidle_enter(int cpu)
 		soidle_time = idle_get_current_time_ms();
 
 	mtk_idle_ratio_calc_start(IDLE_TYPE_SO, cpu);
+	lockdep_off();
 
 	soidle_pre_handler();
 
@@ -2139,6 +1894,7 @@ int soidle_enter(int cpu)
 #endif /* DEFAULT_MMP_ENABLE */
 
 	soidle_post_handler();
+	lockdep_on();
 
 	mtk_idle_ratio_calc_stop(IDLE_TYPE_SO, cpu);
 
@@ -2165,56 +1921,6 @@ int soidle_enter(int cpu)
 	return ret;
 }
 EXPORT_SYMBOL(soidle_enter);
-
-int mcsodi_enter(int cpu)
-{
-	unsigned long flags;
-
-	mcsodi_before_wfi(cpu);
-
-	spin_lock_irqsave(&__wfi_lock, flags);
-	if (mtk_idle_single_core()) {
-		mcsodi_start = true;
-#if SPM_ALLWFI_PROFILE_RATIO
-		all_wfi_start = true;
-		mtk_mcsodi_ratio_start(cpu, MCSODI_WFI_RATIO);
-#endif
-#if SPM_MCSODI_PROFILE_RATIO
-		if (mcsodi_start)
-			mtk_mcsodi_ratio_start(cpu, MCSODI_RES_RATIO);
-#endif
-		spm_go_to_mcsodi(slp_spm_MCSODI_flags, cpu, 0);
-	}
-	spin_unlock_irqrestore(&__wfi_lock, flags);
-
-	/* enter wfi */
-	wfi_with_sync();
-
-	spin_lock_irqsave(&__wfi_lock, flags);
-
-#if SPM_ALLWFI_PROFILE_RATIO
-	if (all_wfi_start) {
-		mtk_mcsodi_ratio_stop(cpu, MCSODI_WFI_RATIO);
-		all_wfi_start = false;
-	}
-#endif
-
-	if (mcsodi_start) {
-		spm_leave_mcsodi();
-#if SPM_MCSODI_PROFILE_RATIO
-		mtk_mcsodi_ratio_stop(cpu, MCSODI_RES_RATIO);
-#endif
-		mcsodi_start = false;
-		mcsodi_cnt[cpu]++;
-	}
-	spin_unlock_irqrestore(&__wfi_lock, flags);
-
-	mcsodi_after_wfi(cpu);
-
-	return IDLE_TYPE_MCSODI;
-}
-EXPORT_SYMBOL(mcsodi_enter);
-
 
 int mcidle_enter(int cpu)
 {
@@ -2326,8 +2032,8 @@ static ssize_t idle_state_read(struct file *filp,
 			      "dpidle_cnt[%d]=%lu, dpidle_26m[%d]=%lu, soidle3_cnt[%d]=%lu, soidle_cnt[%d]=%lu, ",
 			      i, dpidle_cnt[i], i, dpidle_f26m_cnt[i], i, soidle3_cnt[i], i, soidle_cnt[i]);
 		p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-			      "mcsodi_cnt[%d]=%lu, mcidle_cnt[%d]=%lu, slidle_cnt[%d]=%lu, rgidle_cnt[%d]=%lu\n",
-			      i, mcsodi_cnt[i], i, mcidle_cnt[i], i, slidle_cnt[i], i, rgidle_cnt[i]);
+			      "mcidle_cnt[%d]=%lu, slidle_cnt[%d]=%lu, rgidle_cnt[%d]=%lu\n",
+			      i, mcidle_cnt[i], i, slidle_cnt[i], i, rgidle_cnt[i]);
 	}
 
 	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "\n********** variables dump **********\n");
@@ -2475,7 +2181,7 @@ static ssize_t mcidle_state_write(struct file *filp,
 			mcidle_time_critera = param;
 
 		return count;
-	} else if (!kstrtoint(cmd_buf, 10, &param) == 1) {
+	} else if (!kstrtoint(cmd_buf, 10, &param)) {
 		idle_switch[IDLE_TYPE_MC] = param;
 
 		return count;
@@ -2605,7 +2311,7 @@ static ssize_t dpidle_state_write(struct file *filp,
 			dpidle_dump_log = param;
 
 		return count;
-	} else if (!kstrtoint(cmd_buf, 10, &param) == 1) {
+	} else if (!kstrtoint(cmd_buf, 10, &param)) {
 		idle_switch[IDLE_TYPE_DP] = param;
 
 		return count;
@@ -2756,7 +2462,7 @@ static ssize_t soidle3_state_write(struct file *filp,
 #endif
 		}
 		return count;
-	} else if (!kstrtoint(cmd_buf, 10, &param) == 1) {
+	} else if (!kstrtoint(cmd_buf, 10, &param)) {
 		idle_switch[IDLE_TYPE_SO3] = param;
 		return count;
 	}
@@ -2882,7 +2588,7 @@ static ssize_t soidle_state_write(struct file *filp,
 			idle_dbg("sodi_flags = 0x%x\n", sodi_flags);
 		}
 		return count;
-	} else if (!kstrtoint(cmd_buf, 10, &param) == 1) {
+	} else if (!kstrtoint(cmd_buf, 10, &param)) {
 		idle_switch[IDLE_TYPE_SO] = param;
 		return count;
 	}
@@ -2897,117 +2603,6 @@ static const struct file_operations soidle_state_fops = {
 	.llseek = seq_lseek,
 	.release = single_release,
 };
-
-
-/* mcsodi state file*/
-static int _mcsodi_state_open(struct seq_file *s, void *data)
-{
-	return 0;
-}
-
-static int mcsodi_state_open(struct inode *inode, struct file *filp)
-{
-	return single_open(filp, _mcsodi_state_open, inode->i_private);
-}
-
-static ssize_t mcsodi_state_read(struct file *filp, char __user *userbuf, size_t count, loff_t *f_pos)
-{
-	int len = 0;
-	char *p = dbg_buf;
-	int i;
-
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "*********** mcsodi state ************\n");
-
-	for (i = 0; i < NR_REASONS; i++) {
-		p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-			"[%d]mcsodi_block_cnt[%s]=%lu\n",
-			i, reason_name[i], mcsodi_block_cnt[i]);
-	}
-
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "\n");
-
-	for (i = 0; i < NR_GRPS; i++) {
-		p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-			"[%02d]mcsodi_condition_mask[%-8s]=0x%08x\t\tmcsodi_block_mask[%-8s]=0x%08x\n",
-			i,
-			cg_grp_get_name(i), mcsodi_condition_mask[i],
-			cg_grp_get_name(i), mcsodi_block_mask[i]);
-	}
-
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "mcsodi_bypass_cg=%u\n", mcsodi_by_pass_cg);
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "mcsodi_by_pass_pg=%u\n", mcsodi_by_pass_pg);
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "mcsodi_bypass_en=%u\n", mcsodi_by_pass_en);
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "mcsodi_time_critera=%u\n", mcsodi_time_critera);
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "SPM_BSI_CLK_SR  0x%x\n", idle_readl(SPM_BSI_CLK_SR));
-
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "\n*********** mcsodi command help  ************\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-		      "mcsodi help:   cat /sys/kernel/debug/cpuidle/mcsodi_state\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-		      "switch on/off: echo [mcsodi] 1/0 > /sys/kernel/debug/cpuidle/mcsodi_state\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-		      "en_dp_by_bit:  echo enable id > /sys/kernel/debug/cpuidle/mcsodi_state\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-		      "dis_dp_by_bit: echo disable id > /sys/kernel/debug/cpuidle/mcsodi_state\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-		      "modify tm_cri: echo time value(dec) > /sys/kernel/debug/cpuidle/mcsodi_state\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-		      "bypass cg:     echo bypass 1/0 > /sys/kernel/debug/cpuidle/mcsodi_state\n");
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf),
-		      "bypass en:     echo bypass_en 1/0 > /sys/kernel/debug/cpuidle/mcsodi_state\n");
-
-
-	len = p - dbg_buf;
-
-	return simple_read_from_buffer(userbuf, count, f_pos, dbg_buf, len);
-}
-
-static ssize_t mcsodi_state_write(struct file *filp, const char __user *userbuf, size_t count, loff_t *f_pos)
-{
-	char cmd[NR_CMD_BUF];
-	int param;
-
-	count = min(count, sizeof(cmd_buf) - 1);
-
-	if (copy_from_user(cmd_buf, userbuf, count))
-		return -EFAULT;
-
-	cmd_buf[count] = '\0';
-
-	if (sscanf(cmd_buf, "%127s %d", cmd, &param) == 2) {
-		if (!strcmp(cmd, "mcsodi"))
-			idle_switch[IDLE_TYPE_MCSODI] = param;
-		else if (!strcmp(cmd, "enable"))
-			enable_mcsodi_by_bit(param);
-		else if (!strcmp(cmd, "disable"))
-			disable_mcsodi_by_bit(param);
-		else if (!strcmp(cmd, "time"))
-			mcsodi_time_critera = param;
-		else if (!strcmp(cmd, "bypass"))
-			mcsodi_by_pass_cg = !!param;
-		else if (!strcmp(cmd, "bypass_pg"))
-			mcsodi_by_pass_pg = !!param;
-		else if (!strcmp(cmd, "bypass_en"))
-			mcsodi_by_pass_en = !!param;
-
-		return count;
-	} else if (!kstrtoint(cmd_buf, 10, &param) == 1) {
-		idle_switch[IDLE_TYPE_MCSODI] = param;
-		return count;
-	}
-
-	return -EINVAL;
-}
-
-static const struct file_operations mcsodi_state_fops = {
-	.open = mcsodi_state_open,
-	.read = mcsodi_state_read,
-	.write = mcsodi_state_write,
-	.llseek = seq_lseek,
-	.release = single_release,
-};
-
 
 /* slidle_state */
 static int _slidle_state_open(struct seq_file *s, void *data)
@@ -3075,7 +2670,7 @@ static ssize_t slidle_state_write(struct file *filp, const char __user *userbuf,
 			disable_slidle_by_bit(param);
 
 		return count;
-	} else if (!kstrtoint(userbuf, 10, &param) == 1) {
+	} else if (!kstrtoint(userbuf, 10, &param)) {
 		idle_switch[IDLE_TYPE_SL] = param;
 		return count;
 	}
@@ -3135,20 +2730,8 @@ static ssize_t reg_dump_read(struct file *filp, char __user *userbuf, size_t cou
 	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "TVDPLL_CON0 = 0x%08x\n", idle_readl(TVDPLL_CON0));
 	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "APLL1_CON0 = 0x%08x\n", idle_readl(APLL1_CON0));
 	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "APLL2_CON0 = 0x%08x\n", idle_readl(APLL2_CON0));
-#if defined(CONFIG_ARCH_MT6755)
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "ARMCA15PLL_CON0 = 0x%08x\n", idle_readl(ARMCA15PLL_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "ARMCA7PLL_CON0 = 0x%08x\n", idle_readl(ARMCA7PLL_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "MMPLL_CON0 = 0x%08x\n", idle_readl(MMPLL_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "VENCPLL_CON0 = 0x%08x\n", idle_readl(VENCPLL_CON0));
-#elif defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 	/* TBD */
-#elif defined(CONFIG_ARCH_MT6797)
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "MFGPLL_CON0 = 0x%08x\n", idle_readl(MFGPLL_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "IMGPLL_CON0 = 0x%08x\n", idle_readl(IMGPLL_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "MPLL_CON0 = 0x%08x\n", idle_readl(MPLL_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "CODECPLL_CON0 = 0x%08x\n", idle_readl(CODECPLL_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "MDPLL1_CON0 = 0x%08x\n", idle_readl(MDPLL1_CON0));
-	p += snprintf(p, DBG_BUF_LEN - strlen(dbg_buf), "VDECPLL_CON0 = 0x%08x\n", idle_readl(VDECPLL_CON0));
 #endif
 
 	/* MTCMOS */
@@ -3208,7 +2791,6 @@ static int mtk_cpuidle_debugfs_init(void)
 	debugfs_create_file("dpidle_state", 0644, root_entry, NULL, &dpidle_state_fops);
 	debugfs_create_file("soidle3_state", 0644, root_entry, NULL, &soidle3_state_fops);
 	debugfs_create_file("soidle_state", 0644, root_entry, NULL, &soidle_state_fops);
-	debugfs_create_file("mcsodi_state", 0644, root_entry, NULL, &mcsodi_state_fops);
 	debugfs_create_file("mcidle_state", 0644, root_entry, NULL, &mcidle_state_fops);
 	debugfs_create_file("slidle_state", 0644, root_entry, NULL, &slidle_state_fops);
 	debugfs_create_file("reg_dump", 0644, root_entry, NULL, &reg_dump_fops);
@@ -3255,62 +2837,17 @@ static int mtk_idle_hotplug_cb_init(void)
 	return 0;
 }
 
-#define VP_CB 0
-
-#if VP_CB
-/* video playblack notification */
-enum{
-	VP_START = 1,
-	VP_STOP = 0,
-};
-
-int __attribute__((weak)) register_vdec_notifier(struct notifier_block *nb)
-{
-	return 0;
-}
-
-static int vd_notifier_call(struct notifier_block *nfb, unsigned int long event, void *arg)
-{
-	if (!idle_switch[IDLE_TYPE_MCSODI])
-		return NOTIFY_OK;
-
-	switch (event) {
-	case VP_START:
-		mcsodi_scenario_activated(slp_spm_MCSODI_flags);
-		break;
-	case VP_STOP:
-		mcsodi_scenario_deactivated();
-		break;
-	default:
-		break;
-	}
-
-	return NOTIFY_OK;
-}
-
-static struct notifier_block nb_vd = {
-	.notifier_call = vd_notifier_call,
-};
-
-void mtk_idle_vdec_cb_init(void)
-{
-	/* mc-sodi: register vb scenario notifier */
-	register_vdec_notifier(&nb_vd);
-}
-#endif
-
 static void mtk_idle_profile_init(void)
 {
 	mtk_idle_twam_init();
 	mtk_idle_block_setting(IDLE_TYPE_DP, dpidle_cnt, dpidle_block_cnt, dpidle_block_mask);
 	mtk_idle_block_setting(IDLE_TYPE_SO3, soidle3_cnt, soidle3_block_cnt, soidle3_block_mask);
 	mtk_idle_block_setting(IDLE_TYPE_SO, soidle_cnt, soidle_block_cnt, soidle_block_mask);
-	mtk_idle_block_setting(IDLE_TYPE_MCSODI, mcsodi_cnt, mcsodi_block_cnt, mcsodi_block_mask);
 	mtk_idle_block_setting(IDLE_TYPE_SL, slidle_cnt, slidle_block_cnt, slidle_block_mask);
 	mtk_idle_block_setting(IDLE_TYPE_RG, rgidle_cnt, NULL, NULL);
 }
 
-void mtk_cpuidle_framework_init(void)
+void __init mtk_cpuidle_framework_init(void)
 {
 #ifndef USING_STD_TIMER_OPS
 	int err = 0;
@@ -3336,9 +2873,6 @@ void mtk_cpuidle_framework_init(void)
 	iomap_init();
 	mtk_cpuidle_debugfs_init();
 	mtk_idle_hotplug_cb_init();
-#if defined(CONFIG_ARCH_MT6797)
-	set_vcorefs_fw_mode();
-#endif
 	mtk_idle_profile_init();
 }
 EXPORT_SYMBOL(mtk_cpuidle_framework_init);

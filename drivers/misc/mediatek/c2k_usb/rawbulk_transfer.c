@@ -44,7 +44,9 @@
 #include <linux/spinlock.h>
 #include <linux/workqueue.h>
 #include <linux/moduleparam.h>
+#ifndef C2K_USB_UT
 #include <mt-plat/mtk_ccci_common.h>
+#endif
 #include "viatel_rawbulk.h"
 /* #include "modem_sdio.h" */
 
@@ -719,6 +721,15 @@ static int start_downstream(struct downstream_transaction *t)
 
 static void downstream_complete(struct usb_ep *ep, struct usb_request *req)
 {
+#ifdef C2K_USB_UT
+	int i;
+	static unsigned char last_c;
+	unsigned char c;
+	char verb[64];
+	char compare_val;
+	char *ptr;
+	char *pbuf;
+#endif
 
 	/* struct downstream_transaction *t = container_of(req->buf, */
 	/* struct downstream_transaction, buffer); */
@@ -738,13 +749,8 @@ static void downstream_complete(struct usb_ep *ep, struct usb_request *req)
 	}
 #ifdef C2K_USB_UT
 #define PRINT_LIMIT 8
-	int i;
-	static unsigned char last_c;
-	unsigned char c;
-	char *ptr = (char *)t->req->buf;
-	char verb[64];
-	char *pbuf = (char *)verb;
-	char compare_val;
+	ptr = (char *)t->req->buf;
+	pbuf = (char *)verb;
 
 	pbuf += sprintf(pbuf, "down len(%d), %d, ", t->req->actual, (int)sizeof(unsigned char));
 	for (i = 0; i < t->req->actual; i++) {
@@ -1300,5 +1306,4 @@ module_exit(rawbulk_exit);
 
 MODULE_AUTHOR(DRIVER_AUTHOR);
 MODULE_DESCRIPTION(DRIVER_DESC);
-MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL");

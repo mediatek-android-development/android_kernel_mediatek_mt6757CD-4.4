@@ -69,13 +69,13 @@ static struct xhci_segment *xhci_segment_alloc(struct xhci_hcd *xhci,
 	return seg;
 }
 
+
 static void xhci_segment_free(struct xhci_hcd *xhci, struct xhci_segment *seg)
 {
 #ifdef CONFIG_MTK_UAC_POWER_SAVING
 	if (seg->sram_flag) {
 		xhci_mtk_free_sram(seg->sram_flag & 0xFF);
 		seg->trbs = NULL;
-		seg->sram_flag = 0;
 	} else
 #endif
 	if (seg->trbs) {
@@ -365,10 +365,9 @@ static int xhci_alloc_segments_for_ring(struct xhci_hcd *xhci,
 
 #ifdef CONFIG_MTK_UAC_POWER_SAVING
 static struct xhci_segment *xhci_segment_alloc_sram(int sram_id, struct xhci_hcd *xhci,
-					unsigned int cycle_state, gfp_t flags, int trbs_per_segment)
+					unsigned int cycle_state, gfp_t flags)
 {
 	struct xhci_segment *seg;
-	int trb_segment_size;
 	dma_addr_t	dma;
 	int		i;
 
@@ -377,27 +376,16 @@ static struct xhci_segment *xhci_segment_alloc_sram(int sram_id, struct xhci_hcd
 		return NULL;
 
 	xhci_mtk_allocate_sram(sram_id, &dma, (unsigned char **) &seg->trbs);
-	switch (sram_id) {
-	case XHCI_AUDIO_INTR:
-		trb_segment_size = TRB_AUDIO_INTR_SIZE;
-	break;
-	case XHCI_AUDIO_FEEDBACK_TX:
-	case XHCI_AUDIO_FEEDBACK_RX:
-		trb_segment_size = TRB_AUDIO_FEEDBACK_SIZE;
-	break;
-	default:
-		trb_segment_size = TRB_SEGMENT_SIZE;
-	}
 
 	if (!seg->trbs) {
 		kfree(seg);
 		return NULL;
 	}
 
-	memset_io(seg->trbs, 0, trb_segment_size);
+	memset_io(seg->trbs, 0, TRB_SEGMENT_SIZE);
 	/* If the cycle state is 0, set the cycle bit to 1 for all the TRBs */
 	if (cycle_state == 0) {
-		for (i = 0; i < trbs_per_segment; i++)
+		for (i = 0; i < TRBS_PER_SEGMENT; i++)
 			seg->trbs[i].link.control |= cpu_to_le32(TRB_CYCLE);
 	}
 	seg->dma = dma;
@@ -407,55 +395,21 @@ static struct xhci_segment *xhci_segment_alloc_sram(int sram_id, struct xhci_hcd
 	return seg;
 }
 
-/*
- * Make the prev segment point to the next segment.
- *
- * Change the last TRB in the prev segment to be a Link TRB which points to the
- * DMA address of the next segment.  The caller needs to set any Link TRB
- * related flags, such as End TRB, Toggle Cycle, and no snoop.
- */
-static void xhci_link_segments_sram(struct xhci_hcd *xhci, struct xhci_segment *prev,
-		struct xhci_segment *next, enum xhci_ring_type type, int trbs_per_segment)
-{
-	u32 val;
-
-	if (!prev || !next)
-		return;
-	prev->next = next;
-	if (type != TYPE_EVENT) {
-		prev->trbs[trbs_per_segment-1].link.segment_ptr =
-			cpu_to_le64(next->dma);
-
-		/* Set the last TRB in the segment to have a TRB type ID of Link TRB */
-		val = le32_to_cpu(prev->trbs[trbs_per_segment-1].link.control);
-		val &= ~TRB_TYPE_BITMASK;
-		val |= TRB_TYPE(TRB_LINK);
-		/* Always set the chain bit with 0.95 hardware */
-		/* Set chain bit for isoc rings on AMD 0.96 host */
-		if (xhci_link_trb_quirk(xhci) ||
-				(type == TYPE_ISOC &&
-				 (xhci->quirks & XHCI_AMD_0x96_HOST)))
-			val |= TRB_CHAIN;
-		prev->trbs[trbs_per_segment-1].link.control = cpu_to_le32(val);
-	}
-}
-
-
 /* Allocate segments and link them for a ring */
 static int xhci_alloc_segments_for_ring_sram(struct xhci_hcd *xhci,
 		struct xhci_segment **first, struct xhci_segment **last,
 		unsigned int num_segs, unsigned int cycle_state,
-		enum xhci_ring_type type, gfp_t flags, int sram_id, int trbs_per_segment)
+		enum xhci_ring_type type, gfp_t flags, int sram_id)
 {
 	struct xhci_segment *prev;
 
-	prev = xhci_segment_alloc_sram(sram_id, xhci, cycle_state, flags, trbs_per_segment);
+	prev = xhci_segment_alloc_sram(sram_id, xhci, cycle_state, flags);
 	if (!prev)
 		return -ENOMEM;
 
 	*first = prev;
 
-	xhci_link_segments_sram(xhci, prev, *first, type, trbs_per_segment);
+	xhci_link_segments(xhci, prev, *first, type);
 	*last = prev;
 
 	return 0;
@@ -466,7 +420,6 @@ static struct xhci_ring *xhci_ring_alloc_sram(struct xhci_hcd *xhci,
 		enum xhci_ring_type type, gfp_t flags, int sram_id)
 {
 	struct xhci_ring	*ring;
-	int trbs_per_segment;
 	int ret;
 
 	ring = kzalloc(sizeof *(ring), flags);
@@ -479,21 +432,8 @@ static struct xhci_ring *xhci_ring_alloc_sram(struct xhci_hcd *xhci,
 	if (num_segs == 0)
 		return ring;
 
-	switch (sram_id) {
-	case XHCI_AUDIO_INTR:
-		trbs_per_segment = TRBS_PER_AUDIO_EP_SEGMENT;
-	break;
-	case XHCI_AUDIO_FEEDBACK_TX:
-	case XHCI_AUDIO_FEEDBACK_RX:
-		trbs_per_segment = TRBS_PER_AUDIO_EP_SEGMENT;
-	break;
-	default:
-		trbs_per_segment = TRBS_PER_SEGMENT;
-	}
-
-
 	ret = xhci_alloc_segments_for_ring_sram(xhci, &ring->first_seg,
-			&ring->last_seg, num_segs, cycle_state, type, flags, sram_id, trbs_per_segment);
+			&ring->last_seg, num_segs, cycle_state, type, flags, sram_id);
 
 	if (ret)
 		goto fail;
@@ -501,7 +441,7 @@ static struct xhci_ring *xhci_ring_alloc_sram(struct xhci_hcd *xhci,
 	/* Only event ring does not use link TRB */
 	if (type != TYPE_EVENT) {
 		/* See section 4.9.2.1 and 6.4.4.1 */
-		ring->last_seg->trbs[trbs_per_segment - 1].link.control |=
+		ring->last_seg->trbs[TRBS_PER_SEGMENT - 1].link.control |=
 			cpu_to_le32(LINK_TOGGLE);
 	}
 	xhci_initialize_ring_info(ring, cycle_state);
@@ -1131,6 +1071,40 @@ void xhci_free_virt_device(struct xhci_hcd *xhci, int slot_id)
 	xhci->devs[slot_id] = NULL;
 }
 
+/*
+ * Free a virt_device structure.
+ * If the virt_device added a tt_info (a hub) and has children pointing to
+ * that tt_info, then free the child first. Recursive.
+ * We can't rely on udev at this point to find child-parent relationships.
+ */
+void xhci_free_virt_devices_depth_first(struct xhci_hcd *xhci, int slot_id)
+{
+	struct xhci_virt_device *vdev;
+	struct list_head *tt_list_head;
+	struct xhci_tt_bw_info *tt_info, *next;
+	int i;
+
+	vdev = xhci->devs[slot_id];
+	if (!vdev)
+		return;
+
+	tt_list_head = &(xhci->rh_bw[vdev->real_port - 1].tts);
+	list_for_each_entry_safe(tt_info, next, tt_list_head, tt_list) {
+		/* is this a hub device that added a tt_info to the tts list */
+		if (tt_info->slot_id == slot_id) {
+			/* are any devices using this tt_info? */
+			for (i = 1; i < HCS_MAX_SLOTS(xhci->hcs_params1); i++) {
+				vdev = xhci->devs[i];
+				if (vdev && (vdev->tt_info == tt_info))
+					xhci_free_virt_devices_depth_first(
+						xhci, i);
+			}
+		}
+	}
+	/* we are now at a leaf device */
+	xhci_free_virt_device(xhci, slot_id);
+}
+
 int xhci_alloc_virt_device(struct xhci_hcd *xhci, int slot_id,
 		struct usb_device *udev, gfp_t flags)
 {
@@ -1239,7 +1213,7 @@ static u32 xhci_find_real_port_number(struct xhci_hcd *xhci,
 	struct usb_device *top_dev;
 	struct usb_hcd *hcd;
 
-	if (udev->speed == USB_SPEED_SUPER)
+	if (udev->speed >= USB_SPEED_SUPER)
 		hcd = xhci->shared_hcd;
 	else
 		hcd = xhci->main_hcd;
@@ -1274,6 +1248,7 @@ int xhci_setup_addressable_virt_dev(struct xhci_hcd *xhci, struct usb_device *ud
 	/* 3) Only the control endpoint is valid - one endpoint context */
 	slot_ctx->dev_info |= cpu_to_le32(LAST_CTX(1) | udev->route);
 	switch (udev->speed) {
+	case USB_SPEED_SUPER_PLUS:
 	case USB_SPEED_SUPER:
 		slot_ctx->dev_info |= cpu_to_le32(SLOT_SPEED_SS);
 		max_packets = MAX_PACKET(512);
@@ -1461,6 +1436,7 @@ static unsigned int xhci_get_endpoint_interval(struct usb_device *udev,
 		}
 		/* Fall through - SS and HS isoc/int have same decoding */
 
+	case USB_SPEED_SUPER_PLUS:
 	case USB_SPEED_SUPER:
 		if (usb_endpoint_xfer_int(&ep->desc) ||
 		    usb_endpoint_xfer_isoc(&ep->desc)) {
@@ -1501,7 +1477,7 @@ static unsigned int xhci_get_endpoint_interval(struct usb_device *udev,
 static u32 xhci_get_endpoint_mult(struct usb_device *udev,
 		struct usb_host_endpoint *ep)
 {
-	if (udev->speed != USB_SPEED_SUPER ||
+	if (udev->speed < USB_SPEED_SUPER ||
 			!usb_endpoint_xfer_isoc(&ep->desc))
 		return 0;
 	return ep->ss_ep_comp.bmAttributes;
@@ -1551,7 +1527,7 @@ static u32 xhci_get_max_esit_payload(struct usb_device *udev,
 			usb_endpoint_xfer_bulk(&ep->desc))
 		return 0;
 
-	if (udev->speed == USB_SPEED_SUPER)
+	if (udev->speed >= USB_SPEED_SUPER)
 		return le16_to_cpu(ep->ss_ep_comp.wBytesPerInterval);
 
 	max_packet = GET_MAX_PACKET(usb_endpoint_maxp(&ep->desc));
@@ -1559,6 +1535,31 @@ static u32 xhci_get_max_esit_payload(struct usb_device *udev,
 	/* A 0 in max burst means 1 transfer per ESIT */
 	return max_packet * (max_burst + 1);
 }
+
+#if 0
+static bool is_uac_data_endpoint(struct usb_endpoint_descriptor *desc)
+{
+	int is_playback;
+	int attr;
+	bool data_ep = false;
+
+	if (usb_endpoint_xfer_isoc(desc) &&
+			desc->bLength >= USB_DT_ENDPOINT_AUDIO_SIZE) {
+
+		data_ep = true;
+		attr = desc->bmAttributes & USB_ENDPOINT_SYNCTYPE;
+		is_playback = usb_endpoint_dir_out(desc);
+
+		/* check if it is a sync endpoint */
+		if ((!is_playback && (attr == USB_ENDPOINT_SYNC_ASYNC)) ||
+			(is_playback && (attr == USB_ENDPOINT_SYNC_ADAPTIVE))) {
+			if (!desc->bSynchAddress && desc->bRefresh)
+				data_ep = false;
+		}
+	}
+	return data_ep;
+}
+#endif
 
 /* Set up an endpoint with one ring segment.  Do not allocate stream rings.
  * Drivers will have to call usb_alloc_streams() to do that.
@@ -1586,35 +1587,34 @@ int xhci_endpoint_init(struct xhci_hcd *xhci,
 	ep_ctx->ep_info2 = cpu_to_le32(endpoint_type);
 
 	type = usb_endpoint_type(&ep->desc);
+
 	/* Set up the endpoint ring */
 #ifdef CONFIG_MTK_UAC_POWER_SAVING
-	if (xhci->msram_virt_addr && udev->usb_audio_enabled) {
-		if ((ep->desc.bmAttributes & USB_ENDPOINT_USAGE_MASK) == USB_ENDPOINT_USAGE_FEEDBACK) {
-			int in = usb_endpoint_dir_in(&ep->desc);
+	if (xhci->msram_virt_addr && type == TYPE_ISOC) {
+		int in = usb_endpoint_dir_in(&ep->desc);
+		u32 usage = ep->desc.bmAttributes & USB_ENDPOINT_USAGE_MASK;
 
-			if (in)
-				virt_dev->eps[ep_index].new_ring =
-					xhci_ring_alloc_sram(xhci, 1, 1, type, mem_flags, XHCI_AUDIO_FEEDBACK_RX);
-			else
-				virt_dev->eps[ep_index].new_ring =
-					xhci_ring_alloc_sram(xhci, 1, 1, type, mem_flags, XHCI_AUDIO_FEEDBACK_TX);
-		} else if (type == TYPE_ISOC) {
-			int in = usb_endpoint_dir_in(&ep->desc);
+		xhci_warn(xhci, "xhci_ring_alloc_sram, ep=%d, type=%d, in=%d usage=0x%x\n",
+				 ep_index, type, in, usage);
 
-			if (in)
-				virt_dev->eps[ep_index].new_ring =
-					xhci_ring_alloc_sram(xhci, 1, 1, type, mem_flags, XHCI_EPRX);
-			else
-				virt_dev->eps[ep_index].new_ring =
-					xhci_ring_alloc_sram(xhci, 1, 1, type, mem_flags, XHCI_EPTX);
-		} else if (type == TYPE_INTR) {
+		if (usage == USB_ENDPOINT_USAGE_FEEDBACK) {
+			/* FIXME feedback ep force use dram */
+		} else {
+		if (in)
 			virt_dev->eps[ep_index].new_ring =
-				xhci_ring_alloc_sram(xhci, 1, 1, type, mem_flags, XHCI_AUDIO_INTR);
+				xhci_ring_alloc_sram(xhci, 1, 1, type, mem_flags, XHCI_EPRX);
+		else
+			virt_dev->eps[ep_index].new_ring =
+				xhci_ring_alloc_sram(xhci, 1, 1, type, mem_flags, XHCI_EPTX);
 		}
+
+		if (!virt_dev->eps[ep_index].new_ring)
+			xhci_warn(xhci, "use dram\n");
 	}
+
 	if (!virt_dev->eps[ep_index].new_ring)
-	virt_dev->eps[ep_index].new_ring =
-		xhci_ring_alloc(xhci, 2, 1, type, mem_flags);
+		virt_dev->eps[ep_index].new_ring =
+			xhci_ring_alloc(xhci, 2, 1, type, mem_flags);
 #else
 	virt_dev->eps[ep_index].new_ring =
 		xhci_ring_alloc(xhci, 2, 1, type, mem_flags);
@@ -1652,6 +1652,7 @@ int xhci_endpoint_init(struct xhci_hcd *xhci,
 	max_packet = GET_MAX_PACKET(usb_endpoint_maxp(&ep->desc));
 	max_burst = 0;
 	switch (udev->speed) {
+	case USB_SPEED_SUPER_PLUS:
 	case USB_SPEED_SUPER:
 		/* dig out max burst from ep companion desc */
 		max_burst = ep->ss_ep_comp.bMaxBurst;
@@ -1869,7 +1870,7 @@ static int scratchpad_alloc(struct xhci_hcd *xhci, gfp_t flags)
 	xhci->dcbaa->dev_context_ptrs[0] = cpu_to_le64(xhci->scratchpad->sp_dma);
 	for (i = 0; i < num_sp; i++) {
 		dma_addr_t dma;
-		void *buf = dma_alloc_coherent(dev, xhci->page_size, &dma,
+		void *buf = dma_zalloc_coherent(dev, xhci->page_size, &dma,
 				flags);
 		if (!buf)
 			goto fail_sp5;
@@ -1989,7 +1990,7 @@ void xhci_mem_cleanup(struct xhci_hcd *xhci)
 	int size;
 	int i, j, num_ports;
 
-	del_timer_sync(&xhci->cmd_timer);
+	cancel_delayed_work_sync(&xhci->cmd_timer);
 
 	/* Free the Event Ring Segment Table and the actual Event Ring */
 	size = sizeof(struct xhci_erst_entry)*(xhci->erst.num_entries);
@@ -2032,8 +2033,8 @@ void xhci_mem_cleanup(struct xhci_hcd *xhci)
 		}
 	}
 
-	for (i = 1; i < MAX_HC_SLOTS; ++i)
-		xhci_free_virt_device(xhci, i);
+	for (i = HCS_MAX_SLOTS(xhci->hcs_params1); i > 0; i--)
+		xhci_free_virt_devices_depth_first(xhci, i);
 
 	dma_pool_destroy(xhci->segment_pool);
 	xhci->segment_pool = NULL;
@@ -2578,9 +2579,9 @@ int xhci_mem_init(struct xhci_hcd *xhci, gfp_t flags)
 
 	INIT_LIST_HEAD(&xhci->cmd_list);
 
-	/* init command timeout timer */
-	setup_timer(&xhci->cmd_timer, xhci_handle_command_timeout,
-		    (unsigned long)xhci);
+	/* init command timeout work */
+	INIT_DELAYED_WORK(&xhci->cmd_timer, xhci_handle_command_timeout);
+	init_completion(&xhci->cmd_ring_stop_completion);
 
 	page_size = readl(&xhci->op_regs->page_size);
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init,
@@ -2627,11 +2628,11 @@ int xhci_mem_init(struct xhci_hcd *xhci, gfp_t flags)
 		xhci_mtk_allocate_sram(XHCI_DCBAA, &dma, (unsigned char **) &xhci->dcbaa);
 
 	if (!xhci->dcbaa)
-	xhci->dcbaa = dma_alloc_coherent(dev, sizeof(*xhci->dcbaa), &dma,
-			GFP_KERNEL);
+		xhci->dcbaa = dma_alloc_coherent(dev, sizeof(*xhci->dcbaa), &dma,
+			flags);
 #else
 	xhci->dcbaa = dma_alloc_coherent(dev, sizeof(*xhci->dcbaa), &dma,
-			GFP_KERNEL);
+			flags);
 #endif
 
 	if (!xhci->dcbaa)
@@ -2698,7 +2699,7 @@ int xhci_mem_init(struct xhci_hcd *xhci, gfp_t flags)
 		(xhci->cmd_ring->first_seg->dma & (u64) ~CMD_RING_RSVD_BITS) |
 		xhci->cmd_ring->cycle_state;
 	xhci_dbg_trace(xhci, trace_xhci_dbg_init,
-			"// Setting command ring address to 0x%x", val);
+			"// Setting command ring address to 0x%016llx", val_64);
 	xhci_write_64(xhci, val_64, &xhci->op_regs->cmd_ring);
 	xhci_dbg_cmd_ptrs(xhci);
 
@@ -2734,7 +2735,7 @@ int xhci_mem_init(struct xhci_hcd *xhci, gfp_t flags)
 						flags, XHCI_EVENTRING);
 
 	if (!xhci->event_ring)
-	xhci->event_ring = xhci_ring_alloc(xhci, ERST_NUM_SEGS, 1, TYPE_EVENT,
+		xhci->event_ring = xhci_ring_alloc(xhci, ERST_NUM_SEGS, 1, TYPE_EVENT,
 						flags);
 #else
 	xhci->event_ring = xhci_ring_alloc(xhci, ERST_NUM_SEGS, 1, TYPE_EVENT,
@@ -2750,13 +2751,13 @@ int xhci_mem_init(struct xhci_hcd *xhci, gfp_t flags)
 		xhci_mtk_allocate_sram(XHCI_ERST, &dma, (unsigned char **) &xhci->erst.entries);
 
 	if (!xhci->erst.entries)
-	xhci->erst.entries = dma_alloc_coherent(dev,
+		xhci->erst.entries = dma_alloc_coherent(dev,
 			sizeof(struct xhci_erst_entry) * ERST_NUM_SEGS, &dma,
-			GFP_KERNEL);
+			flags);
 #else
 	xhci->erst.entries = dma_alloc_coherent(dev,
 			sizeof(struct xhci_erst_entry) * ERST_NUM_SEGS, &dma,
-			GFP_KERNEL);
+			flags);
 #endif
 
 	if (!xhci->erst.entries)
@@ -2769,7 +2770,7 @@ int xhci_mem_init(struct xhci_hcd *xhci, gfp_t flags)
 	if (xhci->msram_virt_addr)
 		memset_io(xhci->erst.entries, 0, sizeof(struct xhci_erst_entry)*ERST_NUM_SEGS);
 	else
-	memset(xhci->erst.entries, 0, sizeof(struct xhci_erst_entry)*ERST_NUM_SEGS);
+		memset(xhci->erst.entries, 0, sizeof(struct xhci_erst_entry)*ERST_NUM_SEGS);
 #else
 	memset(xhci->erst.entries, 0, sizeof(struct xhci_erst_entry)*ERST_NUM_SEGS);
 #endif

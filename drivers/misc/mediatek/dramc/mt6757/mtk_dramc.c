@@ -173,13 +173,13 @@ const char *uname, int depth, void *data)
 		g_dram_info_dummy_read = &dram_info_dummy_read;
 		dram_info_dummy_read.rank_num = get_dram_info->rank_num;
 		dram_rank_num = get_dram_info->rank_num;
-		pr_err("[DRAMC] dram info dram rank number = %d\n",
+		pr_info("[DRAMC] dram info dram rank number = %d\n",
 		g_dram_info_dummy_read->rank_num);
 
 		if ((dram_rank_num == SINGLE_RANK) || (check_DRAM_size() == 1)) {
 			dram_info_dummy_read.rank_info[0].start = dram_rank0_addr;
 			dram_info_dummy_read.rank_info[1].start = dram_rank0_addr;
-			pr_err("[DRAMC] dram info dram rank0 base = 0x%llx\n",
+			pr_info("[DRAMC] dram info dram rank0 base = 0x%llx\n",
 			g_dram_info_dummy_read->rank_info[0].start);
 		} else if (dram_rank_num == DUAL_RANK) {
 			/* No dummy read address for rank1, try to fix it up */
@@ -193,9 +193,9 @@ const char *uname, int depth, void *data)
 				dram_info_dummy_read.rank_info[1].start = 0xC0000000;
 			else
 				dram_info_dummy_read.rank_info[1].start = dram_rank1_addr;
-			pr_err("[DRAMC] dram info dram rank0 base = 0x%llx\n",
+			pr_info("[DRAMC] dram info dram rank0 base = 0x%llx\n",
 			g_dram_info_dummy_read->rank_info[0].start);
-			pr_err("[DRAMC] dram info dram rank1 base = 0x%llx\n",
+			pr_info("[DRAMC] dram info dram rank1 base = 0x%llx\n",
 			g_dram_info_dummy_read->rank_info[1].start);
 		} else {
 			No_DummyRead = 1;
@@ -893,8 +893,8 @@ int Binning_DRAM_complex_mem_test(void)
 	MEM32_BASE = (unsigned int *)ptr;
 	MEM_BASE = (unsigned int *)ptr;
 	/*pr_warn("Test DRAM start address 0x%lx\n", (unsigned long)ptr);*/
-	pr_warn("Test DRAM start address %p\n", ptr);
-	pr_warn("Test DRAM SIZE 0x%x\n", MEM_TEST_SIZE);
+	pr_info("Test DRAM start address %p\n", ptr);
+	pr_info("Test DRAM SIZE 0x%x\n", MEM_TEST_SIZE);
 	size = len >> 2;
 
 	/* === Verify the tied bits (tied high) === */
@@ -903,7 +903,6 @@ int Binning_DRAM_complex_mem_test(void)
 
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0) {
-			vfree(ptr);
 			/* return -1; */
 			ret = -1;
 			goto fail;
@@ -914,7 +913,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* === Verify the tied bits (tied low) === */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0xffffffff) {
-			vfree(ptr);
 			/* return -2; */
 			ret = -2;
 			goto fail;
@@ -929,7 +927,6 @@ int Binning_DRAM_complex_mem_test(void)
 	pattern8 = 0x00;
 	for (i = 0; i < len; i++) {
 		if (MEM8_BASE[i] != pattern8++) {
-			vfree(ptr);
 			/* return -3; */
 			ret = -3;
 			goto fail;
@@ -942,7 +939,6 @@ int Binning_DRAM_complex_mem_test(void)
 		if (MEM8_BASE[i] == pattern8)
 			MEM16_BASE[j] = pattern8;
 		if (MEM16_BASE[j] != pattern8) {
-			vfree(ptr);
 			/* return -4; */
 			ret = -4;
 			goto fail;
@@ -957,7 +953,6 @@ int Binning_DRAM_complex_mem_test(void)
 	pattern16 = 0x00;
 	for (i = 0; i < (len >> 1); i++) {
 		if (MEM16_BASE[i] != pattern16++) {
-			vfree(ptr);
 			/* return -5; */
 			ret = -5;
 			goto fail;
@@ -971,7 +966,6 @@ int Binning_DRAM_complex_mem_test(void)
 	pattern32 = 0x00;
 	for (i = 0; i < (len >> 2); i++) {
 		if (MEM32_BASE[i] != pattern32++) {
-			vfree(ptr);
 			/* return -6; */
 			ret = -6;
 			goto fail;
@@ -985,7 +979,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* === Read Check then Fill Memory with a5a5a5a5 Pattern === */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0x44332211) {
-			vfree(ptr);
 			/* return -7; */
 			ret = -7;
 			goto fail;
@@ -998,7 +991,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* 00 Byte Pattern at offset 0h === */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0xa5a5a5a5) {
-			vfree(ptr);
 			/* return -8; */
 			ret = -8;
 			goto fail;
@@ -1011,7 +1003,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* 00 Byte Pattern at offset 2h === */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0xa5a5a500) {
-			vfree(ptr);
 			/* return -9; */
 			ret = -9;
 			goto fail;
@@ -1024,7 +1015,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* 00 Byte Pattern at offset 1h === */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0xa500a500) {
-			vfree(ptr);
 			/* return -10; */
 			ret = -10;
 			goto fail;
@@ -1037,7 +1027,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* 00 Byte Pattern at offset 3h === */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0xa5000000) {
-			vfree(ptr);
 			/* return -11; */
 			ret = -11;
 			goto fail;
@@ -1050,7 +1039,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* Word Pattern at offset 1h == */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0x00000000) {
-			vfree(ptr);
 			/* return -12; */
 			ret = -12;
 			goto fail;
@@ -1063,7 +1051,6 @@ int Binning_DRAM_complex_mem_test(void)
 	/* Word Pattern at offset 0h == */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0xffff0000) {
-			vfree(ptr);
 			/* return -13; */
 			ret = -13;
 			goto fail;
@@ -1074,7 +1061,6 @@ int Binning_DRAM_complex_mem_test(void)
     /*===  Read Check === */
 	for (i = 0; i < size; i++) {
 		if (MEM32_BASE[i] != 0xffffffff) {
-			vfree(ptr);
 			/* return -14; */
 			ret = -14;
 			goto fail;
@@ -1094,7 +1080,6 @@ int Binning_DRAM_complex_mem_test(void)
 		value = MEM_BASE[i];
 
 		if (value != PATTERN1) {
-			vfree(ptr);
 			/* return -15; */
 			ret = -15;
 			goto fail;
@@ -1106,7 +1091,6 @@ int Binning_DRAM_complex_mem_test(void)
 	for (i = 0; i < size; i++) {
 		value = MEM_BASE[i];
 		if (value != PATTERN2) {
-			vfree(ptr);
 			/* return -16; */
 			ret = -16;
 			goto fail;
@@ -1118,7 +1102,6 @@ int Binning_DRAM_complex_mem_test(void)
 	for (i = 0; i < size; i++) {
 		value = MEM_BASE[i];
 		if (value != PATTERN1) {
-			vfree(ptr);
 			/* return -17; */
 			ret = -17;
 			goto fail;
@@ -1130,7 +1113,6 @@ int Binning_DRAM_complex_mem_test(void)
 	for (i = 0; i < size; i++) {
 		value = MEM_BASE[i];
 		if (value != PATTERN2) {
-			vfree(ptr);
 			/* return -18; */
 			ret = -18;
 			goto fail;
@@ -1142,7 +1124,6 @@ int Binning_DRAM_complex_mem_test(void)
 	for (i = 0; i < size; i++) {
 		value = MEM_BASE[i];
 		if (value != PATTERN1) {
-			vfree(ptr);
 			/* return -19; */
 			ret = -19;
 			goto fail;
@@ -1188,7 +1169,6 @@ int Binning_DRAM_complex_mem_test(void)
 	for (i = 0; i < size; i++) {
 		value = MEM_BASE[i];
 		if (value != 0x12345678) {
-			vfree(ptr);
 			/* return -20; */
 			ret = -20;
 			goto fail;
@@ -1206,7 +1186,6 @@ int Binning_DRAM_complex_mem_test(void)
 		if (i < size * 4 - 1)
 			MEM8_BASE[waddr8] = pattern8 + 1;
 		if (MEM8_BASE[raddr8] != pattern8) {
-			vfree(ptr);
 			/* return -21; */
 			ret = -21;
 			goto fail;
@@ -1221,7 +1200,6 @@ int Binning_DRAM_complex_mem_test(void)
 		if (i < size * 2 - 1)
 			MEM16_BASE[i + 1] = pattern16 + 1;
 		if (MEM16_BASE[i] != pattern16) {
-			vfree(ptr);
 			/* return -22; */
 			ret = -22;
 			goto fail;
@@ -1235,14 +1213,13 @@ int Binning_DRAM_complex_mem_test(void)
 		if (i < size - 1)
 			MEM32_BASE[i + 1] = pattern32 + 1;
 		if (MEM32_BASE[i] != pattern32) {
-			vfree(ptr);
 			/* return -23; */
 			ret = -23;
 			goto fail;
 		}
 		pattern32++;
 	}
-	pr_warn("complex R/W mem test pass\n");
+	pr_info("complex R/W mem test pass\n");
 
 fail:
 	vfree(ptr);
@@ -1302,6 +1279,7 @@ unsigned int get_dram_data_rate(void)
 
 	return u4DataRate;
 }
+EXPORT_SYMBOL(get_dram_data_rate);
 
 unsigned int read_dram_temperature(unsigned char channel)
 {
@@ -1386,7 +1364,7 @@ int dram_dummy_read_reserve_mem_of_init(struct reserved_mem *rmem)
 		}
 		dram_rank0_addr = rptr;
 		dram_rank_num++;
-		pr_err("[dram_dummy_read_reserve_mem_of_init] dram_rank0_addr = %pa, size = 0x%x\n",
+		pr_info("[dram_dummy_read_reserve_mem_of_init] dram_rank0_addr = %pa, size = 0x%x\n",
 				&dram_rank0_addr, rsize);
 	}
 
@@ -1398,7 +1376,7 @@ int dram_dummy_read_reserve_mem_of_init(struct reserved_mem *rmem)
 		}
 		dram_rank1_addr = rptr;
 		dram_rank_num++;
-		pr_err("[dram_dummy_read_reserve_mem_of_init] dram_rank1_addr = %pa, size = 0x%x\n",
+		pr_info("[dram_dummy_read_reserve_mem_of_init] dram_rank1_addr = %pa, size = 0x%x\n",
 				&dram_rank1_addr, rsize);
 	}
 
@@ -1787,35 +1765,35 @@ static unsigned int get_vddq(void)
 static void print_HQA_voltage(void)
 {
 #if defined(HVCORE_HVDRAM)
-	pr_err("[HQA] Vcore HV, Vdram HV\n");
+	pr_info("[HQA] Vcore HV, Vdram HV\n");
 #elif defined(NVCORE_NVDRAM)
-	pr_err("[HQA] Vcore NV, Vdram NV\n");
+	pr_info("[HQA] Vcore NV, Vdram NV\n");
 #elif defined(LVCORE_LVDRAM)
-	pr_err("[HQA] Vcore LV, Vdram LV\n");
+	pr_info("[HQA] Vcore LV, Vdram LV\n");
 #elif defined(HVCORE_LVDRAM)
-	pr_err("[HQA] Vcore HV, Vdram LV\n");
+	pr_info("[HQA] Vcore HV, Vdram LV\n");
 #elif defined(LVCORE_HVDRAM)
-	pr_err("[HQA] Vcore LV, Vdram HV\n");
+	pr_info("[HQA] Vcore LV, Vdram HV\n");
 #else
-	pr_err("[HQA] Undefined HQA condition\n");
+	pr_info("[HQA] Undefined HQA condition\n");
 #endif
 
 #ifdef CONFIG_MTK_PMIC_CHIP_MT6355
-	pr_err("[HQA] Vcore = %d uV (should be %d uV)\n",
+	pr_info("[HQA] Vcore = %d uV (should be %d uV)\n",
 		regulator_get_voltage(_reg_VCORE),
 		hqa_vcore);
-	pr_err("[HQA] Vdram = %d uV (should be %d uV)\n",
+	pr_info("[HQA] Vdram = %d uV (should be %d uV)\n",
 		get_vdram(), HQA_VDRAM);
-	pr_err("[HQA] vddq = %d uV (should be %d uV)\n",
+	pr_info("[HQA] vddq = %d uV (should be %d uV)\n",
 		get_vddq(), HQA_VDDQ);
 #else
-	pr_err("[HQA] Vcore = %d mV(should be %d mV)\n",
+	pr_info("[HQA] Vcore = %d mV(should be %d mV)\n",
 		calculate_voltage(upmu_get_reg_value(MT6351_BUCK_VCORE_CON4)),
 		calculate_voltage(hqa_vcore));
-	pr_err("[HQA] Vdram = 0x%x (should be 0x%x)\n",
+	pr_info("[HQA] Vdram = 0x%x (should be 0x%x)\n",
 		get_vdram(), HQA_VDRAM);
 #ifdef HQA_LPDDR4X
-	pr_err("[HQA] vddq = 0x%x (should be 0x%x)\n",
+	pr_info("[HQA] vddq = 0x%x (should be 0x%x)\n",
 		get_vddq(), HQA_VDDQ);
 #endif
 #endif
@@ -1860,13 +1838,13 @@ static int __init dram_hqa_init(void)
 	}
 
 	if (mt_get_chip_hw_ver() == 0xCA00) {
-		pr_err("[HQA] set Vcore to HPM\n");
+		pr_info("[HQA] set Vcore to HPM\n");
 		hqa_vcore = HQA_VCORE_HPM;
 	} else if (mt_get_chip_hw_ver() == 0xCA01) {
-		pr_err("[HQA] set Vcore to LPM\n");
+		pr_info("[HQA] set Vcore to LPM\n");
 		hqa_vcore = HQA_VCORE_LPM;
 	} else if (mt_get_chip_hw_ver() == 0xCB01) {
-		pr_err("[HQA] set Vcore to HPM\n");
+		pr_info("[HQA] set Vcore to HPM\n");
 		hqa_vcore = HQA_VCORE_HPM;
 	} else {
 		pr_err("[HQA] chip ID error!\n");
@@ -1917,10 +1895,10 @@ static int __init dram_test_init(void)
 #endif
 
 	DRAM_TYPE = (readl(PDEF_DRAMC0_CHA_REG_010) & 0x1C00) >> 10;
-	pr_err("[DRAMC Driver] dram type =%d\n", get_ddr_type());
+	pr_info("[DRAMC Driver] dram type =%d\n", get_ddr_type());
 
 	CBT_MODE = (readl(PDEF_DRAMC0_CHA_REG_01C) & 0xF000) >> 12;
-	pr_err("[DRAMC Driver] cbt mode =%d\n", CBT_MODE);
+	pr_info("[DRAMC Driver] cbt mode =%d\n", CBT_MODE);
 
 	switch (CBT_MODE) {
 	case NORMAL_MODE:
@@ -1944,8 +1922,8 @@ static int __init dram_test_init(void)
 		break;
 	}
 
-	pr_err("[DRAMC Driver] Dram Data Rate = %d\n", get_dram_data_rate());
-	pr_err("[DRAMC Driver] shuffle_status = %d\n", get_shuffle_status());
+	pr_info("[DRAMC Driver] Dram Data Rate = %d\n", get_dram_data_rate());
+	pr_info("[DRAMC Driver] shuffle_status = %d\n", get_shuffle_status());
 
 	if ((DRAM_TYPE == TYPE_LPDDR4) || (DRAM_TYPE == TYPE_LPDDR4X)) {
 		low_freq_counter = 10;
@@ -1954,7 +1932,7 @@ static int __init dram_test_init(void)
 			pr_err("[DRAMC Driver] Error in ZQCS mod_timer\n");
 	}
 	if (dram_can_support_fh())
-		pr_err("[DRAMC Driver] dram can support DFS\n");
+		pr_info("[DRAMC Driver] dram can support DFS\n");
 	else
 		pr_err("[DRAMC Driver] dram can not support DFS\n");
 

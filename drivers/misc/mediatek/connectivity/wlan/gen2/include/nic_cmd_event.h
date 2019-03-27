@@ -123,7 +123,6 @@ typedef enum _ENUM_CMD_ID_T {
 	CMD_ID_SET_PSCN_MAC_ADDR = 0x47,	/* 0x47 (Set) */
 	CMD_ID_GET_GSCN_SCN_RESULT = 0x48,	/* 0x48 (Get) */
 	CMD_ID_SET_COUNTRY_POWER_LIMIT = 0x4A,	/* 0x4A (Set) */
-
 	CMD_ID_SET_RRM_CAPABILITY = 0x59, /* 0x59 (Set) */
 	CMD_ID_SET_MAX_TXPWR_LIMIT = 0x5A, /* 0x5A (Set) */
 	CMD_ID_REQ_CHNL_UTILIZATION = 0x5C, /* 0x5C (Get) */
@@ -134,6 +133,7 @@ typedef enum _ENUM_CMD_ID_T {
 	CMD_ID_GET_TSM_STATISTICS = 0x5F,
 	CMD_ID_SET_SYSTEM_SUSPEND = 0x60,	/* 0x60 (Set) */
 	CMD_ID_UPDATE_AC_PARMS = 0x6A,		/* 0x6A (Set) */
+	CMD_ID_SET_CTIA_MODE_STATUS = 0x6B,		/* 0x6B (Set) */
 	CMD_ID_SET_ROAMING_SKIP = 0x6D, /* 0x6D (Set) */
 	CMD_ID_SET_DROP_PACKET_CFG = 0x6E,   /* 0x6E (Set) */
 #if (CFG_SUPPORT_FCC_DYNAMIC_TX_PWR_ADJUST || CFG_SUPPORT_FCC_POWER_BACK_OFF)
@@ -181,6 +181,7 @@ typedef enum _ENUM_CMD_ID_T {
 	CMD_ID_SET_RDD_CH = 0xE1,
 #endif
 
+	CMD_ID_SET_NVRAM_SETTINGS = 0xEF,
 	CMD_ID_SET_BWCS = 0xF1,
 	CMD_ID_SET_ROAMING_INFO = 0xF3,
 
@@ -261,16 +262,17 @@ typedef enum _ENUM_EVENT_ID_T {
 
 	EVENT_ID_CHECK_REORDER_BUBBLE = 0x39,
 #if CFG_SUPPORT_P2P_ECSA
-	EVENT_ID_ECSA_RESULT = 0x3D,
+		EVENT_ID_ECSA_RESULT = 0x3D,
 #endif
+	EVENT_ID_ADD_PKEY_DONE = 0x44, /* 0x44 (Unsolicited) */
+	EVENT_ID_GET_TSM_STATISTICS = 0x47,
+
+
 
 #if CFG_RX_BA_REORDERING_ENHANCEMENT
 	EVENT_ID_BA_FW_DROP_SN = 0x51,
 #endif
 	EVENT_ID_RSP_CHNL_UTILIZATION = 0x59, /* 0x59 (Query - CMD_ID_REQ_CHNL_UTILIZATION) */
-
-	EVENT_ID_ADD_PKEY_DONE = 0x44, /* 0x44 (Unsolicited) */
-	EVENT_ID_GET_TSM_STATISTICS = 0x47,
 #if CFG_SUPPORT_EMI_DEBUG
 	EVENT_ID_DRIVER_DUMP_LOG = 0x76, /*request driver to dump EMI message*/
 #endif
@@ -287,6 +289,17 @@ typedef enum _ENUM_EVENT_ID_T {
 	EVENT_ID_TX_DONE_STATUS = 0xFD,
 	EVENT_ID_FW_LOG_ENV = 0xFE,	/* 0xFE, FW real time debug log */
 } ENUM_EVENT_ID_T, *P_ENUM_EVENT_ID_T;
+
+#if CFG_SUPPORT_P2P_ECSA
+typedef enum _ENUM_ECSA_STATE_T {
+	ECSA_EVENT_STATUS_SUCCESS = 0,
+	ECSA_EVENT_STATUS_UPDATE_BEACON = 1, /*Notify Driver to update GO’s ECSA/CSA IE*/
+	ECSA_EVENT_STATUS_INVALID_PARAM = 2,
+	ECSA_EVENT_STATUS_CHNL_SWITCH_FAILED = 3,
+	ECSA_EVENT_STATUS_UNACCEPTABLE = 4,
+	ECSA_EVENT_STATUS_NUM,
+} ENUM_ECSA_STATE_T;
+#endif
 
 /*******************************************************************************
 *                             D A T A   T Y P E S
@@ -306,7 +319,9 @@ typedef struct _CMD_FCC_TX_PWR_ADJUST_T {
 	UINT_8 Channel_CCK[2];  /* [0] for start channel, [1] for ending channel */
 	UINT_8 Channel_HT20[2]; /* [0] for start channel, [1] for ending channel */
 	UINT_8 Channel_HT40[2]; /* [0] for start channel, [1] for ending channel */
-	UINT_8 cReserved[2];
+	UINT_8 Channel_Bandedge[2]; /* Set specical bandedge for flight mode
+								  *[0] for start channel, [1] for ending channel
+								  */
 } CMD_FCC_TX_PWR_ADJUST, *P_CMD_FCC_TX_PWR_ADJUST;
 #endif
 
@@ -1226,9 +1241,9 @@ typedef struct _CMD_SET_TSM_STATISTICS_REQUEST_T {
 	UINT_8 ucBin0Range;
 	UINT_8 aucReserved[3];
 
-	/* if this variable is 0, followed variables are meaningless
-	 * only report once for a same trigger condition in this time frame
-	*/
+	 /* if this variable is 0, followed variables are meaningless
+	 *   only report once for a same trigger condition in this time frame
+	 */
 	UINT_8 ucTriggerCondition; /* for triggered mode: bit(0):average, bit(1):consecutive, bit(2):delay */
 	UINT_8 ucAvgErrThreshold;
 	UINT_8 ucConsecutiveErrThreshold;
@@ -1552,6 +1567,13 @@ typedef struct _CMD_NLO_CANCEL_T {
 	UINT_8 aucReserved[3];
 } CMD_NLO_CANCEL, *P_CMD_NLO_CANCEL;
 
+
+struct CMD_SET_CTIA_MODE {
+	UINT_8  ucCmdVersion;
+	UINT_8  ucCtiaModeEnable;
+	UINT_8  ucReserved[2];
+};
+
 typedef struct _EVENT_NLO_DONE_T {
 	UINT_8      ucSeqNum;
 	UINT_8      ucStatus;
@@ -1738,14 +1760,8 @@ typedef struct _CMD_SET_ECSA_PARAM_T {
 	UINT_8  ucRfSco;
 	UINT_8  ucReserved[2];
 } CMD_SET_ECSA_PARAM, *P_CMD_SET_ECSA_PARAM;
-
 typedef struct _EVENT_ECSA_RESULT_T {
 	UINT_8 ucNetTypeIndex;
-#define ECSA_EVENT_STATUS_SUCCESS	0
-#define ECSA_EVENT_STATUS_UPDATE_BEACON	1
-#define ECSA_EVENT_STATUS_INVALID_PARAM	2
-#define ECSA_EVENT_STATUS_CHNL_SWITCH_FAILED	3
-#define ECSA_EVENT_STATUS_UNACCEPTABLE	4
 	UINT_8 ucStatus;	/*
 				 * 0: ECSA success
 				 * 1: update beacon success

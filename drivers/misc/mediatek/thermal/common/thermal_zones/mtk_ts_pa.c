@@ -122,6 +122,11 @@ static unsigned long get_tx_bytes(void)
 	return tx_bytes;
 }
 
+int tspa_get_MD_tx_tput(void)
+{
+	return tx_throughput;
+}
+
 static int pa_cal_stats(unsigned long data)
 {
 	struct pa_stats *stats_info = (struct pa_stats *) data;
@@ -388,13 +393,9 @@ static int tspa_sysrst_get_cur_state(struct thermal_cooling_device *cdev, unsign
 	return 0;
 }
 
-/* [lidebiao start] */
-static int pa_sysrst_happened = 0;
-extern int send_sysrst_signal(unsigned int type);
-/* [lidebiao end] */
-
 static int tspa_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 {
+
 	cl_dev_sysrst_state = state;
 	if (cl_dev_sysrst_state == 1) {
 		pr_debug("Power/PA_Thermal: reset, reset, reset!!!");
@@ -402,14 +403,8 @@ static int tspa_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsign
 		pr_debug("*****************************************");
 		pr_debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
 
-
-		/* [lidebiao start] */
-		if (0 == pa_sysrst_happened) {
-			send_sysrst_signal(0);
-			pa_sysrst_happened = 1;
-		}
-		//*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
-		/* [lidebiao end] */
+		/* To trigger data abort to reset the system for thermal protection. */
+		*(unsigned int *)0x0 = 0xdead;
 	}
 	return 0;
 }
@@ -620,6 +615,7 @@ static void mtkts_pa_start_thermal_timer(void)
 {
 	/* pr_debug("mtkts_pa_start_thermal_timer\n"); */
 	/* resume thermal framework polling when leaving deep idle */
+
 	if (!isTimerCancelled)
 		return;
 
@@ -629,8 +625,8 @@ static void mtkts_pa_start_thermal_timer(void)
 		return;
 
 	if (thz_dev != NULL && interval != 0)
-		mod_delayed_work(system_freezable_wq, &(thz_dev->poll_queue),
-			round_jiffies(msecs_to_jiffies(3000)));
+		mod_delayed_work(system_freezable_power_efficient_wq,
+				&(thz_dev->poll_queue), round_jiffies(msecs_to_jiffies(3000)));
 
 	up(&sem_mutex);
 }

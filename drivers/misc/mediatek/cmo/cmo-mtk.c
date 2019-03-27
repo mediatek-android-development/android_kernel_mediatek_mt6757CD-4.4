@@ -21,6 +21,8 @@
 
 #include "cmo-mtk.h"
 
+void __attribute__((weak)) mt_fiq_cache_flush_all(void) {}
+
 /*
  * inner_dcache_flush_all: Flush (clean + invalidate) the entire L1 data cache.
  *
@@ -74,6 +76,9 @@ void inner_dcache_disable(void)
  */
 void smp_inner_dcache_flush_all(void)
 {
+#ifdef CONFIG_MTK_FIQ_CACHE
+	mt_fiq_cache_flush_all();
+#else
 	int i, total_core, cid, last_cid;
 	struct cpumask mask;
 
@@ -112,6 +117,7 @@ void smp_inner_dcache_flush_all(void)
 
 	preempt_enable();
 	put_online_cpus();
+#endif
 }
 EXPORT_SYMBOL(smp_inner_dcache_flush_all);
 
@@ -200,15 +206,15 @@ static void _smp_inner_dcache_flush_all(void)
 	preempt_enable();
 }
 
-typedef enum {
-	FAILED,
+enum {
+	FAILED = 0,
 	STARTING,
 	FLUSHING,
 	WAITING_FOR_OTHERS,
-} flush_state;
+};
 
 static struct scatterlist *sg_sync;
-static flush_state f_state;
+static int f_state;
 
 spinlock_t sg_flush_lock;
 spinlock_t smp_cache_flush_lock;

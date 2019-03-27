@@ -49,14 +49,8 @@
 
 static void _disable_all_charging(struct charger_manager *info)
 {
-	bool chg2_chip_enabled = false;
-
-	charger_dev_is_chip_enabled(info->chg2_dev, &chg2_chip_enabled);
 	charger_dev_enable(info->chg1_dev, false);
-	if (chg2_chip_enabled) {
-		charger_dev_enable(info->chg2_dev, false);
-		charger_dev_enable_chip(info->chg2_dev, false);
-	}
+	charger_dev_enable(info->chg2_dev, false);
 
 	if (mtk_pe20_get_is_enable(info)) {
 		mtk_pe20_set_is_enable(info, false);
@@ -77,9 +71,6 @@ static void dual_swchg_select_charging_current_limit(struct charger_manager *inf
 	struct dual_switch_charging_alg_data *swchgalg = info->algorithm_data;
 	u32 ichg1_min = 0, ichg2_min = 0, aicr1_min = 0, aicr2_min = 0;
 	int ret = 0;
-	bool chg2_chip_enabled = false;
-
-	charger_dev_is_chip_enabled(info->chg2_dev, &chg2_chip_enabled);
 
 	pdata = &info->chg1_data;
 	pdata2 = &info->chg2_data;
@@ -101,7 +92,7 @@ static void dual_swchg_select_charging_current_limit(struct charger_manager *inf
 		goto done;
 	}
 
-	if (info->usb_unlimited && (info->chr_type == STANDARD_HOST || info->chr_type == CHARGING_HOST)) {
+	if (info->usb_unlimited) {
 		pdata->input_current_limit = info->data.ac_charger_input_current;
 		pdata->charging_current_limit = info->data.ac_charger_current;
 		goto done;
@@ -112,7 +103,22 @@ static void dual_swchg_select_charging_current_limit(struct charger_manager *inf
 		goto done;
 	}
 
-	if (info->chr_type == STANDARD_HOST) {
+	if (mtk_pdc_check_charger(info) == true) {
+		int vbus = 0, cur = 0, idx = 0;
+
+		mtk_pdc_get_setting(info, &vbus, &cur, &idx);
+		if (idx != -1) {
+		pdata->input_current_limit = cur * 1000;
+		pdata->charging_current_limit = info->data.pd_charger_current;
+			mtk_pdc_setup(info, idx);
+		} else {
+			pdata->input_current_limit = info->data.usb_charger_current_configured;
+			pdata->charging_current_limit = info->data.usb_charger_current_configured;
+		}
+		chr_err("[%s]vbus:%d input_cur:%d idx:%d current:%d\n", __func__,
+			vbus, cur, idx, info->data.pd_charger_current);
+
+	} else if (info->chr_type == STANDARD_HOST) {
 		if (IS_ENABLED(CONFIG_USBIF_COMPLIANCE)) {
 			if (info->usb_state == USB_SUSPEND)
 				pdata->input_current_limit = info->data.usb_charger_current_suspend;
@@ -123,7 +129,7 @@ static void dual_swchg_select_charging_current_limit(struct charger_manager *inf
 			else
 				pdata->input_current_limit = info->data.usb_charger_current_unconfigured;
 
-			pdata->charging_current_limit = pdata->input_current_limit;
+				pdata->charging_current_limit = pdata->input_current_limit;
 		} else {
 			pdata->input_current_limit = info->data.usb_charger_current;
 			pdata->charging_current_limit = info->data.usb_charger_current;	/* it can be larger */
@@ -255,12 +261,10 @@ done:
 
 	if ((mtk_pe20_get_is_enable(info) && mtk_pe20_get_is_connect(info))
 	    || (mtk_pe_get_is_enable(info) && mtk_pe_get_is_connect(info))) {
-		if (chg2_chip_enabled) {
-			charger_dev_set_input_current(info->chg2_dev,
-				pdata2->input_current_limit);
-			charger_dev_set_charging_current(info->chg2_dev,
-				pdata2->charging_current_limit);
-		}
+		charger_dev_set_input_current(info->chg2_dev,
+					pdata2->input_current_limit);
+		charger_dev_set_charging_current(info->chg2_dev,
+					pdata2->charging_current_limit);
 	}
 #if 0
 	/* If AICR < 300mA, stop PE+/PE+20 */
@@ -307,9 +311,6 @@ done:
 static void swchg_select_cv(struct charger_manager *info)
 {
 	u32 constant_voltage;
-	bool chg2_chip_enabled = false;
-
-	charger_dev_is_chip_enabled(info->chg2_dev, &chg2_chip_enabled);
 
 	if (info->enable_sw_jeita)
 		if (info->sw_jeita.cv != 0) {
@@ -323,9 +324,7 @@ static void swchg_select_cv(struct charger_manager *info)
 
 	charger_dev_set_constant_voltage(info->chg1_dev, constant_voltage);
 	/* Set slave charger's CV to 200mV higher than master's */
-	if (chg2_chip_enabled)
-		charger_dev_set_constant_voltage(info->chg2_dev,
-			constant_voltage + 200000);
+	charger_dev_set_constant_voltage(info->chg2_dev, constant_voltage + 200000);
 }
 
 static void dual_swchg_turn_on_charging(struct charger_manager *info)
@@ -333,9 +332,6 @@ static void dual_swchg_turn_on_charging(struct charger_manager *info)
 	struct dual_switch_charging_alg_data *swchgalg = info->algorithm_data;
 	bool chg1_enable = true;
 	bool chg2_enable = true;
-	bool chg2_chip_enabled = false;
-
-	charger_dev_is_chip_enabled(info->chg2_dev, &chg2_chip_enabled);
 
 	if (swchgalg->state == CHR_ERROR) {
 		chg1_enable = false;
@@ -375,30 +371,23 @@ static void dual_swchg_turn_on_charging(struct charger_manager *info)
 		/* charger_dev_enable(info->chg1_dev, true); */
 		if ((mtk_pe20_get_is_enable(info) && mtk_pe20_get_is_connect(info))
 		    || (mtk_pe_get_is_enable(info) && mtk_pe_get_is_connect(info))) {
-			if (!chg2_chip_enabled)
-				charger_dev_enable_chip(info->chg2_dev, true);
 			if (swchgalg->state != CHR_POSTCC) {
 				charger_dev_enable(info->chg2_dev, true);
 				charger_dev_set_eoc_current(info->chg1_dev, 450000);
 				charger_dev_enable_termination(info->chg1_dev, false);
 			} else {
+				charger_dev_enable(info->chg2_dev, false);
 				charger_dev_set_eoc_current(info->chg1_dev, 150000);
 				charger_dev_enable_termination(info->chg1_dev, true);
 			}
 		} else {
-			if (chg2_chip_enabled) {
-				charger_dev_enable(info->chg2_dev, false);
-				charger_dev_enable_chip(info->chg2_dev, false);
-			}
+			charger_dev_enable(info->chg2_dev, false);
 			charger_dev_set_eoc_current(info->chg1_dev, 150000);
 			charger_dev_enable_termination(info->chg1_dev, true);
 		}
 	} else {
 		/* charger_dev_enable(info->chg1_dev, false); */
-		if (chg2_chip_enabled) {
-			charger_dev_enable(info->chg2_dev, false);
-			charger_dev_enable_chip(info->chg2_dev, false);
-		}
+		charger_dev_enable(info->chg2_dev, false);
 	}
 
 	if (chg1_enable == false || chg2_enable == false) {
@@ -432,6 +421,7 @@ static int mtk_dual_switch_charging_plug_out(struct charger_manager *info)
 {
 	mtk_pe20_set_is_cable_out_occur(info, true);
 	mtk_pe_set_is_cable_out_occur(info, true);
+	mtk_pdc_plugout(info);
 	/* charger_dev_enable(info->chg2_dev, false); */
 	charger_manager_notifier(info, CHARGER_NOTIFY_STOP_CHARGING);
 	return 0;
@@ -460,9 +450,7 @@ static int mtk_dual_switch_charging_do_charging(struct charger_manager *info, bo
 static int mtk_dual_switch_chr_cc(struct charger_manager *info)
 {
 	bool chg_done = false;
-	bool chg2_en = false;
 	struct dual_switch_charging_alg_data *swchgalg = info->algorithm_data;
-	struct charger_data *pdata = &info->chg1_data;
 
 	/* check bif */
 	if (IS_ENABLED(CONFIG_MTK_BIF_SUPPORT)) {
@@ -476,14 +464,6 @@ static int mtk_dual_switch_chr_cc(struct charger_manager *info)
 	/* turn on LED */
 
 	dual_swchg_turn_on_charging(info);
-
-	charger_dev_is_enabled(info->chg2_dev, &chg2_en);
-	/* Check whether eoc condition is met */
-	if (swchgalg->state != CHR_POSTCC && chg2_en
-	    && (pdata->thermal_charging_current_limit > 500000 ||
-		pdata->thermal_charging_current_limit ==  -1)) {
-		charger_dev_safety_check(info->chg1_dev);
-	}
 
 	if (info->enable_sw_jeita) {
 		if (info->sw_jeita.pre_sm != TEMP_T2_TO_T3
@@ -610,17 +590,19 @@ int dual_charger_dev_event(struct notifier_block *nb, unsigned long event, void 
 	struct charger_data *pdata2 = &info->chg2_data;
 	struct dual_switch_charging_alg_data *swchgalg = info->algorithm_data;
 	u32 ichg2, ichg2_min;
-	bool chg_en = false;
-	bool chg2_chip_enabled = false;
-
-	charger_dev_is_chip_enabled(info->chg2_dev, &chg2_chip_enabled);
+	bool chg_en;
+	int ret;
 
 	pr_err("charger_dev_event %ld\n", event);
 
 	if (event == CHARGER_DEV_NOTIFY_EOC) {
-		charger_dev_is_enabled(info->chg2_dev, &chg_en);
+		ret = charger_dev_is_enabled(info->chg2_dev, &chg_en);
+		if (ret < 0) {
+			pr_err("is_enabled callback is not registered\n");
+			return NOTIFY_DONE;
+		}
 
-		if (!chg_en || !chg2_chip_enabled) {
+		if (!chg_en) {
 			swchgalg->state = CHR_BATFULL;
 			charger_manager_notifier(info, CHARGER_NOTIFY_EOC);
 			if (info->chg1_dev->is_polling_mode == false)
@@ -671,8 +653,8 @@ int dual_charger_dev_event(struct notifier_block *nb, unsigned long event, void 
 		return NOTIFY_DONE;
 	}
 
-	if (info->chg1_dev->is_polling_mode == false)
-		_wake_up_charger(info);
+		if (info->chg1_dev->is_polling_mode == false)
+			_wake_up_charger(info);
 
 	return NOTIFY_DONE;
 }

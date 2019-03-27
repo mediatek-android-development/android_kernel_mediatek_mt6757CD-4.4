@@ -331,7 +331,7 @@ void ldo_oc_int_handler(void)
 /*****************************************************************************
  * General OC Int Handler
  ******************************************************************************/
-void oc_int_handler(PMIC_IRQ_ENUM intNo, const char *int_name)
+void oc_int_handler(enum PMIC_IRQ_ENUM intNo, const char *int_name)
 {
 	static unsigned int vcore_pre_oc_times;
 	static unsigned int vgpu_pre_oc_times;
@@ -527,7 +527,7 @@ irqreturn_t mt_pmic_eint_irq(int irq, void *desc)
 	return IRQ_HANDLED;
 }
 
-void pmic_enable_interrupt(PMIC_IRQ_ENUM intNo, unsigned int en, char *str)
+void pmic_enable_interrupt(enum PMIC_IRQ_ENUM intNo, unsigned int en, char *str)
 {
 	unsigned int shift, no;
 
@@ -553,7 +553,7 @@ void pmic_enable_interrupt(PMIC_IRQ_ENUM intNo, unsigned int en, char *str)
 
 }
 
-void pmic_register_interrupt_callback(PMIC_IRQ_ENUM intNo, void (EINT_FUNC_PTR) (void))
+void pmic_register_interrupt_callback(enum PMIC_IRQ_ENUM intNo, void (EINT_FUNC_PTR) (void))
 {
 	unsigned int shift, no;
 
@@ -574,7 +574,7 @@ void pmic_register_interrupt_callback(PMIC_IRQ_ENUM intNo, void (EINT_FUNC_PTR) 
 #define ENABLE_ALL_OC_IRQ 0
 
 /* register general oc interrupt handler */
-void pmic_register_oc_interrupt_callback(PMIC_IRQ_ENUM intNo)
+void pmic_register_oc_interrupt_callback(enum PMIC_IRQ_ENUM intNo)
 {
 	unsigned int shift, no;
 
@@ -595,7 +595,7 @@ void pmic_register_oc_interrupt_callback(PMIC_IRQ_ENUM intNo)
 /* register and enable all oc interrupt */
 void register_all_oc_interrupts(void)
 {
-	PMIC_IRQ_ENUM oc_interrupt = INT_VCORE_OC;
+	enum PMIC_IRQ_ENUM oc_interrupt = INT_VCORE_OC;
 
 	for (; oc_interrupt <= INT_VS2_PREOC; oc_interrupt++) {
 		if (oc_interrupt == INT_VPA_OC) {
@@ -612,11 +612,10 @@ void register_all_oc_interrupts(void)
 	}
 }
 
-void PMIC_EINT_SETTING(void)
+void PMIC_EINT_SETTING(struct device_node *np)
 {
-	struct device_node *node = NULL;
+	struct device_node *pmic_irq_node = NULL;
 	int ret = 0;
-	u32 ints[2] = { 0, 0 };
 
 	upmu_set_reg_value(MT6351_INT_CON0, 0);
 	upmu_set_reg_value(MT6351_INT_CON1, 0);
@@ -670,12 +669,9 @@ void PMIC_EINT_SETTING(void)
 	register_all_oc_interrupts();
 #endif
 
-	node = of_find_compatible_node(NULL, NULL, "mediatek,mt6351-pmic");
-	if (node) {
-		of_property_read_u32_array(node, "debounce", ints, ARRAY_SIZE(ints));
-	/*	mt_gpio_set_debounce(ints[0], ints[1]);	*/
-
-		g_pmic_irq = irq_of_parse_and_map(node, 0);
+	pmic_irq_node = of_get_child_by_name(np, "pmic_irq");
+	if (pmic_irq_node) {
+		g_pmic_irq = irq_of_parse_and_map(pmic_irq_node, 0);
 		ret = request_irq(g_pmic_irq, (irq_handler_t) mt_pmic_eint_irq, IRQF_TRIGGER_NONE, "pmic-eint", NULL);
 		if (ret > 0)
 			PMICLOG("EINT IRQ LINENNOT AVAILABLE\n");
@@ -693,15 +689,13 @@ void PMIC_EINT_SETTING(void)
 static void pmic_int_handler(void)
 {
 	unsigned char i, j;
+	unsigned int ret;
 
 	for (i = 0; i < ARRAY_SIZE(interrupts); i++) {
 		unsigned int int_status_val = 0;
 
 		int_status_val = upmu_get_reg_value(interrupts[i].address);
-		if (int_status_val) {
-			pr_err(PMICTAG "[PMIC_INT] addr[0x%x]=0x%x\n", interrupts[i].address, int_status_val);
-			upmu_set_reg_value(interrupts[i].address, int_status_val);
-		}
+		pr_err("[PMIC_INT] addr[0x%x]=0x%x\n", interrupts[i].address, int_status_val);
 
 		for (j = 0; j < PMIC_INT_WIDTH; j++) {
 			if ((int_status_val) & (1 << j)) {
@@ -712,8 +706,9 @@ static void pmic_int_handler(void)
 					interrupts[i].interrupts[j].callback();
 				if (interrupts[i].interrupts[j].oc_callback != NULL) {
 					interrupts[i].interrupts[j].oc_callback((i * PMIC_INT_WIDTH + j),
-						interrupts[i].interrupts[j].name);
+										interrupts[i].interrupts[j].name);
 				}
+				ret = pmic_config_interface(interrupts[i].address, 0x1, 0x1, j);
 			}
 		}
 	}

@@ -1,22 +1,15 @@
-/******************************************************************************
- * mtk_tpd.c - MTK Android Linux Touch Panel Device Driver               *
- *                                                                            *
- * Copyright 2008-2009 MediaTek Co.,Ltd.                                      *
- *                                                                            *
- * DESCRIPTION:                                                               *
- *     this file provide basic touch panel event to input sub system          *
- *                                                                            *
- * AUTHOR:                                                                    *
- *     Kirby.Wu (mtk02247)                                                    *
- *                                                                            *
- * NOTE:                                                                      *
- * 1. Sensitivity for touch screen should be set to edge-sensitive.           *
- *    But in this driver it is assumed to be done by interrupt core,          *
- *    though not done yet. Interrupt core may provide interface to            *
- *    let drivers set the sensitivity in the future. In this case,            *
- *    this driver should set the sensitivity of the corresponding IRQ         *
- *    line itself.                                                            *
- ******************************************************************************/
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
 
 #include "tpd.h"
 #include <linux/slab.h>
@@ -54,12 +47,6 @@ struct tpd_dts_info tpd_dts_data;
 struct pinctrl *pinctrl1;
 struct pinctrl_state *pins_default;
 struct pinctrl_state *eint_as_int, *eint_output0, *eint_output1, *rst_output0, *rst_output1;
-/* Vanzo:yuntaohe on: Mon, 11 Jan 2016 14:08:13 +0800
- */
-#ifndef CONFIG_TPD_POWER_SOURCE_VIA_VGP
-struct pinctrl_state *ldoen_output0, *ldoen_output1;
-#endif
-// End of Vanzo:yuntaohe
 const struct of_device_id touch_of_match[] = {
 	{ .compatible = "mediatek,mt6735-touch", },
 	{ .compatible = "mediatek,mt6580-touch", },
@@ -75,32 +62,21 @@ const struct of_device_id touch_of_match[] = {
 	{ .compatible = "mediatek,mt7623-touch", },
 	{ .compatible = "mediatek,elbrus-touch", },
 	{ .compatible = "mediatek,mt6799-touch", },
+	{ .compatible = "mediatek,mt6739-touch", },
 	{ .compatible = "mediatek,touch", },
 	{},
 };
 
-/* Vanzo:yangzhihong on: Thu, 25 Feb 2016 20:47:40 +0800
- */
-#if CFG_TPD_USE_BUTTON
-static int tpd_keys_local[CFG_TPD_KEY_COUNT] = CFG_TPD_KEYS;
-static int tpd_keys_dim_local[CFG_TPD_KEY_COUNT][4] = CFG_TPD_KEYS_DIM;
-#endif
-// End of Vanzo:yangzhihong
 void tpd_get_dts_info(void)
 {
 	struct device_node *node1 = NULL;
-    int i;
-	//int key_dim_local[16], i;
+	int key_dim_local[16], i;
 
 	node1 = of_find_matching_node(node1, touch_of_match);
 	if (node1) {
-/* Vanzo:yangzhihong on: Thu, 25 Feb 2016 20:33:41 +0800
- * TODO: Don't get tpd parameter from dts
- */
-#if 0
-		of_property_read_u32(node1, "tpd-key-dim-local", &tpd_dts_data.touch_max_num);
+		of_property_read_u32(node1, "tpd-max-touch-num", &tpd_dts_data.touch_max_num);
 		of_property_read_u32(node1, "use-tpd-button", &tpd_dts_data.use_tpd_button);
-		pr_info("[tpd]use-tpd-button = %d\n", tpd_dts_data.use_tpd_button);
+		pr_debug("[tpd]use-tpd-button = %d\n", tpd_dts_data.use_tpd_button);
 		of_property_read_u32_array(node1, "tpd-resolution",
 			tpd_dts_data.tpd_resolution, ARRAY_SIZE(tpd_dts_data.tpd_resolution));
 		if (tpd_dts_data.use_tpd_button) {
@@ -111,44 +87,12 @@ void tpd_get_dts_info(void)
 				key_dim_local, ARRAY_SIZE(key_dim_local));
 			memcpy(tpd_dts_data.tpd_key_dim_local, key_dim_local, sizeof(key_dim_local));
 			for (i = 0; i < 4; i++) {
-				pr_info("[tpd]key[%d].key_x = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_x);
-				pr_info("[tpd]key[%d].key_y = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_y);
-				pr_info("[tpd]key[%d].key_W = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_width);
-				pr_info("[tpd]key[%d].key_H = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_height);
+				pr_debug("[tpd]key[%d].key_x = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_x);
+				pr_debug("[tpd]key[%d].key_y = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_y);
+				pr_debug("[tpd]key[%d].key_W = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_width);
+				pr_debug("[tpd]key[%d].key_H = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_height);
 			}
-		}            
-#else
-        tpd_dts_data.touch_max_num = CFG_TPD_MAX_TOUCH_NUM;
-
-        tpd_dts_data.tpd_resolution[0] = CFG_TPD_WIDTH;
-        tpd_dts_data.tpd_resolution[1] = CFG_TPD_HEIGHT;
-
-        tpd_dts_data.use_tpd_button = CFG_TPD_USE_BUTTON;
-
-#if CFG_TPD_USE_BUTTON
-        if(tpd_dts_data.use_tpd_button){
-
-            tpd_dts_data.tpd_key_num = CFG_TPD_KEY_COUNT;
-
-            for(i=0; i<4; i++) {
-                tpd_dts_data.tpd_key_local[i] = tpd_keys_local[i];
-
-                tpd_dts_data.tpd_key_dim_local[i].key_x = tpd_keys_dim_local[i][0];
-                tpd_dts_data.tpd_key_dim_local[i].key_y = tpd_keys_dim_local[i][1];
-                tpd_dts_data.tpd_key_dim_local[i].key_width = tpd_keys_dim_local[i][2];
-                tpd_dts_data.tpd_key_dim_local[i].key_height = tpd_keys_dim_local[i][3];
-                
-				pr_info("[tpd]key[%d].key_x = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_x);
-				pr_info("[tpd]key[%d].key_y = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_y);
-				pr_info("[tpd]key[%d].key_W = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_width);
-				pr_info("[tpd]key[%d].key_H = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_height);
-            }
-        }
-#endif
-        tpd_dts_data.tpd_switch_vkey = 0;    
-#endif
-// End of Vanzo:yangzhihong
-
+		}
 		of_property_read_u32(node1, "tpd-filter-enable", &tpd_dts_data.touch_filter.enable);
 		if (tpd_dts_data.touch_filter.enable) {
 			of_property_read_u32(node1, "tpd-filter-pixel-density",
@@ -220,7 +164,7 @@ pr_err("Lomen 0.2\n");
 	pins_default = pinctrl_lookup_state(pinctrl1, "default");
 	if (IS_ERR(pins_default)) {
 		ret = PTR_ERR(pins_default);
-		/*dev_err(&pdev->dev, "fwq Cannot find touch pinctrl default %d!\n", ret);*/
+		dev_err(&pdev->dev, "fwq Cannot find touch pinctrl default %d!\n", ret);
 	}
 	eint_as_int = pinctrl_lookup_state(pinctrl1, "state_eint_as_int");
 	if (IS_ERR(eint_as_int)) {
@@ -254,41 +198,9 @@ pr_err("Lomen 0.2\n");
 			return ret;
 		}
 	}
-
-/* Vanzo:yuntaohe on: Mon, 11 Jan 2016 14:09:30 +0800
- */
-#ifndef CONFIG_TPD_POWER_SOURCE_VIA_VGP
-	ldoen_output0 = pinctrl_lookup_state(pinctrl1, "state_ldoen_output0");
-	if (IS_ERR(ldoen_output0)) {
-		ret = PTR_ERR(ldoen_output0);
-		dev_err(&pdev->dev, "fwq Cannot find touch pinctrl state_ldoen_output0!\n");
-		return ret;
-	}
-	ldoen_output1 = pinctrl_lookup_state(pinctrl1, "state_ldoen_output1");
-	if (IS_ERR(ldoen_output1)) {
-		ret = PTR_ERR(ldoen_output1);
-		dev_err(&pdev->dev, "fwq Cannot find touch pinctrl state_ldoen_output1!\n");
-		return ret;
-	}
-#endif
-// End of Vanzo:yuntaohe
-
 	TPD_DEBUG("[tpd%d] mt_tpd_pinctrl----------\n", pdev->id);
 	return 0;
 }
-
-/* Vanzo:yuntaohe on: Mon, 11 Jan 2016 14:12:29 +0800
- */
-#ifndef CONFIG_TPD_POWER_SOURCE_VIA_VGP
-void tpd_ldo_power_enable(bool en)
-{
-    if (en==1 && !IS_ERR(ldoen_output1))
-        pinctrl_select_state(pinctrl1, ldoen_output1);
-    else if(en==0 && !IS_ERR(ldoen_output0))
-        pinctrl_select_state(pinctrl1, ldoen_output0);
-}
-#endif
-// End of Vanzo:yuntaohe
 
 static int tpd_misc_open(struct inode *inode, struct file *file)
 {
@@ -576,31 +488,6 @@ static void tpd_create_attributes(struct device *dev, struct tpd_attrs *attrs)
 		device_create_file(dev, attrs->attr[--num]);
 }
 
-#ifdef VANZO_FEATURE_DYN_SWITCH_VIRTUAL_KEY
-static ssize_t show_tpd_switch_vkey(struct device *dev, struct device_attribute *attr, char *buf)
-{
-    ssize_t num_read_chars = 0;
-
-    num_read_chars = snprintf(buf, PAGE_SIZE, "%d\n", tpd_dts_data.tpd_switch_vkey);
-
-    return num_read_chars;
-}
-static ssize_t store_tpd_switch_vkey(struct device *dev, struct device_attribute *attr, const char *buf, size_t size)
-{
-    if(buf[0] == '1' && tpd_dts_data.tpd_switch_vkey == 0){
-        tpd_dts_data.tpd_switch_vkey = 1;
-    }
-
-    if(buf[0] == '0' && tpd_dts_data.tpd_switch_vkey == 1){
-        tpd_dts_data.tpd_switch_vkey = 0;
-    }
-    
-    return size;
-}
-
-static DEVICE_ATTR(tpd_switch_vkey, 0664, show_tpd_switch_vkey, store_tpd_switch_vkey);
-#endif
-
 /* touch panel probe */
 static int tpd_probe(struct platform_device *pdev)
 {
@@ -662,7 +549,7 @@ pr_err("Lomen 1\n");
 			return ret;
 		}
 		TPD_RES_X = tpd_res_x;
-		ret = kstrtoul(CONFIG_LCM_HEIGHT, 0, &tpd_res_y);
+		ret = kstrtoul(CONFIG_LCM_HEIGHT, 0, &tpd_res_x);
 		if (ret < 0) {
 			pr_err("Touch down get lcm_y failed");
 			return ret;
@@ -709,14 +596,6 @@ pr_err("Lomen 1\n");
 				TPD_DMESG("[mtk-tpd]tpd_probe, tpd_driver_name=%s\n",
 					  tpd_driver_list[i].tpd_device_name);
 				g_tpd_drv = &tpd_driver_list[i];
-/* Vanzo:zhangqingzhan on: Tue, 01 Nov 2016 18:38:34 +0800
- *for tpd info
- */
-                /*{
-                    extern void v_set_dev_name(int id, char *name);
-                    v_set_dev_name(2, tpd_driver_list[i].tpd_device_name);
-                }*/
-// End of Vanzo: zhangqingzhan
 				break;
 			}
 		}
@@ -779,9 +658,7 @@ pr_err("Lomen 1\n");
 
 	if (g_tpd_drv->attrs.num)
 		tpd_create_attributes(&pdev->dev, &g_tpd_drv->attrs);
-#ifdef VANZO_FEATURE_DYN_SWITCH_VIRTUAL_KEY
-    device_create_file(&pdev->dev, &dev_attr_tpd_switch_vkey);
-#endif
+
 	return 0;
 }
 static int tpd_remove(struct platform_device *pdev)

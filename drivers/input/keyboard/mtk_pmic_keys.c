@@ -27,6 +27,7 @@
 #include <linux/regmap.h>
 #include <linux/mfd/mt6323/registers.h>
 #include <linux/mfd/mt6397/registers.h>
+#include <linux/mfd/mt6392/registers.h>
 #include <linux/mfd/mt6397/core.h>
 #include <linux/slab.h>
 #include <linux/irqdomain.h>
@@ -37,6 +38,9 @@
 #define PMIC_RG_HOMEKEY_RST_EN_SHIFT  5
 #define PMIC_RG_RST_DU_MASK  0x3
 #define PMIC_RG_RST_DU_SHIFT  8
+
+static struct wake_lock pwrkey_lock;
+#define PWRKEY_INITIAL_STATE (0)
 
 struct pmic_keys_regs {
 	u32 deb_reg;
@@ -57,19 +61,30 @@ struct pmic_regs {
 	const struct pmic_keys_regs pwrkey_regs;
 	const struct pmic_keys_regs homekey_regs;
 	u32 pmic_rst_reg;
+	u8 indie_release_irq_mask;
 };
 
 static const struct pmic_regs mt6397_regs = {
 	.pwrkey_regs = PMIC_KEYS_REGS(MT6397_CHRSTATUS, 0x8, MT6397_INT_RSV, 0x10),
 	.homekey_regs = PMIC_KEYS_REGS(MT6397_OCSTATUS2, 0x10, MT6397_INT_RSV, 0x8),
 	.pmic_rst_reg = MT6397_TOP_RST_MISC,
+	.indie_release_irq_mask = 0,
 };
 
 static const struct pmic_regs mt6323_regs = {
 	.pwrkey_regs = PMIC_KEYS_REGS(MT6323_CHRSTATUS, 0x2, MT6323_INT_MISC_CON, 0x10),
 	.homekey_regs = PMIC_KEYS_REGS(MT6323_CHRSTATUS, 0x4, MT6323_INT_MISC_CON, 0x8),
 	.pmic_rst_reg = MT6323_TOP_RST_MISC,
+	.indie_release_irq_mask = 0,
 };
+
+static const struct pmic_regs mt6392_regs = {
+	.pwrkey_regs = PMIC_KEYS_REGS(MT6392_CHRSTATUS, 0x2, MT6392_INT_MISC_CON, 0x10),
+	.homekey_regs = PMIC_KEYS_REGS(MT6392_CHRSTATUS, 0x4, MT6392_INT_MISC_CON, 0x8),
+	.pmic_rst_reg = MT6392_TOP_RST_MISC,
+	.indie_release_irq_mask = 1,
+};
+
 
 struct pmic_keys_info {
 	struct mtk_pmic_keys *keys;
@@ -84,7 +99,8 @@ struct mtk_pmic_keys {
 	struct device *dev;
 	struct regmap *regmap;
 	struct irq_domain *irq_domain;
-	struct pmic_keys_info pwrkey, homekey;
+	struct pmic_keys_info pwrkey, homekey, pwr_release, home_release;
+	u8 indie_release_irq_mask;
 };
 
 enum long_press_mode {
@@ -141,6 +157,10 @@ static irqreturn_t mtk_pmic_keys_irq_handler_thread(int irq, void *data)
 
 	input_report_key(info->keys->input_dev, info->keycode, pressed);
 	input_sync(info->keys->input_dev);
+	if (pressed)
+		wake_lock(&pwrkey_lock);
+	else
+		wake_lock_timeout(&pwrkey_lock, HZ/2);
 
 	dev_info(info->keys->dev, "[PMICKEYS] (%s) key =%d using PMIC\n",
 		pressed ? "pressed" : "released", info->keycode);
@@ -162,10 +182,17 @@ static int mtk_pmic_key_setup(struct mtk_pmic_keys *keys,
 
 	info->keys = keys;
 
-	ret = regmap_update_bits(keys->regmap, info->regs->intsel_reg,
+	if (keys->indie_release_irq_mask == 1) {
+		ret = regmap_update_bits(keys->regmap, info->regs->intsel_reg,
+			info->regs->intsel_mask, 0);
+		if (ret < 0)
+			return ret;
+	} else {
+		ret = regmap_update_bits(keys->regmap, info->regs->intsel_reg,
 			info->regs->intsel_mask, info->regs->intsel_mask);
-	if (ret < 0)
-		return ret;
+		if (ret < 0)
+			return ret;
+	}
 
 	info->irq = irq_create_mapping(keys->irq_domain, info->hw_irq);
 	if (info->irq <= 0)
@@ -206,6 +233,9 @@ static const struct of_device_id of_pmic_keys_match_tbl[] = {
 		.compatible = "mediatek,mt6323-keys",
 		.data = &mt6323_regs,
 	}, {
+		.compatible = "mediatek,mt6392-keys",
+		.data = &mt6392_regs,
+	}, {
 		/* sentinel */
 	}
 };
@@ -239,8 +269,19 @@ static int mtk_pmic_keys_probe(struct platform_device *pdev)
 		return -ENODEV;
 	}
 
+	keys->indie_release_irq_mask = pmic_regs->indie_release_irq_mask;
 	keys->pwrkey.hw_irq = res->start;
-	keys->homekey.hw_irq = res->end;
+	if (keys->indie_release_irq_mask == 1) {
+		keys->pwr_release.regs = &pmic_regs->pwrkey_regs;
+		keys->home_release.regs = &pmic_regs->homekey_regs;
+		keys->homekey.hw_irq = res->end - 2;
+		keys->pwr_release.hw_irq = res->end - 1;
+		keys->home_release.hw_irq = res->end;
+	} else {
+		keys->homekey.hw_irq = res->end;
+	}
+
+	wake_lock_init(&pwrkey_lock, WAKE_LOCK_SUSPEND, "pwrkey wakelock");
 
 	keys->input_dev = input_dev = devm_input_allocate_device(keys->dev);
 	if (!input_dev) {
@@ -264,6 +305,16 @@ static int mtk_pmic_keys_probe(struct platform_device *pdev)
 	ret = mtk_pmic_key_setup(keys, "mediatek,homekey-code", &keys->homekey, false);
 	if (ret)
 		goto out_dispose_irq;
+
+	if (keys->indie_release_irq_mask == 1) {
+		ret = mtk_pmic_key_setup(keys, "mediatek,pwrkey-code", &keys->pwr_release, true);
+		if (ret)
+			goto out_dispose_irq;
+
+		ret = mtk_pmic_key_setup(keys, "mediatek,homekey-code", &keys->home_release, false);
+		if (ret)
+			goto out_dispose_irq;
+	}
 
 	ret = input_register_device(input_dev);
 	if (ret) {

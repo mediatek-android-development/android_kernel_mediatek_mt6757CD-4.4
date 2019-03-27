@@ -55,6 +55,12 @@ BOOLEAN g_bCaptureDone = FALSE;
 BOOLEAN g_bIcapEnable = FALSE;
 UINT_16 g_u2DumpIndex;
 BOOLEAN g_fgHasChannelSwitchIE = FALSE;
+#if CFG_SUPPORT_QA_TOOL
+UINT_32 g_au4Offset[2][2];
+UINT_32 g_au4IQData[20][1024];
+UINT_32 g_au4I0Data[1][408000];
+UINT_32 g_au4Q0Data[1][408000];
+#endif
 /*******************************************************************************
 *                                 M A C R O S
 ********************************************************************************
@@ -1362,9 +1368,11 @@ static UINT_8 rlmRecIeInfoForClient(P_ADAPTER_T prAdapter, P_BSS_INFO_T prBssInf
 
 	if (fgHasChannelSwitchIE != FALSE) {
 		P_BSS_DESC_T prBssDesc;
+		PARAM_SSID_T rSsid;
 
 		prBssInfo->ucPrimaryChannel = ucChannelAnnouncePri;
-		prBssDesc = scanSearchBssDescByBssid(prAdapter, prBssInfo->aucBSSID);
+		COPY_SSID(rSsid.aucSsid, rSsid.u4SsidLen, prBssInfo->aucSSID, prBssInfo->ucSSIDLen);
+		prBssDesc = scanSearchBssDescByBssidAndSsid(prAdapter, prBssInfo->aucBSSID, TRUE, &rSsid);
 
 		if (prBssDesc) {
 			DBGLOG(RLM, INFO, "DFS: BSS: " MACSTR " Desc found, channel from %u to %u\n ",
@@ -2444,8 +2452,10 @@ VOID rlmProcessSpecMgtAction(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb)
 		}		/*end of IE_FOR_EACH */
 		if (!fgHasChannelSwitchIE) {
 			P_BSS_DESC_T prBssDesc;
+			PARAM_SSID_T rSsid;
 
-			prBssDesc = scanSearchBssDescByBssid(prAdapter, prBssInfo->aucBSSID);
+			COPY_SSID(rSsid.aucSsid, rSsid.u4SsidLen, prBssInfo->aucSSID, prBssInfo->ucSSIDLen);
+			prBssDesc = scanSearchBssDescByBssidAndSsid(prAdapter, prStaRec->aucMacAddr, TRUE, &rSsid);
 			if (RLM_NET_IS_11AC(prBssInfo) && (prBssInfo->ucVhtChannelWidth != CW_20_40MHZ)) {
 				/*Due to MT6630 BW80 sidelope issue*/
 				DBGLOG(RLM, INFO,

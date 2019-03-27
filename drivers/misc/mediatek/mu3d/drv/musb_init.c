@@ -22,6 +22,9 @@
 #include <linux/platform_device.h>
 #include <linux/dma-mapping.h>
 #include <linux/prefetch.h>
+#ifdef CONFIG_MTK_BOOT
+#include <mt-plat/mtk_boot_common.h>
+#endif
 
 #include <asm/cacheflush.h>
 
@@ -31,9 +34,14 @@
 #include "mu3d_hal_phy.h"
 #include "mu3d_hal_usb_drv.h"
 #include "musb_gadget.h"
+#include <linux/phy/mediatek/mtk_usb_phy.h>
 
 #ifdef CONFIG_PROJECT_PHY
 #include "mtk-phy-asic.h"
+#endif
+
+#ifdef CONFIG_PHY_MTK_SSUSB
+#include "mtk-ssusb-hal.h"
 #endif
 
 #ifdef CONFIG_MTK_USB2JTAG_SUPPORT
@@ -48,7 +56,7 @@
 #ifdef CONFIG_USBIF_COMPLIANCE
 static struct musb_fifo_cfg mtu3d_cfg[] = {
 #else
-static struct musb_fifo_cfg mtu3d_cfg[] __initdata = {
+static struct musb_fifo_cfg mtu3d_cfg[] = {
 #endif
 	{.hw_ep_num = 1, .style = FIFO_TX, .maxpacket = 1024,},
 	{.hw_ep_num = 1, .style = FIFO_RX, .maxpacket = 1024,},
@@ -188,13 +196,14 @@ static inline void mtu3d_u3_ltssm_intr_handler(struct musb *musb, u32 dwLtssmVal
 	}
 
 	if (dwLtssmValue & ENTER_U0_INTR) {
+		usb_hal_dpidle_request(USB_DPIDLE_FORBIDDEN);
+		os_printk(K_INFO, "LTSSM: ENTER_U0_INTR %d, USB_DPIDLE_FORBIDDEN\n", musb->g.speed);
+
 		soft_conn_num = 0;
 		/* do not apply U3 EP0 setting again, if the speed is already U3 */
 		/* LTSSM may go to recovery and back to U0 */
-		if (musb->g.speed != USB_SPEED_SUPER) {
-			os_printk(K_INFO, "LTSSM: ENTER_U0_INTR %d\n", musb->g.speed);
+		if (musb->g.speed != USB_SPEED_SUPER)
 			musb_conifg_ep0(musb);
-		}
 		cancel_delayed_work(&musb->check_ltssm_work);
 		sts_ltssm = ENTER_U0_INTR;
 	}
@@ -211,7 +220,8 @@ static inline void mtu3d_u3_ltssm_intr_handler(struct musb *musb, u32 dwLtssmVal
 	}
 
 	if (dwLtssmValue & ENTER_U3_INTR) {
-		os_printk(K_INFO, "LTSSM: ENTER_U3_INTR\n");
+		usb_hal_dpidle_request(USB_DPIDLE_TIMER);
+		os_printk(K_INFO, "LTSSM: ENTER_U3_INTR, USB_DPIDLE_TIMER\n");
 		mu3d_hal_pdn_ip_port(0, 0, 1, 0);
 		sts_ltssm = ENTER_U3_INTR;
 	}
@@ -237,8 +247,8 @@ static inline void mtu3d_u3_ltssm_intr_handler(struct musb *musb, u32 dwLtssmVal
 	 * 5. The port shall maintain its low-impedance receiver termination (RRX-DC) defined in Table 6-13.
 	 */
 	if (dwLtssmValue & HOT_RST_INTR) {
-		DEV_INT32 link_err_cnt;
-		DEV_INT32 timeout_val;
+		int link_err_cnt;
+		int timeout_val;
 
 		os_printk(K_INFO, "LTSSM: HOT_RST_INTR\n");
 		/* Clear link error count */
@@ -277,7 +287,7 @@ static inline void mtu3d_u3_ltssm_intr_handler(struct musb *musb, u32 dwLtssmVal
 	 * 4. The LTSSM of a port shall transition to U0 through RxDetect and Polling.
 	 */
 	if (dwLtssmValue & WARM_RST_INTR) {
-		DEV_INT32 link_err_cnt;
+		int link_err_cnt;
 
 		os_printk(K_INFO, "LTSSM: WARM_RST_INTR\n");
 		/* Clear link error count */
@@ -299,7 +309,7 @@ static inline void mtu3d_u3_ltssm_intr_handler(struct musb *musb, u32 dwLtssmVal
 		 */
 		os_printk(K_INFO, "LTSSM: RXDET_SUCCESS_INTR\n");
 		sts_ltssm = RXDET_SUCCESS_INTR;
-		schedule_delayed_work_on(0, &musb->check_ltssm_work, msecs_to_jiffies(1000));
+		schedule_delayed_work(&musb->check_ltssm_work, msecs_to_jiffies(1000));
 	}
 }
 
@@ -346,17 +356,25 @@ static inline void mtu3d_u2_common_intr_handler(u32 dwIntrUsbValue)
 	}
 
 	if (dwIntrUsbValue & SUSPEND_INTR) {
-		os_printk(K_NOTICE, "[U2 SUSPEND_INTR]\n");
+		usb_hal_dpidle_request(USB_DPIDLE_TIMER);
+		os_printk(K_NOTICE, "[U2 SUSPEND_INTR], USB_DPIDLE_TIMER\n");
 		mu3d_hal_pdn_ip_port(0, 0, 0, 1);
+#ifdef U3_COMPLIANCE
+		os_writel(U3D_LTSSM_INFO, CLR_DISABLE_CNT);
+		os_printk(K_NOTICE, "w1c, U3D_LTSSM_INFO, CLR_DISABLE_CNT\n");
+#endif
 	}
 
 	if (dwIntrUsbValue & RESUME_INTR) {
-		os_printk(K_NOTICE, "[U2 RESUME_INTR]\n");
+		usb_hal_dpidle_request(USB_DPIDLE_FORBIDDEN);
+		os_printk(K_NOTICE, "[U2 RESUME_INTR], USB_DPIDLE_FORBIDDEN\n");
 		mu3d_hal_pdn_ip_port(1, 0, 0, 1);
 	}
 
-	if (dwIntrUsbValue & RESET_INTR)
-		os_printk(K_NOTICE, "[U2 RESET_INTR]\n");
+	if (dwIntrUsbValue & RESET_INTR) {
+		usb_hal_dpidle_request(USB_DPIDLE_FORBIDDEN);
+		os_printk(K_NOTICE, "[U2 RESET_INTR], USB_DPIDLE_FORBIDDEN\n");
+	}
 
 }
 
@@ -380,12 +398,17 @@ static inline void mtu3d_link_intr_handler(struct musb *musb, u32 dwLinkIntValue
 		speed = SSUSB_SPEED_FULL;
 #endif
 
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 		/* Comment from CC Chou.
 		 * When detecting HS or FS and setting RG_USB20_SW_PLLMODE=1, It is OK to enter LPM L1 with BESL=0.
 		 * When disconnecting, set RG_USB20_SW_PLLMODE=0 back.
 		 */
+#ifdef CONFIG_PHY_MTK_SSUSB
+		usb_mtkphy_lpm_enable(musb->mtk_phy, true);
+#else
 		os_setmsk(U3D_U2PHYDCR1, (0x1 << E60802_RG_USB20_SW_PLLMODE_OFST));
+#endif
+
 
 		/*BESLCK = 0 < BESLCK_U3 = 1 < BESLDCK = 15 */
 		os_writel(U3D_USB20_LPM_PARAMETER, 0x10f0);
@@ -411,20 +434,23 @@ static inline void mtu3d_link_intr_handler(struct musb *musb, u32 dwLinkIntValue
 			if (timespec_compare(&ss_timestamp, &tmp) > 0) {
 				os_printk(K_INFO, "queue reconnect work\n");
 
-				schedule_delayed_work_on(0, &musb->reconnect_work, 0);
+				schedule_delayed_work(&musb->reconnect_work, 0);
 			}
 		}
 		speed_last = speed;
 		speed = SSUSB_SPEED_HIGH;
 #endif
 
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 		/* Comment from CC Chou.
 		 * When detecting HS or FS and setting RG_USB20_SW_PLLMODE=1, It is OK to enter LPM L1 with BESL=0.
 		 * When disconnecting, set RG_USB20_SW_PLLMODE=0 back.
 		 */
+#ifdef CONFIG_PHY_MTK_SSUSB
+		usb_mtkphy_lpm_enable(musb->mtk_phy, true);
+#else
 		os_setmsk(U3D_U2PHYDCR1, (0x1 << E60802_RG_USB20_SW_PLLMODE_OFST));
-
+#endif
 		/*BESLCK = 0 < BESLCK_U3 = 1 < BESLDCK = 15 */
 		os_writel(U3D_USB20_LPM_PARAMETER, 0x10f0);
 		/*
@@ -554,12 +580,14 @@ static irqreturn_t generic_interrupt(int irq, void *__hci)
 		os_printk(K_INFO, "===L1[%x] DMA[%x]\n", dwL1Value, dwDmaIntrValue);
 	}
 
-	if (dwL1Value & MAC3_INTR) {
+#ifdef SUPPORT_U3
+	if (musb_speed && (dwL1Value & MAC3_INTR)) {
 		dwLtssmValue = os_readl(U3D_LTSSM_INTR) & os_readl(U3D_LTSSM_INTR_ENABLE);
 		/* Write 1 clear */
 		os_writel(U3D_LTSSM_INTR, dwLtssmValue);
 		os_printk(K_DEBUG, "===L1[%x] LTSSM[%x]\n", dwL1Value, dwLtssmValue);
 	}
+#endif
 #ifdef USE_SSUSB_QMU
 	if (dwL1Value & QMU_INTR) {
 		wIntrQMUValue = os_readl(U3D_QISAR1) & os_readl(U3D_QIER1);
@@ -644,12 +672,16 @@ static void mtu3d_musb_disable(struct musb *musb)
 {
 	os_printk(K_DEBUG, "%s\n", __func__);
 
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 	/* Comment from CC Chou.
 	 * When detecting HS or FS and setting RG_USB20_SW_PLLMODE=1, It is OK to enter LPM L1 with BESL=0.
 	 * When disconnecting, set RG_USB20_SW_PLLMODE=0 back.
 	 */
+#ifdef CONFIG_PHY_MTK_SSUSB
+	usb_mtkphy_lpm_enable(musb->mtk_phy, false);
+#else
 	os_clrmsk(U3D_U2PHYDCR1, E60802_RG_USB20_SW_PLLMODE);
+#endif
 #endif
 }
 
@@ -660,6 +692,17 @@ static int mtu3d_musb_init(struct musb *musb)
 	musb->xceiv = usb_get_phy(USB_PHY_TYPE_USB2);
 	if (IS_ERR_OR_NULL(musb->xceiv))
 		goto unregister;
+
+#ifdef CONFIG_PHY_MTK_SSUSB
+	musb->mtk_phy = devm_of_phy_get_by_index(musb->controller->parent, musb->controller->parent->of_node, 0);
+	if (IS_ERR_OR_NULL(musb->mtk_phy)) {
+		musb->mtk_phy = NULL;
+		goto unregister;
+	}
+	init_phy_hal(musb->mtk_phy);
+	if (ssusb_phy_init_debugfs(musb->mtk_phy))
+		os_printk(K_ERR, "usb20_phy_init_debugfs fail!\n");
+#endif
 
 	mtu3d_musb_reg_init(musb);
 
@@ -688,12 +731,34 @@ static int mtu3d_musb_exit(struct musb *musb)
 #endif				/* NEVER */
 
 	usb_put_phy(musb->xceiv);
+#ifdef CONFIG_PHY_MTK_SSUSB
+	ssusb_phy_exit_debugfs();
+#endif
 
 	return 0;
 }
 
 static void mtu3d_musb_reg_init(struct musb *musb)
 {
+#ifdef CONFIG_PHY_MTK_SSUSB
+	os_printk(K_DEBUG, "%s\n", __func__);
+	phy_init(musb->mtk_phy);
+	musb->is_clk_on = 1;
+#ifdef CONFIG_MTK_UART_USB_SWITCH
+	if (usb_phy_check_in_uart_mode()) {
+		os_printk(K_INFO, "%s+ UART_MODE\n", __func__);
+		in_uart_mode = true;
+	} else {
+		os_printk(K_INFO, "%s+ USB_MODE\n", __func__);
+	}
+#endif
+	phy_power_on(musb->mtk_phy);
+	/* disable ip power down, disable U2/U3 ip power down */
+	_ex_mu3d_hal_ssusb_en();
+
+	/* reset U3D all dev module. */
+	mu3d_hal_rst_dev();
+#else
 	int ret = 1;
 
 	os_printk(K_DEBUG, "%s\n", __func__);
@@ -738,6 +803,7 @@ static void mtu3d_musb_reg_init(struct musb *musb)
 		os_printk(K_ERR, "%s: PHY initialization fail!\n", __func__);
 		WARN_ON(1);
 	}
+#endif
 }
 
 static u64 usb_dmamask = DMA_BIT_MASK(32);
@@ -795,9 +861,8 @@ static int mtu3d_probe(struct platform_device *pdev)
 	musb->dev.dma_mask = &usb_dmamask;
 	musb->dev.coherent_dma_mask = usb_dmamask;
 
-	/* FIXME, check why dev its self cannot be used for dma related in 64-bit, search "->parent" */
-	musb->dev.parent->dma_mask = &usb_dmamask;
-	musb->dev.parent->coherent_dma_mask = usb_dmamask;
+	/* add from kernel 4.4, 64-bit will get dummy dma ops without this, -1 denote no matters */
+	arch_setup_dma_ops(&musb->dev, -1, -1, NULL, 0);
 
 	glue->dev = &pdev->dev;
 	glue->musb = musb;
@@ -827,6 +892,19 @@ static int mtu3d_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "failed to register musb device\n");
 		goto err2;
 	}
+
+/* run time force on */
+#if defined(CONFIG_FPGA_EARLY_PORTING) || defined(U3_COMPLIANCE) || defined(FOR_BRING_UP)
+	mu3d_force_on = 1;
+#endif
+
+#ifdef CONFIG_MTK_BOOT
+	if (get_boot_mode() == META_BOOT) {
+		os_printk(K_WARNIN, "in special mode %d\n", get_boot_mode());
+		mu3d_force_on = 1;
+	}
+#endif
+
 
 	return 0;
 

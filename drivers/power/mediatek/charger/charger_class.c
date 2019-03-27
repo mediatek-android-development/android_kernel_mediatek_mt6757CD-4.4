@@ -142,15 +142,6 @@ int charger_dev_enable_chip(struct charger_device *charger_dev, bool en)
 }
 EXPORT_SYMBOL(charger_dev_enable_chip);
 
-int charger_dev_is_chip_enabled(struct charger_device *charger_dev, bool *en)
-{
-	if (charger_dev != NULL && charger_dev->ops != NULL && charger_dev->ops->is_chip_enabled)
-		return charger_dev->ops->is_chip_enabled(charger_dev, en);
-
-	return -ENOTSUPP;
-}
-EXPORT_SYMBOL(charger_dev_is_chip_enabled);
-
 int charger_dev_enable_direct_charging(struct charger_device *charger_dev, bool en)
 {
 	if (charger_dev != NULL && charger_dev->ops != NULL && charger_dev->ops->enable_direct_charging)
@@ -475,14 +466,6 @@ int charger_dev_reset_eoc_state(struct charger_device *charger_dev)
 	return -ENOTSUPP;
 }
 EXPORT_SYMBOL(charger_dev_reset_eoc_state);
-
-int charger_dev_safety_check(struct charger_device *charger_dev)
-{
-	if (charger_dev != NULL && charger_dev->ops != NULL && charger_dev->ops->safety_check)
-		return charger_dev->ops->safety_check(charger_dev);
-
-	return -ENOTSUPP;
-}
 
 int charger_dev_notify(struct charger_device *charger_dev, int event)
 {

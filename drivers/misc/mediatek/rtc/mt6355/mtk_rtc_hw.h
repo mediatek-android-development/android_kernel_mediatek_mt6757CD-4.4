@@ -241,9 +241,6 @@ extern unsigned int pmic_config_interface_nolock(unsigned int RegNum,
 #define RTC_SPAR0                (RTC_BASE + 0x0032)
 #define RTC_SPAR0_32K_LESS             (1U << 6)
 #define RTC_SPAR0_LP_DET            (1U << 7)
-/* [liguanxiong start] on_boot vibration flag, 1: disable 0: enable  */
-#define RTC_SPAR0_BOOT_VIB_DISABLE  (1U << 8)
-/* [liguanxiong end] */
 
 /*
  * RTC_SPAR1:
@@ -318,6 +315,10 @@ extern unsigned int pmic_config_interface_nolock(unsigned int RegNum,
 #define RTC_PWRON_DOM        RTC_SPAR1
 #define RTC_PWRON_DOM_MASK     0xf800
 #define RTC_PWRON_DOM_SHIFT     11
+
+#define RTC_INT_CNT            (RTC_BASE + 0x00A2)
+#define RTC_INT_CNT_MASK        0x7FF
+#define RTC_INT_CNT_SHIFT       0
 
 extern u16 rtc_spare_reg[][3];
 

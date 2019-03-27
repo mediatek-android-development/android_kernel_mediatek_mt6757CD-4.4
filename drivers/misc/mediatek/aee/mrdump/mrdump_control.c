@@ -23,7 +23,7 @@
 struct mrdump_control_block mrdump_cblock __attribute__((section(".mrdump")));
 
 int mrdump_rsv_conflict;
-mrdump_rsvmem_block_t __initdata rsvmem_block[4];
+struct mrdump_rsvmem_block __initdata rsvmem_block[4];
 
 static __init char *find_next_mrdump_rsvmem(char *p, int len)
 {
@@ -51,7 +51,7 @@ static int __init early_mrdump_rsvmem(char *p)
 	for (i = 0; i < 4; i++) {
 		ret = sscanf(tmp_p, "0x%lx,0x%lx", &start_addr, &size);
 		if (ret != 2) {
-			pr_alert("%s:%s reserve failed ret=%d\n", __func__, p, ret);
+			pr_notice("%s:%s reserve failed ret=%d\n", __func__, p, ret);
 			return 0;
 		}
 		rsvmem_block[i].start_addr = start_addr;
@@ -81,7 +81,7 @@ __init void mrdump_rsvmem(void)
 				mrdump_rsv_conflict = 1;
 				mrdump_enable = 0;
 #endif
-				pr_err(" mrdump region start = %pa size =%pa is reserved already\n",
+				pr_notice(" mrdump region start = %pa size =%pa is reserved already\n",
 						&rsvmem_block[i].start_addr, &rsvmem_block[i].size);
 			}
 		}
@@ -89,14 +89,6 @@ __init void mrdump_rsvmem(void)
 }
 
 early_param("mrdump_rsvmem", early_mrdump_rsvmem);
-
-extern const unsigned long kallsyms_addresses[] __weak;
-extern const u8 kallsyms_names[] __weak;
-extern const u8 kallsyms_token_table[] __weak;
-extern const u16 kallsyms_token_index[] __weak;
-extern const unsigned long kallsyms_markers[] __weak;
-extern const unsigned long kallsyms_num_syms
-__attribute__((weak, section(".rodata")));
 
 static void mrdump_cblock_kallsyms_init(struct mrdump_ksyms_param *kparam)
 {
@@ -136,7 +128,7 @@ void mrdump_cblock_init(void)
 	memcpy(&mrdump_cblock.sig, MRDUMP_GO_DUMP, 8);
 
 	machdesc_p = &mrdump_cblock.machdesc;
-	machdesc_p->nr_cpus = NR_CPUS;
+	machdesc_p->nr_cpus = AEE_MTK_CPU_NUMS;
 	machdesc_p->page_offset = (uint64_t)PAGE_OFFSET;
 	machdesc_p->high_memory = (uintptr_t)high_memory;
 
@@ -158,7 +150,7 @@ void mrdump_cblock_init(void)
 	machdesc_p->modules_start = (uint64_t)MODULES_VADDR;
 	machdesc_p->modules_end = (uint64_t)MODULES_END;
 
-	machdesc_p->phys_offset = (uint64_t)PHYS_OFFSET;
+	machdesc_p->phys_offset = (uint64_t)(phys_addr_t)PHYS_OFFSET;
 	machdesc_p->master_page_table = (uintptr_t)__pa(&swapper_pg_dir);
 
 #if defined(CONFIG_SPARSEMEM_VMEMMAP)
@@ -203,7 +195,7 @@ static void __mrdump_reboot_stop_all(void)
 		pr_warn("Non-crashing CPUs did not react to IPI\n");
 }
 
-void __mrdump_create_oops_dump(AEE_REBOOT_MODE reboot_mode, struct pt_regs *regs, const char *msg, ...)
+void __mrdump_create_oops_dump(enum AEE_REBOOT_MODE reboot_mode, struct pt_regs *regs, const char *msg, ...)
 {
 	local_irq_disable();
 

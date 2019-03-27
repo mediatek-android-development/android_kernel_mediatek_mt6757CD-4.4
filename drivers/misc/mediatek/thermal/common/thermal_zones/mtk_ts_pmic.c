@@ -35,7 +35,6 @@
  *Local variable definition
  *=============================================================
  */
-
 static kuid_t uid = KUIDT_INIT(0);
 static kgid_t gid = KGIDT_INIT(1000);
 static DEFINE_SEMAPHORE(sem_mutex);
@@ -244,11 +243,6 @@ static int tspmic_sysrst_get_cur_state(struct thermal_cooling_device *cdev, unsi
 	return 0;
 }
 
-/* [lidebiao start] */
-static int pmic_sysrst_happened = 0;
-extern int send_sysrst_signal(unsigned int type);
-/* [lidebiao end] */
-
 static int tspmic_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 {
 	cl_dev_sysrst_state = state;
@@ -258,13 +252,7 @@ static int tspmic_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsi
 		mtktspmic_info("*****************************************");
 		mtktspmic_info("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
 
-		/* [lidebiao start] */
-		if (0 == pmic_sysrst_happened) {
-			send_sysrst_signal(0);
-			pmic_sysrst_happened = 1;
-		}
-		//*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
-		/* [lidebiao end] */
+		*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
 
 	}
 	return 0;
@@ -440,6 +428,7 @@ static void mtkts_pmic_start_thermal_timer(void)
 {
 	/* pr_debug("mtkts_pmic_start_thermal_timer\n"); */
 	/* resume thermal framework polling when leaving deep idle */
+
 	if (!isTimerCancelled)
 		return;
 
@@ -449,14 +438,14 @@ static void mtkts_pmic_start_thermal_timer(void)
 		return;
 
 	if (thz_dev != NULL && interval != 0)
-		mod_delayed_work(system_freezable_wq, &(thz_dev->poll_queue),
-			round_jiffies(msecs_to_jiffies(1000)));
+		mod_delayed_work(system_freezable_power_efficient_wq,
+				&(thz_dev->poll_queue), round_jiffies(msecs_to_jiffies(1000)));
 
 	up(&sem_mutex);
 }
 
 
-int mtktspmic_register_cooler(void)
+static int mtktspmic_register_cooler(void)
 {
 	cl_dev_sysrst = mtk_thermal_cooling_device_register("mtktspmic-sysrst", NULL,
 							    &mtktspmic_cooling_sysrst_ops);
@@ -474,7 +463,7 @@ static int mtktspmic_register_thermal(void)
 	return 0;
 }
 
-void mtktspmic_unregister_cooler(void)
+static void mtktspmic_unregister_cooler(void)
 {
 	if (cl_dev_sysrst) {
 		mtk_thermal_cooling_device_unregister(cl_dev_sysrst);

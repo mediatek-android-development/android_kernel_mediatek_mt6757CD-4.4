@@ -31,6 +31,7 @@ struct tag_nand_number {
 #define C_SIZE		8192
 #define RAMDOM_READ		(1<<0)
 #define CACHE_READ		(1<<1)
+#define MULTI_PLANE		(1<<2)
 #define RAND_TYPE_SAMSUNG 0
 #define RAND_TYPE_TOSHIBA 1
 #define RAND_TYPE_NONE 2
@@ -139,6 +140,13 @@ struct NFI_TLC_WL_INFO {
 	enum NFI_TLC_WL_PRE wl_pre;
 };
 
+struct NAND_LIFE_PARA {
+	u16 slc_pe;	/* by 1k */
+	u16 data_pe;
+	u16 slc_bitflip;
+	u16 data_bitflip;
+};
+
 typedef struct {
 	u8 id[NAND_MAX_ID];
 	u8 id_length;
@@ -160,6 +168,7 @@ typedef struct {
 	u16 NAND_FLASH_TYPE;
 	struct NFI_TLC_CTRL tlcControl;
 	bool two_phyplane;
+	struct NAND_LIFE_PARA lifepara;
 } flashdev_info_t, *pflashdev_info;
 
 #endif

@@ -534,8 +534,6 @@ enum DSI_STATUS DSI_DumpRegisters(enum DISP_MODULE_ENUM module, int level)
 				}
 
 				DDPDUMP("- DSI%d CMD REGS -\n", i);
-
-			#if 0
 				for (k = 0; k < 32; k += 16) { /* only dump first 32 bytes cmd */
 					DDPDUMP("0x%04x: 0x%08x 0x%08x 0x%08x 0x%08x\n", k,
 						INREG32((dsi_base_addr + 0x200 + k)),
@@ -543,8 +541,6 @@ enum DSI_STATUS DSI_DumpRegisters(enum DISP_MODULE_ENUM module, int level)
 						INREG32((dsi_base_addr + 0x200 + k + 0x8)),
 						INREG32((dsi_base_addr + 0x200 + k + 0xc)));
 				}
-			#endif
-
 
 #ifndef CONFIG_FPGA_EARLY_PORTING
 				DDPDUMP("== DSI_PHY%d REGS ==\n", i);
@@ -923,6 +919,9 @@ enum DSI_STATUS DSI_Wakeup(enum DISP_MODULE_ENUM module, struct cmdqRecStruct *c
 	u32 tmp = 0;
 
 	DISPINFO("DSI_Wakeup+\n");
+	/* set wait_sleep_out_done to false first to avoid race condition */
+	wait_sleep_out_done = false;
+
 	for (i = DSI_MODULE_BEGIN(module); i <= DSI_MODULE_END(module); i++) {
 		DSI_OUTREGBIT(cmdq, struct DSI_START_REG, DSI_REG[i]->DSI_START, SLEEPOUT_START, 0);
 		DSI_OUTREGBIT(cmdq, struct DSI_START_REG, DSI_REG[i]->DSI_START, SLEEPOUT_START, 1);
@@ -930,13 +929,12 @@ enum DSI_STATUS DSI_Wakeup(enum DISP_MODULE_ENUM module, struct cmdqRecStruct *c
 
 	for (i = DSI_MODULE_BEGIN(module); i <= DSI_MODULE_END(module); i++) {
 		cnt = 0;
-		wait_sleep_out_done = false;
-
 		if (i == 0) { /* kernel only listens DSI0's IRQ */
 			do {
 				cnt++;
 				ret = wait_event_interruptible_timeout(_dsi_wait_sleep_out_done_queue[i],
 								       wait_sleep_out_done, 2 * HZ);
+				wait_sleep_out_done = false;
 			} while (ret <= 0 && cnt <= 2);
 		}
 		if (ret == 0) {
@@ -2864,13 +2862,13 @@ void DSI_set_cmdq(enum DISP_MODULE_ENUM module, struct cmdqRecStruct *cmdq, unsi
 #if 0
 		/* start DSI VM CMDQ */
 		if (force_update) {
-			MMProfileLogEx(MTKFB_MMP_Events.DSICmd, MMProfileFlagStart,
+			mmprofile_log_ex(MTKFB_MMP_Events.DSICmd, MMPROFILE_FLAG_START,
 				       *(unsigned int *)(&DSI_VM_CMD_REG->data[0]),
 				       *(unsigned int *)(&DSI_VM_CMD_REG->data[1]));
 			DSI_EnableVM_CMD();
 
 			/* must wait VM CMD done? */
-			MMProfileLogEx(MTKFB_MMP_Events.DSICmd, MMProfileFlagEnd,
+			mmprofile_log_ex(MTKFB_MMP_Events.DSICmd, MMPROFILE_FLAG_END,
 				       *(unsigned int *)(&DSI_VM_CMD_REG->data[2]),
 				       *(unsigned int *)(&DSI_VM_CMD_REG->data[3]));
 		}
@@ -2926,8 +2924,7 @@ int DSI_Send_ROI(enum DISP_MODULE_ENUM module, void *handle, unsigned int x, uns
 
 static void lcm_set_reset_pin(UINT32 value)
 {
-/* [liliwen] Change LCM_RST gpio mode */
-#if 0
+#if 1
 	DSI_OUTREG32(NULL, DISPSYS_CONFIG_BASE + 0x150, value);
 #else
 #if !defined(CONFIG_MTK_LEGACY)
@@ -3049,50 +3046,19 @@ unsigned int DSI_dcs_read_lcm_reg_v2_wrapper_DSIDUAL(UINT8 cmd, UINT8 *buffer, U
 	return DSI_dcs_read_lcm_reg_v2(DISP_MODULE_DSIDUAL, NULL, cmd, buffer, buffer_size);
 }
 
-/* [liliwen start] Add LCM gpio config api */
 long lcd_enp_bias_setting(unsigned int value)
 {
 	long ret = 0;
+
 #if !defined(CONFIG_MTK_LEGACY)
-	if (value){
-		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_BIAS_ENP1);
-	}
-	else{
-		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_BIAS_ENP0);
-	}
+	if (value)
+		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_BIAS_ENP);
+	else
+		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_BIAS_ENN);
 #endif
+
 	return ret;
 }
-
-long lcd_enn_bias_setting(unsigned int value)
-{
-	long ret = 0;
-#if !defined(CONFIG_MTK_LEGACY)
-	if (value){
-		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_BIAS_ENN1);
-	}
-	else{
-		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_BIAS_ENN0);
-	}
-#endif
-	return ret;
-}
-
-long lcd_tp_rst_setting(unsigned int value)
-{
-	long ret = 0;
-#if !defined(CONFIG_MTK_LEGACY)
-	if (value){
-		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_TP_RST_OUT1);
-    }
-	else{
-		ret = disp_dts_gpio_select_state(DTS_GPIO_STATE_LCD_TP_RST_OUT0);
-    }
-#endif
-	return ret;
-}
-/* [liliwen end] */
-
 int ddp_dsi_set_lcm_utils(enum DISP_MODULE_ENUM module, LCM_DRIVER *lcm_drv)
 {
 	LCM_UTIL_FUNCS *utils = NULL;
@@ -3169,10 +3135,6 @@ int ddp_dsi_set_lcm_utils(enum DISP_MODULE_ENUM module, LCM_DRIVER *lcm_drv)
 	utils->set_gpio_pull_enable = (int (*)(unsigned int, unsigned char))mt_set_gpio_pull_enable;
 #else
 	utils->set_gpio_lcd_enp_bias = lcd_enp_bias_setting;
-	/* [liliwen start] Add LCM gpio config api */
-	utils->set_gpio_lcd_enn_bias = lcd_enn_bias_setting;
-	utils->set_gpio_lcd_tp_rst = lcd_tp_rst_setting;
-	/* [liliwen end] */
 #endif
 #endif
 
@@ -3771,7 +3733,7 @@ int ddp_dsi_switch_mode(enum DISP_MODULE_ENUM module, void *cmdq_handle, void *p
 	}
 
 	if (mode == 0) {	/* V2C */
-		DISPMSG("[C2V]v2c switch begin\n");
+		DISPCHECK("[C2V]v2c switch begin\n");
 #if 0
 		/* 1. enable dsi auto rack */
 		DSI_SetBypassRack(module, cmdq_handle, 1);
@@ -3884,9 +3846,9 @@ int ddp_dsi_switch_mode(enum DISP_MODULE_ENUM module, void *cmdq_handle, void *p
 		dsi_analysis(module);
 		DSI_DumpRegisters(module, 2);
 
-		DISPMSG("[C2V]v2c switch finished\n");
+		DISPCHECK("[C2V]v2c switch finished\n");
 	} else {		/* C2V */
-		DISPMSG("[C2V]c2v switch begin\n");
+		DISPCHECK("[C2V]c2v switch begin\n");
 		/* 1. Adjust PLL clk */
 		cmdqRecWaitNoClear(cmdq_handle, CMDQ_SYNC_TOKEN_STREAM_EOF);
 		DSI_DisableClk(module, cmdq_handle);
@@ -3975,7 +3937,7 @@ int ddp_dsi_switch_mode(enum DISP_MODULE_ENUM module, void *cmdq_handle, void *p
 		/* 8. disable dsi auto rack  */
 		/* DSI_SetBypassRack(module, NULL, 0); */
 
-		DISPMSG("[C2V]c2v switch finished\n");
+		DISPCHECK("[C2V]c2v switch finished\n");
 
 	}
 	dsi_currect_mode = mode;
@@ -4236,6 +4198,8 @@ int ddp_dsi_power_off(enum DISP_MODULE_ENUM module, void *cmdq_handle)
 	int ret = 0;
 	unsigned int value = 0;
 #endif
+	unsigned int try_cnt = 1;
+
 	DISPFUNC();
 	/* DSI_DumpRegisters(module,1); */
 
@@ -4256,9 +4220,18 @@ int ddp_dsi_power_off(enum DISP_MODULE_ENUM module, void *cmdq_handle)
 			mdelay(1);
 			value = INREG32(&DSI_REG[0]->DSI_STATE_DBG1);
 			value = value >> 24;
-			if (value == 0x20)
+			if (value == 0x20) {
+				if (try_cnt > 1)
+					DDPMSG("dsi in ulps mode, try_cnt(%u)\n", try_cnt);
 				break;
-			DDPMSG("dsi not in ulps mode, try again...\n");
+			}
+
+			if (try_cnt == 1)
+				DDPERR("dsi not in ulps mode, try again...(%u)\n", try_cnt);
+			else if (!(try_cnt & 0x3FF))
+				DDPMSG("dsi not in ulps mode, try again...(%u)\n", try_cnt);
+
+			try_cnt++;
 		}
 		/* clear lane_num when enter ulps */
 		for (i = DSI_MODULE_BEGIN(module); i <= DSI_MODULE_END(module); i++)
@@ -5178,6 +5151,14 @@ UINT32 PanelMaster_get_dsi_timing(UINT32 dsi_index, enum MIPI_SETTING_TYPE type)
 	}
 	dsi_val = 0;
 	return dsi_val;
+}
+
+unsigned int PanelMaster_is_enable(void)
+{
+	if (atomic_read(&PMaster_enable) == 1)
+		return 1;
+	else
+		return 0;
 }
 
 unsigned int PanelMaster_set_PM_enable(unsigned int value)

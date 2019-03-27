@@ -26,11 +26,10 @@
 #include "mtk-phy-asic.h"
 /*#include <mach/mt_typedefs.h>*/
 #endif
+#include <linux/phy/mediatek/mtk_usb_phy.h>
 
-/* #define USB_FORCE_ON */
-/* USB FORCE ON for FPGA/U3_COMPLIANCE cases */
-#if defined(CONFIG_FPGA_EARLY_PORTING) || defined(U3_COMPLIANCE) || defined(FOR_BRING_UP)
-#define USB_FORCE_ON
+#ifdef CONFIG_PHY_MTK_SSUSB
+#include "mtk-ssusb-hal.h"
 #endif
 
 unsigned int cable_mode = CABLE_MODE_NORMAL;
@@ -49,7 +48,7 @@ bool mt_usb_is_device(void)
 #if !defined(CONFIG_FPGA_EARLY_PORTING) && defined(CONFIG_USB_XHCI_MTK)
 	bool tmp = mtk_is_host_mode();
 
-	os_printk(K_INFO, "%s mode\n", tmp ? "HOST" : "DEV");
+	os_printk(K_DEBUG, "%s mode\n", tmp ? "HOST" : "DEV");
 	return !tmp;
 #else
 	return true;
@@ -95,23 +94,75 @@ void connection_work(struct work_struct *data)
 #ifndef CONFIG_USBIF_COMPLIANCE
 	static enum status connection_work_dev_status = INIT;
 #endif
+	bool is_usb_cable;
 
+	/* delay 100ms if user space is not ready to set usb function */
+	if (!is_usb_rdy()) {
+		static DEFINE_RATELIMIT_STATE(ratelimit, 1 * HZ, 5);
+		int delay = 50;
+
+		if (__ratelimit(&ratelimit))
+			os_printk(K_INFO, "%s, !is_usb_rdy, delay %d ms\n", __func__, delay);
+
+		/* to DISCONNECT stage to avoid stage transition while usb is ready */
+#ifdef CONFIG_MTK_UART_USB_SWITCH
+		if (in_uart_mode) {
+			os_printk(K_INFO, "%s, Uart mode. directly return\n", __func__);
+			return;
+		}
+#endif
+#ifndef CONFIG_FPGA_EARLY_PORTING
+		if (!mt_usb_is_device()) {
+			os_printk(K_INFO, "%s, Host mode. directly return\n", __func__);
+			return;
+		}
+#endif
+
+		if (connection_work_dev_status != OFF) {
+			connection_work_dev_status = OFF;
+#ifndef CONFIG_USBIF_COMPLIANCE
+			clr_connect_timestamp();
+#endif
+
+			/*FIXME: we should use usb_gadget_disconnect() & usb_udc_stop().  like usb_udc_softconn_store().
+			 * But have no time to think how to handle. However i think it is the correct way.
+			 */
+			musb_stop(musb);
+
+			if (wake_lock_active(&musb->usb_wakelock))
+				wake_unlock(&musb->usb_wakelock);
+
+#ifdef VCORE_OPS_DEV
+			vcore_op(0);
+#endif
+			os_printk(K_INFO, "%s ----Disconnect----\n", __func__);
+		}
+
+		queue_delayed_work(musb->st_wq, &musb->connection_work,
+				msecs_to_jiffies(delay));
+		return;
+	}
 
 #ifdef CONFIG_MTK_UART_USB_SWITCH
 	if (!usb_phy_check_in_uart_mode()) {
 #endif
-		bool is_usb_cable = usb_cable_connected();
 
 #ifndef CONFIG_FPGA_EARLY_PORTING
-
 		if (!mt_usb_is_device()) {
 			connection_work_dev_status = OFF;
+#ifdef CONFIG_PHY_MTK_SSUSB
+			if (musb->is_clk_on)
+				phy_power_off(musb->mtk_phy);
+#else
 			usb_fake_powerdown(musb->is_clk_on);
+#endif
 			musb->is_clk_on = 0;
 			os_printk(K_INFO, "%s, Host mode. directly return\n", __func__);
 			return;
 		}
 #endif
+
+		is_usb_cable = usb_cable_connected();
 
 		os_printk(K_INFO, "%s musb %s, cable %s\n", __func__,
 			  ((connection_work_dev_status ==
@@ -131,6 +182,9 @@ void connection_work(struct work_struct *data)
 			/* FIXME: Should use usb_udc_start() & usb_gadget_connect(), like usb_udc_softconn_store().
 			 * But have no time to think how to handle. However i think it is the correct way.
 			 */
+#ifdef VCORE_OPS_DEV
+			vcore_op(1);
+#endif
 			musb_start(musb);
 
 			os_printk(K_INFO, "%s ----Connect----\n", __func__);
@@ -149,6 +203,9 @@ void connection_work(struct work_struct *data)
 			if (wake_lock_active(&musb->usb_wakelock))
 				wake_unlock(&musb->usb_wakelock);
 
+#ifdef VCORE_OPS_DEV
+			vcore_op(0);
+#endif
 			os_printk(K_INFO, "%s ----Disconnect----\n", __func__);
 		} else {
 			/* This if-elseif is to set wakelock when booting with USB cable.
@@ -162,7 +219,7 @@ void connection_work(struct work_struct *data)
 			/* wake_unlock(&musb->usb_wakelock); */
 			/* } */
 
-			os_printk(K_INFO, "%s directly return\n", __func__);
+			os_printk(K_INFO, "%s ----directly return----\n", __func__);
 		}
 #ifdef CONFIG_MTK_UART_USB_SWITCH
 	} else {
@@ -196,7 +253,7 @@ void mt_usb_connect(void)
 
 		work = &_mu3d_musb->connection_work;
 
-		schedule_delayed_work_on(0, work, 0);
+		queue_delayed_work(_mu3d_musb->st_wq, work, 0);
 	} else {
 		os_printk(K_INFO, "%s musb_musb not ready\n", __func__);
 	}
@@ -213,7 +270,7 @@ void mt_usb_disconnect(void)
 
 		work = &_mu3d_musb->connection_work;
 
-		schedule_delayed_work_on(0, work, 0);
+		queue_delayed_work(_mu3d_musb->st_wq, work, 0);
 	} else {
 		os_printk(K_INFO, "%s musb_musb not ready\n", __func__);
 	}
@@ -221,46 +278,130 @@ void mt_usb_disconnect(void)
 }
 EXPORT_SYMBOL_GPL(mt_usb_disconnect);
 
-bool usb_cable_connected(void)
+/* build time force on */
+#if defined(CONFIG_FPGA_EARLY_PORTING)
+#define BYPASS_PMIC_LINKAGE
+#endif
+
+/* to avoid build error due to PMIC module not ready */
+#ifndef CONFIG_MTK_SMART_BATTERY
+#define BYPASS_PMIC_LINKAGE
+#endif
+
+static CHARGER_TYPE mu3d_hal_get_charger_type(void)
 {
-	CHARGER_TYPE chg_type = CHARGER_UNKNOWN;
-	bool connected = false, vbus_exist = false;
-#if 0
-#ifdef CONFIG_MTK_KERNEL_POWER_OFF_CHARGING
-	if (get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT
-			|| get_boot_mode() == LOW_POWER_OFF_CHARGING_BOOT) {
-		os_printk(K_INFO, "%s, in KPOC, force USB on\n", __func__);
-		return true;
-	}
-#endif
-#endif
-#ifdef USB_FORCE_ON
-	/* FORCE USB ON */
-	chg_type = _mu3d_musb->charger_mode = STANDARD_HOST;
-	vbus_exist = true;
-	connected = true;
-	os_printk(K_INFO, "%s type force to STANDARD_HOST\n", __func__);
+	CHARGER_TYPE chg_type;
+#ifdef BYPASS_PMIC_LINKAGE
+	os_printk(K_INFO, "force on");
+	chg_type = STANDARD_HOST;
 #else
-	/* TYPE CHECK*/
-	chg_type = _mu3d_musb->charger_mode = mt_get_charger_type();
-	if (fake_CDP && chg_type == STANDARD_HOST) {
-		os_printk(K_INFO, "%s, fake to type 2\n", __func__);
-		chg_type = CHARGING_HOST;
-	}
+	chg_type = mt_get_charger_type();
+#endif
 
-	if (chg_type == STANDARD_HOST || chg_type == CHARGING_HOST)
-		connected = true;
+	return chg_type;
+}
+static bool mu3d_hal_is_vbus_exist(void)
+{
+	bool vbus_exist;
 
-	/* VBUS CHECK to avoid type miss-judge */
+#ifdef BYPASS_PMIC_LINKAGE
+	os_printk(K_INFO, "force on");
+	vbus_exist = true;
+#else
 #ifdef CONFIG_POWER_EXT
 	vbus_exist = upmu_get_rgs_chrdet();
 #else
 	vbus_exist = upmu_is_chr_det();
 #endif
-	os_printk(K_INFO, "%s vbus_exist=%d type=%d\n", __func__, vbus_exist, chg_type);
-	if (!vbus_exist)
-		connected = false;
 #endif
+
+	return vbus_exist;
+
+}
+
+static int mu3d_test_connect;
+static bool test_connected;
+static struct delayed_work mu3d_test_connect_work;
+#define TEST_CONNECT_BASE_MS 3000
+#define TEST_CONNECT_BIAS_MS 5000
+static void do_mu3d_test_connect_work(struct work_struct *work)
+{
+	static ktime_t ktime;
+	static unsigned long int ktime_us;
+	unsigned int delay_time_ms;
+
+	if (!mu3d_test_connect) {
+		test_connected = false;
+		os_printk(K_INFO, "%s, test done, trigger connect\n", __func__);
+		mt_usb_connect();
+		return;
+	}
+	mt_usb_connect();
+
+	ktime = ktime_get();
+	ktime_us = ktime_to_us(ktime);
+	delay_time_ms = TEST_CONNECT_BASE_MS + (ktime_us % TEST_CONNECT_BIAS_MS);
+	os_printk(K_INFO, "%s, work after %d ms\n", __func__, delay_time_ms);
+	schedule_delayed_work(&mu3d_test_connect_work, msecs_to_jiffies(delay_time_ms));
+
+	test_connected = !test_connected;
+}
+void mt_usb_connect_test(int start)
+{
+	static struct wake_lock device_test_wakelock;
+	static int wake_lock_inited;
+
+	if (!wake_lock_inited) {
+		os_printk(K_WARNIN, "%s wake_lock_init\n", __func__);
+		wake_lock_init(&device_test_wakelock, WAKE_LOCK_SUSPEND, "device.test.lock");
+		wake_lock_inited = 1;
+	}
+
+	if (start) {
+		wake_lock(&device_test_wakelock);
+		mu3d_test_connect = 1;
+		INIT_DELAYED_WORK(&mu3d_test_connect_work, do_mu3d_test_connect_work);
+		schedule_delayed_work(&mu3d_test_connect_work, 0);
+	} else {
+		mu3d_test_connect = 0;
+		wake_unlock(&device_test_wakelock);
+	}
+}
+
+
+bool usb_cable_connected(void)
+{
+	CHARGER_TYPE chg_type = CHARGER_UNKNOWN;
+	bool connected = false, vbus_exist = false;
+
+	if (mu3d_test_connect) {
+		os_printk(K_INFO, "%s, return test_connected<%d>\n", __func__, test_connected);
+		return test_connected;
+	}
+
+	if (mu3d_force_on) {
+		/* FORCE USB ON */
+		chg_type = _mu3d_musb->charger_mode = STANDARD_HOST;
+		vbus_exist = true;
+		connected = true;
+		os_printk(K_INFO, "%s type force to STANDARD_HOST\n", __func__);
+	} else {
+		/* TYPE CHECK*/
+		chg_type = _mu3d_musb->charger_mode = mu3d_hal_get_charger_type();
+		if (fake_CDP && chg_type == STANDARD_HOST) {
+			os_printk(K_INFO, "%s, fake to type 2\n", __func__);
+			chg_type = CHARGING_HOST;
+		}
+
+		if (chg_type == STANDARD_HOST || chg_type == CHARGING_HOST)
+			connected = true;
+
+		/* VBUS CHECK to avoid type miss-judge */
+		vbus_exist = mu3d_hal_is_vbus_exist();
+		os_printk(K_INFO, "%s vbus_exist=%d type=%d\n", __func__, vbus_exist, chg_type);
+		if (!vbus_exist)
+			connected = false;
+	}
 
 	/* CMODE CHECK */
 	if (cable_mode == CABLE_MODE_CHRG_ONLY || (cable_mode == CABLE_MODE_HOST_ONLY && chg_type != CHARGING_HOST))
@@ -283,7 +424,7 @@ int typec_switch_usb_connect(void *data)
 
 		work = &musb->connection_work;
 
-		schedule_delayed_work_on(0, work, 0);
+		queue_delayed_work(_mu3d_musb->st_wq, work, 0);
 	} else {
 		os_printk(K_INFO, "%s musb_musb not ready\n", __func__);
 	}
@@ -303,7 +444,7 @@ int typec_switch_usb_disconnect(void *data)
 
 		work = &musb->connection_work;
 
-		schedule_delayed_work_on(0, work, 0);
+		queue_delayed_work(_mu3d_musb->st_wq, work, 0);
 	} else {
 		os_printk(K_INFO, "%s musb_musb not ready\n", __func__);
 	}
@@ -511,6 +652,10 @@ ssize_t musb_portmode_store(struct device *dev, struct device_attribute *attr,
 
 ssize_t musb_tx_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
+#ifdef CONFIG_PHY_MTK_SSUSB
+	struct musb *musb;
+	u32 value;
+#endif
 	u8 var;
 	u8 var2;
 
@@ -519,7 +664,13 @@ ssize_t musb_tx_show(struct device *dev, struct device_attribute *attr, char *bu
 		return 0;
 	}
 
+#ifdef CONFIG_PHY_MTK_SSUSB
+	musb = dev_to_musb(dev);
+	value = usb_mtkphy_io_read(musb->mtk_phy, 1, 0x6C);
+	var = value >> 16;
+#else
 	var = U3PhyReadReg8((u3phy_addr_t) (U3D_U2PHYDTM1 + 0x2));
+#endif
 	var2 = (var >> 3) & ~0xFE;
 	pr_debug("[MUSB]addr: 0x6E (TX), value: %x - %x\n", var, var2);
 
@@ -532,6 +683,10 @@ ssize_t musb_tx_store(struct device *dev, struct device_attribute *attr,
 		      const char *buf, size_t count)
 {
 	unsigned int val;
+#ifdef CONFIG_PHY_MTK_SSUSB
+	struct musb *musb;
+	u32 value;
+#endif
 	u8 var;
 	u8 var2;
 
@@ -544,7 +699,13 @@ ssize_t musb_tx_store(struct device *dev, struct device_attribute *attr,
 #ifdef CONFIG_FPGA_EARLY_PORTING
 		var = USB_PHY_Read_Register8(U3D_U2PHYDTM1 + 0x2);
 #else
+#ifdef CONFIG_PHY_MTK_SSUSB
+		musb = dev_to_musb(dev);
+		value = usb_mtkphy_io_read(musb->mtk_phy, 1, 0x6C);
+		var = value >> 16;
+#else
 		var = U3PhyReadReg8((u3phy_addr_t) (U3D_U2PHYDTM1 + 0x2));
+#endif
 #endif
 
 		if (val == 0)
@@ -560,9 +721,14 @@ ssize_t musb_tx_store(struct device *dev, struct device_attribute *attr,
 		 * E60802_RG_USB20_BC11_SW_EN_OFST, E60802_RG_USB20_BC11_SW_EN, 0);
 		 */
 		/* Jeremy TODO 0320 */
+#ifdef CONFIG_PHY_MTK_SSUSB
+		musb = dev_to_musb(dev);
+		value = usb_mtkphy_io_read(musb->mtk_phy, 1, 0x6C);
+		var = value >> 16;
+#else
 		var = U3PhyReadReg8((u3phy_addr_t) (U3D_U2PHYDTM1 + 0x2));
 #endif
-
+#endif
 		var2 = (var >> 3) & ~0xFE;
 
 		pr_debug
@@ -575,6 +741,10 @@ ssize_t musb_tx_store(struct device *dev, struct device_attribute *attr,
 
 ssize_t musb_rx_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
+#ifdef CONFIG_PHY_MTK_SSUSB
+	struct musb *musb;
+	u32 value;
+#endif
 	u8 var;
 	u8 var2;
 
@@ -585,7 +755,13 @@ ssize_t musb_rx_show(struct device *dev, struct device_attribute *attr, char *bu
 #ifdef CONFIG_FPGA_EARLY_PORTING
 	var = USB_PHY_Read_Register8(U3D_U2PHYDMON1 + 0x3);
 #else
+#ifdef CONFIG_PHY_MTK_SSUSB
+	musb = dev_to_musb(dev);
+	value = usb_mtkphy_io_read(musb->mtk_phy, 1, 0x74);
+	var = value >> 24;
+#else
 	var = U3PhyReadReg8((u3phy_addr_t) (U3D_U2PHYDMON1 + 0x3));
+#endif
 #endif
 	var2 = (var >> 7) & ~0xFE;
 	pr_debug("[MUSB]addr: U3D_U2PHYDMON1 (0x77) (RX), value: %x - %x\n", var, var2);
@@ -595,15 +771,19 @@ ssize_t musb_rx_show(struct device *dev, struct device_attribute *attr, char *bu
 }
 ssize_t musb_uart_path_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	u8 var = 0;
+	u32 var = 0;
 
 	if (!dev) {
 		pr_debug("dev is null!!\n");
 		return 0;
 	}
 
+#ifdef CONFIG_PHY_MTK_SSUSB
+	var = usb_phy_get_uart_path();
+#else
 	var = DRV_Reg32(ap_uart0_base + 0x600);
-	pr_debug("[MUSB]addr: (GPIO Misc) 0x600, value: %x\n\n", DRV_Reg32(ap_uart0_base + 0x600));
+#endif
+	pr_debug("[MUSB]addr: (GPIO Misc) 0x600, value: %x\n\n", var);
 	sw_uart_path = var;
 
 	return scnprintf(buf, PAGE_SIZE, "%x\n", var);

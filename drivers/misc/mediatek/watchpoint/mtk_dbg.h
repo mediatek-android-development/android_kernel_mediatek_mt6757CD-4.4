@@ -17,7 +17,7 @@
 
 #include <linux/notifier.h>
 
-/*#define DBG_REG_DUMP*/
+/*#define DBG_REG_DUMP */
 
 unsigned long *mt_save_dbg_regs(unsigned long *p, unsigned int cpuid);
 void mt_restore_dbg_regs(unsigned long *p, unsigned int cpuid);

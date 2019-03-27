@@ -46,8 +46,12 @@
 #define I2C_TIMING_SAMPLE_DIV_MASK	(0x7 << 8)
 #define I2C_TIMING_DATA_READ_MASK	(0x7 << 12)
 #define I2C_DCM_DISABLE			0x0000
+#define I2C_DCM_ENABLE			0x0007
 #define I2C_IO_CONFIG_OPEN_DRAIN	0x0003
 #define I2C_IO_CONFIG_PUSH_PULL		0x0000
+#define I2C_IO_CONFIG_OPEN_DRAIN_AED	0x0000
+#define I2C_IO_CONFIG_PUSH_PULL_AED	0x0000
+#define I2C_IO_CONFIG_AED_MASK	(0xfff << 4)
 #define I2C_SOFT_RST			0x0001
 #define I2C_FIFO_ADDR_CLR		0x0001
 #define I2C_DELAY_LEN			0x0002
@@ -55,6 +59,8 @@
 #define I2C_FS_START_CON		0x1800
 #define I2C_TIME_CLR_VALUE		0x0000
 #define I2C_TIME_DEFAULT_VALUE		0x0003
+
+#define I2C_HS_NACK_DET_EN		(0x1 << 1)
 
 #define I2C_DMA_CON_TX			0x0000
 #define I2C_DMA_CON_RX			0x0001
@@ -68,9 +74,13 @@
 #define MAX_FS_MODE_SPEED		400000
 #define MAX_HS_MODE_SPEED		3400000
 #define MAX_DMA_TRANS_SIZE		4096	/* 255 */
+#define MAX_CLOCK_DIV			8
 #define MAX_SAMPLE_CNT_DIV		8
 #define MAX_STEP_CNT_DIV		64
 #define MAX_HS_STEP_CNT_DIV		8
+
+#define HALF_DUTY_CYCLE			50
+#define DUTY_CYCLE				45
 
 #define I2C_CONTROL_RS                  (0x1 << 1)
 #define I2C_CONTROL_DMA_EN              (0x1 << 2)
@@ -86,6 +96,7 @@
 #define I2CTAG          "[I2C]"
 
 #define I2C_RECORD_LEN 10
+#define I2C_MAX_CHANNEL 10
 
 enum DMA_REGS_OFFSET {
 	OFFSET_INT_FLAG = 0x0,
@@ -153,6 +164,7 @@ enum I2C_REGS_OFFSET {
 	OFFSET_TIMING = 0x20,
 	OFFSET_START = 0x24,
 	OFFSET_EXT_CONF = 0x28,
+	OFFSET_LTIMING = 0x2c,
 	OFFSET_FIFO_STAT = 0x30,
 	OFFSET_FIFO_THRESH = 0x34,
 	OFFSET_FIFO_ADDR_CLR = 0x38,
@@ -202,12 +214,15 @@ struct mt_i2c_ext {
 
 struct mtk_i2c_compatible {
 	unsigned char dma_support;  /* 0 : original; 1: 4gb  support 2: 33bit support; 3: 36 bit support */
-	unsigned char idvfs_i2c;
+	unsigned char idvfs_i2c; /* compatible before chip, set 1 if no TRANSFER_LEN_AUX */
+	unsigned char set_dt_div; /* use dt to set div */
+	unsigned char check_max_freq; /* check max freq */
+	unsigned char set_ltiming; /* need to set LTIMING */
+	unsigned char set_aed; /* need to set AED */
 	u16 ext_time_config;
 	char clk_compatible[128];
-	u16 clk_sta_offset[2];
-	char clk_mux_compatible[128];
-	u16 clk_mux_sta_offset;
+	u16 clk_sta_offset[I2C_MAX_CHANNEL]; /* I2C clock status register */
+	u8 cg_bit[I2C_MAX_CHANNEL]; /* i2c clock bit */
 };
 
 struct mt_i2c {
@@ -230,10 +245,12 @@ struct mt_i2c {
 	bool appm;			/* I2C for APPM */
 	bool gpupm;			/* I2C for GPUPM */
 	bool buffermode;	/* I2C Buffer mode support */
+	bool hs_only;	/* I2C HS only */
 	/* set when doing the transfer */
 	u16 irq_stat;			/* interrupt status */
 	unsigned int speed_hz;		/* The speed in transfer */
 	unsigned int clk_src_div;
+	unsigned int aed;		/* aed value from dt */
 	spinlock_t cg_lock;
 	int cg_cnt;
 	bool trans_stop;		/* i2c transfer stop */
@@ -244,6 +261,7 @@ struct mt_i2c {
 	u16 msg_aux_len;		/* WRRD mode to set AUX_LEN register*/
 	u16 addr;	/* 7bit slave address, without read/write bit */
 	u16 timing_reg;
+	u16 ltiming_reg;
 	u16 high_speed_reg;
 	struct mutex i2c_mutex;
 	struct mt_i2c_ext ext_data;

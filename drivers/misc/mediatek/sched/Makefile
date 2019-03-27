@@ -13,6 +13,8 @@
 
 LINUXINCLUDE += -include $(srctree)/kernel/sched/sched.h
 
+ccflags-y += -DMET_USER_EVENT_SUPPORT
+
 #
 # RQ stats for TLP estimation
 #
@@ -20,10 +22,13 @@ LINUXINCLUDE += -include $(srctree)/kernel/sched/sched.h
 obj-$(CONFIG_MTK_SCHED_RQAVG_US) += rq_stats.o
 # For kernel space operation
 obj-$(CONFIG_MTK_SCHED_RQAVG_KS) += sched_avg.o
+# For power calculation referring platform-character
+obj-$(CONFIG_MTK_SCHED_EAS_POWER_SUPPORT) += sched_power.o
 
 # For Enhance CPU affinity in hotplug
-obj-$(CONFIG_MT_CPU_AFFINITY) += mtk_cpu_affinity/
-obj-$(CONFIG_MT_RT_THROTTLE_MON) += rt_monitor.o
+obj-$(CONFIG_MTK_CPU_AFFINITY) += mtk_cpu_affinity/
+obj-$(CONFIG_MTK_RT_THROTTLE_MON) += rt_monitor.o
 
 # For CPU topology to user space
 obj-y += cputopo.o
+obj-y += sched_ctl.o

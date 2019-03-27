@@ -65,15 +65,3 @@ config USB_MU3D_DRV_36BIT
 	  address accessing.
 	  Say Y here if you want to enable 36-bits addressing support.
 	  If unsure, say N.
-
-config MTK_UART_USB_SWITCH
-	bool "Use USB As UART For Debugging"
-	default n
-	---help---
-	  This is a feature for debugging purpose.
-	  It uses the USB TX/RX as UART TX/RX.
-	  A USB to UART cable is needed to use this feature.
-	  Using the UI in the EngineerMode to switch between USB and UART mode.
-	  After switching to UART mode and connect to the PC with a USB to UART cable,
-	  you can connect to a Virtual COM port on the PC and get the log output to the UART console.
-

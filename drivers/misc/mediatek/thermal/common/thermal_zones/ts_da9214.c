@@ -231,11 +231,6 @@ static int tsda9214_sysrst_get_cur_state(struct thermal_cooling_device *cdev, un
 	return 0;
 }
 
-/* [lidebiao start] */
-static int tsda9214_sysrst_happened = 0;
-extern int send_sysrst_signal(unsigned int type);
-/* [lidebiao end] */
-
 static int tsda9214_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 {
 	tsda9214_dprintk("tsda9214_sysrst_set_cur_state = %d\n", cl_dev_sysrst_state);
@@ -247,13 +242,7 @@ static int tsda9214_sysrst_set_cur_state(struct thermal_cooling_device *cdev, un
 		pr_debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
 
 
-		/* [lidebiao start] */
-		if (0 == tsda9214_sysrst_happened) {
-			send_sysrst_signal(0);
-			tsda9214_sysrst_happened = 1;
-		}
-		//*(unsigned int *)0x0 = 0xdead; /* To trigger data abort to reset the system for thermal protection. */
-		/* [lidebiao end] */
+		*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
 
 	}
 	return 0;

@@ -193,6 +193,7 @@ UINT_32
 rsnCalculateFTIELen(P_ADAPTER_T prAdapter, ENUM_NETWORK_TYPE_INDEX_T eNetTypeIndex, P_STA_RECORD_T prStaRec);
 
 VOID rsnGenerateFTIE(IN P_ADAPTER_T prAdapter, IN OUT P_MSDU_INFO_T prMsduInfo);
+
 /*******************************************************************************
 *                              F U N C T I O N S
 ********************************************************************************

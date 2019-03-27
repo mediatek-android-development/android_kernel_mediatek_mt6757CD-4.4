@@ -590,10 +590,9 @@ static int scsi_probe_lun(struct scsi_device *sdev, unsigned char *inq_result,
 
 		memset(inq_result, 0, try_inquiry_len);
 
-
 		result = scsi_execute_req(sdev,  scsi_cmd, DMA_FROM_DEVICE,
 					  inq_result, try_inquiry_len, &sshdr,
-					  HZ / 2 + HZ * scsi_inq_timeout, 5,
+					  HZ / 2 + HZ * scsi_inq_timeout, 3,
 					  &resid);
 
 		SCSI_LOG_SCAN_BUS(3, sdev_printk(KERN_INFO, sdev,
@@ -971,6 +970,13 @@ static int scsi_add_lun(struct scsi_device *sdev, unsigned char *inq_result,
 		sdev->skip_vpd_pages = 1;
 
 	transport_configure_device(&sdev->sdev_gendev);
+
+	/*
+	 * MTK PATCH:
+	 * The LLD can override auto suspend configuration in ->slave_configure().
+	 */
+	sdev->use_rpm_auto = 0;
+	sdev->autosuspend_delay = SCSI_DEFAULT_AUTOSUSPEND_DELAY;
 
 	if (sdev->host->hostt->slave_configure) {
 		ret = sdev->host->hostt->slave_configure(sdev);
@@ -1460,12 +1466,12 @@ retry:
  out_err:
 	kfree(lun_data);
  out:
-	scsi_device_put(sdev);
 	if (scsi_device_created(sdev))
 		/*
 		 * the sdev we used didn't appear in the report luns scan
 		 */
 		__scsi_remove_device(sdev);
+	scsi_device_put(sdev);
 	return ret;
 }
 

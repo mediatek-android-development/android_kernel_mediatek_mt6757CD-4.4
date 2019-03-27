@@ -116,12 +116,13 @@
 
 #define CFG_SUPPORT_PERSIST_NETDEV		0	/* create NETDEV when system bootup */
 
-#define CFG_FORCE_USE_20BW			0   /* [yangqing] Enable 40BW */
+#define CFG_FORCE_USE_20BW			1
 
 #define CFG_SUPPORT_RN				1
 
 #define CFG_SUPPORT_SET_CAM_BY_PROC	1
 
+#define CFG_SUPPORT_RSN_SCORE		1
 /*------------------------------------------------------------------------------
  * SLT Option
  *------------------------------------------------------------------------------
@@ -463,9 +464,18 @@
  */
 #define CFG_MULTI_SSID_SCAN			1
 #define CFG_NLO_MSP 0 /* NLO/PNO Multiple Scan Plan */
+#define CFG_SUPPORT_SCHED_SCN_SSID_SETS		1 /*Sched-scan support hidden SSID*/
 #define CFG_SCAN_SSID_MAX_NUM                   (10)
+
+
+#if CFG_SUPPORT_SCHED_SCN_SSID_SETS
+#define CFG_SCAN_HIDDEN_SSID_MAX_NUM       (7)
+#endif
 #define CFG_SCAN_SSID_MATCH_MAX_NUM             (16)
 
+#define CFG_SUPPORT_DETECT_ATHEROS_AP		0
+
+#define CFG_SCAN_ABORT_HANDLE		1
 /*------------------------------------------------------------------------------
  * Flags and Parameters for Support EMI DEBUG
  *------------------------------------------------------------------------------
@@ -616,6 +626,9 @@
 
 #define CFG_AUTO_CHANNEL_SEL_SUPPORT            1
 
+#define CFG_SET_BCN_CAPINFO_BY_DRIVER           0
+
+
 /*------------------------------------------------------------------------------
  * Configuration Flags (Linux Only)
  *------------------------------------------------------------------------------
@@ -632,7 +645,7 @@
 #define CFG_ENABLE_STATISTICS_BUFFERING         0
 #endif
 #define CFG_STATISTICS_VALID_CYCLE              2000
-#define CFG_LINK_QUALITY_VALID_PERIOD           5000
+#define CFG_LINK_QUALITY_VALID_PERIOD           1000
 
 /*------------------------------------------------------------------------------
  * Migration Option
@@ -711,7 +724,7 @@
 #define CFG_SUPPORT_UL_PSMP         0
 
 #define CFG_SUPPORT_ROAMING         1	/* Roaming System */
-#define CFG_SUPPORT_DYNAMOC_ROAM    0
+#define CFG_SUPPORT_DYNAMIC_ROAM    0
 #define CFG_SUPPORT_SWCR            1
 
 #define CFG_SUPPORT_ANTI_PIRACY     1
@@ -728,12 +741,10 @@
 #define CFG_MAX_NUM_OF_CHNL_INFO				50
 #define CFG_SELECT_BSS_BASE_ON_MULTI_PARAM		1
 #define CFG_SELECT_BSS_BASE_ON_RSSI				0
-
-// [yangqing] CFG_SUPPORT_VO_ENTERPRISE from 1 to 0, Refs to ALPS03610302
-// Mtk said that the feature has not been completed yet.
-#define CFG_SUPPORT_VO_ENTERPRISE               0
+#define CFG_SUPPORT_VO_ENTERPRISE               1
 #define CFG_NEIGHBOR_AP_CHANNEL_NUM             50
 #define CFG_SUPPORT_WMM_AC                      1
+
 #if CFG_SUPPORT_VO_ENTERPRISE
 #define CFG_SUPPORT_802_11V_BSS_TRANSITION_MGT  1
 #define CFG_SUPPORT_802_11R                     1
@@ -745,13 +756,15 @@
 #define CFG_SUPPORT_802_11V                     0
 #define CFG_SUPPORT_802_11K                     0
 #endif
+
 #define CFG_SUPPORT_802_11V_TIMING_MEASUREMENT  0
 #define CFG_SUPPORT_OKC                         1
 
-#if (CFG_SUPPORT_802_11V_TIMING_MEASUREMENT == 1 || CFG_SUPPORT_802_11V_BSS_TRANSITION_MGT == 1) \
+#if (CFG_SUPPORT_802_11V_TIMING_MEASUREMENT == 1) || CFG_SUPPORT_802_11V_BSS_TRANSITION_MGT == 1 \
 	&& (CFG_SUPPORT_802_11V == 0)
 #error "CFG_SUPPORT_802_11V should be 1 once CFG_SUPPORT_802_11V_TIMING_MEASUREMENT equals to 1"
 #endif
+
 #define WNM_UNIT_TEST 0
 
 #define CFG_SUPPORT_PPR2	1
@@ -765,14 +778,20 @@
 
 #define CFG_SUPPORT_CPU_BOOST			0
 
-#define CFG_SUPPORT_TX_POWER_BACK_OFF              1
 
-#define CFG_SUPPORT_FCC_POWER_BACK_OFF             1
+#define CFG_SUPPORT_TX_POWER_BACK_OFF       1
+
+#define CFG_SUPPORT_FCC_POWER_BACK_OFF             0
 
 
-#define CFG_SUPPORT_P2P_ECSA                       1
+#define CFG_SUPPORT_P2P_ECSA                       0
 
-#define CFG_SUPPORT_P2P_GO_OFFLOAD_PROBE_RSP       1
+#define CFG_SUPPORT_P2P_GO_OFFLOAD_PROBE_RSP       0
+
+#define CFG_SUPPORT_RLM_ACT_NETWORK                1
+
+#define CFG_SUPPORT_P2P_EAP_FAIL_WORKAROUND        1
+
 /*------------------------------------------------------------------------------
  * Flags of Packet Lifetime Profiling Mechanism
  *------------------------------------------------------------------------------
@@ -818,9 +837,8 @@
  */
 
 #define CFG_SUPPORT_SCN_PSCN	1
-
 #if CFG_SUPPORT_SCN_PSCN
-#define CFG_SUPPORT_GSCN	1	/* GSCN can be disabled here */
+#define CFG_SUPPORT_GSCN	0	/* GSCN can be disabled here */
 #else
 #define CFG_SUPPORT_GSCN	0
 #endif
@@ -840,6 +858,7 @@
 #define WLAN_INCLUDE_PROC                   1
 
 #define CFG_SUPPORT_DETECT_SECURITY_MODE_CHANGE 1
+#define CFG_IGNORE_INVALID_AUTH_TSN		0
 /*------------------------------------------------------------------------------
  * Flags of drop multicast packet when device suspend
  *------------------------------------------------------------------------------
@@ -850,7 +869,8 @@
  * Flags of NCHO SUPPORT
  *------------------------------------------------------------------------------
  */
-#define CFG_SUPPORT_NCHO		1
+#define CFG_SUPPORT_NCHO		0
+#define CFG_SUPPORT_NCHO_AUTO_ENABLE		0
 
 #define CFG_SUPPORT_ADD_CONN_AP		1
 
@@ -871,7 +891,12 @@
 /*Branch: 00 for Trunk, 01->mp1,02->mp2*/
 /*Date: relase date*/
 /*Serial Number :start form 1*/
-#define WIFI_DRIVER_VERSION		"11_70_00_20170120_1"
+#define WIFI_MODULE "11"
+#define ANDROID_VER "70"
+#define RELEASE_DATE "20170324"
+#define SERIAL_NUMBER "1"
+#define SP_BRANCH "TC10"
+#define WIFI_DRIVER_VERSION		WIFI_MODULE "_" ANDROID_VER "_" RELEASE_DATE "_" SERIAL_NUMBER "_" SP_BRANCH
 
 /*******************************************************************************
 *                           P R I V A T E   D A T A

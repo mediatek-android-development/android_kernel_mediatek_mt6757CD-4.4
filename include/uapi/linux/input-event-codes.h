@@ -517,17 +517,6 @@
 #define KEY_INS_LINE		0x1c2
 #define KEY_DEL_LINE		0x1c3
 
-/* [liguanxiong start] Add oem keys for fingerprint */
-#define KEY_FP_UP           0x1c4
-#define KEY_FP_DOWN         0x1c5
-#define KEY_FP_LEFT         0x1c6
-#define KEY_FP_RIGHT        0x1c7
-#define KEY_FP_CLICK        0x1c8
-#define KEY_FP_DOUBLE_CLICK 0x1c9
-#define KEY_FP_LONG_CLICK   0x1ca
-#define KEY_FP_SPEED_UP     0x1cb
-/* [liguanxiong end] */
-
 #define KEY_FN			0x1d0
 #define KEY_FN_ESC		0x1d1
 #define KEY_FN_F1		0x1d2

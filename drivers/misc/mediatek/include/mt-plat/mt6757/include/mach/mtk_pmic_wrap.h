@@ -27,10 +27,9 @@ struct mt_pmic_wrap_driver {
 	s32 (*suspend)(void);
 	void (*resume)(void);
 };
-typedef enum {
-	PWRAP_READ	= 0,
-	PWRAP_WRITE	= 1,
-} PWRAP_OPS;
+
+#define PWRAP_READ     0
+#define PWRAP_WRITE	   1
 
 /* ------external API for pmic_wrap user-------------------------------------------------- */
 s32 pwrap_read(u32 adr, u32 *rdata);
@@ -56,7 +55,7 @@ extern unsigned int gPWRAPDBGADDR;
 		if (addr == gPWRAPDBGADDR) { \
 			unsigned int rdata; \
 			pwrap_read(addr, &rdata); \
-			pr_err("pwrap addr = 0x%x wdata = 0x%x, rdata = 0x%x\n", addr, wdata, rdata); \
+			pr_notice("pwrap addr = 0x%x wdata = 0x%x, rdata = 0x%x\n", addr, wdata, rdata); \
 			WARN_ON(1); \
 		} \
 } while (0)

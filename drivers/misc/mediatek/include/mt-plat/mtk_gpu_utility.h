@@ -47,6 +47,7 @@ bool mtk_get_gpu_page_cache(unsigned int *pPageCache);
 
 /* unit: 0~100 % */
 bool mtk_get_gpu_loading(unsigned int *pLoading);
+bool mtk_get_gpu_loading2(unsigned int *pLoading, int reset);
 bool mtk_get_gpu_block(unsigned int *pBlock);
 bool mtk_get_gpu_idle(unsigned int *pIlde);
 bool mtk_get_gpu_freq(unsigned int *pFreq);
@@ -80,6 +81,24 @@ bool mtk_get_vsync_offset_debug_status(unsigned int *pui32DebugStatus);
 
 /* MET */
 bool mtk_enable_gpu_perf_monitor(bool enable);
+
+/* GPU PMU should be implemented by GPU IP-dep code */
+typedef struct {
+	int id;
+	const char *name;
+	unsigned int value;
+	int overflow;
+} GPU_PMU;
+bool mtk_get_gpu_pmu_init(GPU_PMU *pmus, int pmu_size, int *ret_size);
+bool mtk_get_gpu_pmu_swapnreset(GPU_PMU *pmus, int pmu_size);
+
+typedef void (*gpu_power_change_notify_fp)(int power_on);
+
+bool mtk_register_gpu_power_change(const char *name, gpu_power_change_notify_fp callback);
+bool mtk_unregister_gpu_power_change(const char *name);
+
+/* GPU POWER NOTIFY should be called by GPU only */
+void mtk_notify_gpu_power_change(int power_on);
 
 #ifdef __cplusplus
 }

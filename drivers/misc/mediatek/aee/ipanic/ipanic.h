@@ -32,7 +32,7 @@
 
 #define AEE_IPANIC_MAGIC 0xaee0dead
 #define AEE_IPANIC_PHDR_VERSION   0x10
-#define IPANIC_NR_SECTIONS		32
+#define IPANIC_NR_SECTIONS		64
 #if (AEE_IPANIC_PHDR_VERSION >= 0x10)
 #define IPANIC_USERSPACE_READ		1
 #endif
@@ -46,19 +46,19 @@
 			pr_debug(fmt, ##__VA_ARGS__);	\
 	} while (0)
 
-#define LOG_ERROR(fmt, ...)			\
+#define LOG_NOTICE(fmt, ...)			\
 	do {	\
 		if (aee_in_nested_panic())			\
 			aee_nested_printf(fmt, ##__VA_ARGS__);	\
 		else						\
-			pr_err(fmt, ##__VA_ARGS__);	\
+			pr_notice(fmt, ##__VA_ARGS__);	\
 	} while (0)
 
 #define LOGV(fmt, msg...)
 #define LOGD LOG_DEBUG
 #define LOGI LOG_DEBUG
-#define LOGW LOG_ERROR
-#define LOGE LOG_ERROR
+#define LOGW LOG_NOTICE
+#define LOGE LOG_NOTICE
 
 struct ipanic_data_header {
 	u32 type;		/* data type(0-31) */
@@ -141,6 +141,7 @@ enum IPANIC_DT {
 	IPANIC_DT_LAST_LOG,
 	IPANIC_DT_ATF_LOG,
 	IPANIC_DT_DISP_LOG,
+	IPANIC_DT_MODULES_INFO = 17,
 	IPANIC_DT_RAM_DUMP = 28,
 	IPANIC_DT_SHUTDOWN_LOG = 30,
 	IPANIC_DT_RESERVED31 = 31,
@@ -240,12 +241,13 @@ extern int card_dump_func_read(unsigned char *buf, unsigned int len, unsigned lo
 extern int card_dump_func_write(unsigned char *buf, unsigned int len, unsigned long long offset,
 				int dev);
 extern unsigned int reset_boot_up_device(int type);	/* force to re-initialize the emmc host controller */
-extern void mrdump_mini_per_cpu_regs(int cpu, struct pt_regs *regs);
+extern void mrdump_mini_per_cpu_regs(int cpu, struct pt_regs *regs, struct task_struct *tsk);
 extern void mrdump_mini_ke_cpu_regs(struct pt_regs *regs);
 extern void mrdump_mini_add_misc(unsigned long addr, unsigned long size, unsigned long start,
 				 char *name);
 extern void mrdump_mini_ipanic_done(void);
 extern int mrdump_task_info(unsigned char *buffer, size_t sz_buf);
+extern int mrdump_modules_info(unsigned char *buffer, size_t sz_buf);
 #ifdef CONFIG_MTK_RAM_CONSOLE
 extern void aee_rr_rec_exp_type(unsigned int type);
 extern unsigned int aee_rr_curr_exp_type(void);
@@ -265,8 +267,5 @@ extern void wq_debug_dump(void);
 #endif
 extern void __disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2(void);
 extern int console_trylock(void);
-
-/* dedicated reboot flow for exception */
-extern void aee_exception_reboot(void);
 
 #endif

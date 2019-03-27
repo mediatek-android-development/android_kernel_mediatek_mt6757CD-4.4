@@ -145,7 +145,7 @@ config DEBUG_INFO_REDUCED
 
 config DEBUG_INFO_SPLIT
 	bool "Produce split debuginfo in .dwo files"
-	depends on DEBUG_INFO
+	depends on DEBUG_INFO && !FRV
 	help
 	  Generate debug info into separate .dwo files. This significantly
 	  reduces the build directory size for builds with DEBUG_INFO,
@@ -255,6 +255,27 @@ config PAGE_OWNER
 
 	  If unsure, say N.
 
+config PAGE_OWNER_DEFAULT_OFF
+	bool "Default page owner to off"
+	depends on PAGE_OWNER
+	help
+	  Default enable page owner have memory overhead. For low ram device
+	  and have memory concern may say y here. Page owner will compile in
+	  but not run when boot up. It can then be enabled on the command line
+	  via page_owner=on.
+
+config PAGE_OWNER_SLIM
+	bool "slim page owner data structure"
+	depends on PAGE_OWNER
+	help
+	  Page owner track page allocation backtrace in struct page_ext.
+	  This implementation will cost extra memory each page for keeping
+	  backtrace. The page allocation backtrace come from limited number
+	  of combination. Use hash table to merge and management them will
+	  reduce the memory overhead when enable page owner.
+
+	  If unsure, say N.
+
 config DEBUG_FS
 	bool "Debug Filesystem"
 	help
@@ -314,7 +335,7 @@ config DEBUG_SECTION_MISMATCH
 
 config SECTION_MISMATCH_WARN_ONLY
 	bool "Make section mismatch errors non-fatal"
-	default y
+	default n
 	help
 	  If you say N here, the build process will fail if there are any
 	  section mismatch, instead of just throwing warnings.

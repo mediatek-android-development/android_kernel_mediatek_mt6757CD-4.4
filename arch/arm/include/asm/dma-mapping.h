@@ -121,7 +121,7 @@ static inline dma_addr_t virt_to_dma(struct device *dev, void *addr)
 /* The ARM override for dma_max_pfn() */
 static inline unsigned long dma_max_pfn(struct device *dev)
 {
-	return PHYS_PFN_OFFSET + dma_to_pfn(dev, *dev->dma_mask);
+	return dma_to_pfn(dev, *dev->dma_mask);
 }
 #define dma_max_pfn(dev) dma_max_pfn(dev)
 
@@ -155,7 +155,9 @@ static inline bool dma_capable(struct device *dev, dma_addr_t addr, size_t size)
 	u64 limit, mask;
 
 	if (!dev->dma_mask) {
+#ifdef CONFIG_MTK_BOUNCING_CHECK
 		aee_kernel_warning("Bounce Buffering", "NULL dma_mask");
+#endif
 		return 0;
 	}
 
@@ -163,16 +165,20 @@ static inline bool dma_capable(struct device *dev, dma_addr_t addr, size_t size)
 
 	limit = (mask + 1) & ~mask;
 	if (limit && size > limit) {
+#ifdef CONFIG_MTK_BOUNCING_CHECK
 		aee_kernel_warning("Bounce Buffering",
 				"Incorrect dma_mask(%llx): limit(%llx), size(%llx)",
 				mask, limit, size);
+#endif
 		return 0;
 	}
 
 	if ((addr | (addr + size - 1)) & ~mask) {
+#ifdef CONFIG_MTK_BOUNCING_CHECK
 		aee_kernel_warning("Bounce Buffering",
 				"Incorrect dma_mask(%llx): addr(%llx), size(%llx)",
 				mask, addr, size);
+#endif
 		return 0;
 	}
 	return 1;

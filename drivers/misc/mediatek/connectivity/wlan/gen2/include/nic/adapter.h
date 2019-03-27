@@ -127,6 +127,13 @@ typedef struct _CONNECTION_SETTINGS_T {
 
 	BOOLEAN fgIsAdHocQoSEnable;
 
+	/* Indicates if OKC feature is enabled in wpa_supplicant for this ESS */
+	BOOLEAN fgOkcEnabled;
+	/* Indicates that there's a PMKSA associated with this ESS
+	** in supplicant to generate PMKID for each BSS
+	*/
+	BOOLEAN fgOkcPmksaReady;
+
 	ENUM_PARAM_PHY_CONFIG_T eDesiredPhyConfig;
 
 	/* Used for AP mode for desired channel and bandwidth */
@@ -159,8 +166,6 @@ typedef struct _CONNECTION_SETTINGS_T {
 	/* for RSN info store, when upper layer set rsn info */
 	RSN_INFO_T rRsnInfo;
 
-	BOOLEAN fgUseOkc;
-
 #if CFG_SUPPORT_DETECT_SECURITY_MODE_CHANGE
 	BOOLEAN fgSecModeChangeStartTimer;
 #endif
@@ -178,6 +183,10 @@ struct _BSS_INFO_T {
 #endif
 
 	BOOLEAN fgIsNetActive;	/* TRUE if this network has been activated */
+
+#if CFG_SUPPORT_RLM_ACT_NETWORK
+	UINT_8 ucNetActiveSrc;	/* Trigger source: connect/scan/pno */
+#endif
 
 	UINT_8 ucNetTypeIndex;	/* ENUM_NETWORK_TYPE_INDEX_T */
 
@@ -266,6 +275,8 @@ struct _BSS_INFO_T {
 	UINT_32 u4RsnSelectedPairwiseCipher;
 	UINT_32 u4RsnSelectedAKMSuite;
 	UINT_16 u2RsnSelectedCapInfo;
+
+	enum ENUM_KEY_ACTION_TYPE_T eKeyAction;
 
 	/*------------------------------------------------------------------------*/
 	/* Power Management related information                                   */
@@ -369,6 +380,10 @@ struct _BSS_INFO_T {
 	UINT_8 ucRoamSkipTimes;
 	BOOLEAN fgGoodRcpiArea;
 	BOOLEAN fgPoorRcpiArea;
+#if CFG_SUPPORT_P2P_EAP_FAIL_WORKAROUND
+	BOOLEAN fgP2PPendingDeauth;
+	UINT_32 u4P2PEapTxDoneTime;
+#endif
 };
 
 struct ESS_CHNL_INFO {
@@ -431,6 +446,7 @@ struct _AIS_SPECIFIC_BSS_INFO_T {
 	UINT_8 ucCurEssChnlInfoNum;
 	LINK_T rCurEssLink;
 	struct BSS_TRANSITION_MGT_PARAM_T rBTMParam;
+	UINT_8 ucKeyAlgorithmId;
 };
 
 struct _BOW_SPECIFIC_BSS_INFO_T {
@@ -528,6 +544,7 @@ typedef struct _WIFI_VAR_T {
 #if CFG_SUPPORT_CFG_FILE
 	UINT_8 ucApWpsMode;
 	UINT_8 ucCert11nMode;
+	UINT_8 ucApChannel;
 #endif
 #if CFG_SUPPORT_CE_FCC_TXPWR_LIMIT
 	UINT_8 ucCeFccTxPwrLimit;
@@ -544,7 +561,6 @@ typedef struct _WIFI_VAR_T {
 #if CFG_AUTO_CHANNEL_SEL_SUPPORT
 	PARAM_GET_CHN_INFO rChnLoadInfo;
 #endif
-
 #if CFG_RX_BA_REORDERING_ENHANCEMENT
 	BOOLEAN fgEnableReportIndependentPkt;
 #endif
@@ -814,6 +830,8 @@ struct _ADAPTER_T {
 	TIMER_T rP2pFsmTimeoutTimer;
 #endif
 
+	TIMER_T rTdlsStateTimer;
+
 	/* Online Scan Option */
 	BOOLEAN fgEnOnlineScan;
 
@@ -943,8 +961,9 @@ struct _ADAPTER_T {
 	/* NLO Timer */
 	TIMER_T rScanNloTimeoutTimer;
 
-	OS_SYSTIME rStasEnvReportDetectTime;
+	struct WLAN_DEBUG_INFO rDebugInfo;
 
+	OS_SYSTIME rStasEnvReportDetectTime;
 };				/* end of _ADAPTER_T */
 
 /*******************************************************************************
@@ -970,6 +989,9 @@ struct _ADAPTER_T {
 #define IS_NET_ACTIVE(_prAdapter, _NetTypeIndex) \
 		(_prAdapter->rWifiVar.arBssInfo[(_NetTypeIndex)].fgIsNetActive)
 #define IS_BSS_ACTIVE(_prBssInfo)     ((_prBssInfo)->fgIsNetActive)
+
+#define IS_BSS_AIS(_prBssInfo) \
+	((_prBssInfo)->ucNetTypeIndex == NETWORK_TYPE_AIS_INDEX)
 
 #define IS_AIS_ACTIVE(_prAdapter)     IS_NET_ACTIVE(_prAdapter, NETWORK_TYPE_AIS_INDEX)
 #define IS_P2P_ACTIVE(_prAdapter)     IS_NET_ACTIVE(_prAdapter, NETWORK_TYPE_P2P_INDEX)
@@ -1019,7 +1041,7 @@ struct _ADAPTER_T {
 #define PERF_MON_STOP_BIT       (1)
 #define PERF_MON_RUNNING_BIT    (2)
 
-#define THROUGHPUT_L1_THRESHOLD		(25*1024*1024)
+#define THROUGHPUT_L1_THRESHOLD		(20*1024*1024)
 #define THROUGHPUT_L2_THRESHOLD		(40*1024*1024)
 #define THROUGHPUT_L3_THRESHOLD		(60*1024*1024)
 #define THROUGHPUT_L4_THRESHOLD		(135*1024*1024)

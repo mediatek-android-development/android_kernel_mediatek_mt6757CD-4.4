@@ -2024,8 +2024,7 @@ static int pmic_regulator_ldo_init(struct platform_device *pdev)
 	struct device_node *np, *regulators;
 	int matched, i = 0, ret;
 
-	pdev->dev.of_node = of_find_compatible_node(NULL, NULL, "mediatek,mt_pmic");
-	np = of_node_get(pdev->dev.of_node);
+	np = pdev->dev.of_node;
 	if (!np)
 		return -EINVAL;
 
@@ -3997,36 +3996,20 @@ int get_ext_buck_i2c_ch_num(void)
 		return -1;
 }
 
-void ext_buck_err_check(void)
-{
-	unsigned char proj_id = 0;
-	unsigned char swcid = 0;
-
-	proj_id = mt6311_get_cid();
-	swcid = mt6311_get_swcid();
-	pr_err(PMICTAG "proj_id=0x%x, swcid=0x%x, chip_id=0x%x\n", proj_id, swcid, (proj_id << 8) | swcid);
-}
-
 int is_ext_buck_sw_ready(void)
 {
 	if ((is_mt6311_sw_ready() == 1))
 		return 1;
-	else {
-		pr_err(PMICTAG "[%s] g_mt6311_driver_ready=%d\n", __func__, is_mt6311_sw_ready());
-		ext_buck_err_check();
+	else
 		return 0;
-	}
 }
 
 int is_ext_buck_exist(void)
 {
 	if ((is_mt6311_exist() == 1))
 		return 1;
-	else {
-		pr_err(PMICTAG "[%s] g_mt6311_hw_exist=%d\n", __func__, is_mt6311_exist());
-		ext_buck_err_check();
+	else
 		return 0;
-	}
 }
 
 int is_ext_buck2_exist(void)
@@ -5064,9 +5047,10 @@ static int fb_early_init_dt_get_chosen(unsigned long node, const char *uname, in
 	return 1;
 }
 #endif /*end of #ifdef DLPT_FEATURE_SUPPORT*/
-static int pmic_mt_probe(struct platform_device *dev)
+static int __init pmic_mt_probe(struct platform_device *dev)
 {
 	int ret_device_file = 0, i;
+	struct device_node *node = dev->dev.of_node;
 #ifdef DLPT_FEATURE_SUPPORT
 	const int *pimix = NULL;
 	int len = 0;
@@ -5100,6 +5084,10 @@ static int pmic_mt_probe(struct platform_device *dev)
 	PMICLOG("******** MT pmic driver probe!! ********%d\n", ptim_rac_val_avg);
 	PMICLOG("[PMIC]pmic_mt_probe %s %s\n", dev->name, dev->id_entry->name);
 #endif /* #ifdef DLPT_FEATURE_SUPPORT */
+	if (!node) {
+		pr_err(PMICTAG "Can't find compatible node for PMIC\n");
+		return -1;
+	}
 	/*get PMIC CID */
 	PMICLOG
 	    ("PMIC CID=0x%x PowerGoodStatus = 0x%x OCStatus = 0x%x ThermalStatus = 0x%x rsvStatus = 0x%x\n",
@@ -5128,7 +5116,7 @@ static int pmic_mt_probe(struct platform_device *dev)
 	PMICLOG("[PMIC_EINT_SETTING] disable when CONFIG_FPGA_EARLY_PORTING\n");
 #else
 	/*PMIC Interrupt Service*/
-	PMIC_EINT_SETTING();
+	PMIC_EINT_SETTING(node);
 	PMICLOG("[PMIC_EINT_SETTING] Done\n");
 
 	pmic_thread_handle = kthread_create(pmic_thread_kthread, (void *)NULL, "pmic_thread");
@@ -5336,12 +5324,12 @@ static int pmic_mt_resume(struct platform_device *dev)
 	return 0;
 }
 
-struct platform_device pmic_mt_device = {
-	.name = "mt-pmic",
-	.id = -1,
+static const struct of_device_id pmic_ofid_table[] = {
+	{.compatible = "mediatek,mt_pmic"},
+	{},
 };
 
-static struct platform_driver pmic_mt_driver = {
+static struct platform_driver pmic_mt_driver_probe = {
 	.probe = pmic_mt_probe,
 	.remove = pmic_mt_remove,
 	.shutdown = pmic_mt_shutdown,
@@ -5350,8 +5338,10 @@ static struct platform_driver pmic_mt_driver = {
 	.resume = pmic_mt_resume,
 	/*#endif*/
 	.driver = {
-		   .name = "mt-pmic",
-		   },
+		.name = "mt-pmic",
+		.owner = THIS_MODULE,
+		.of_match_table = pmic_ofid_table,
+	},
 };
 
 static DEFINE_MUTEX(pmic_efuse_lock_mutex);
@@ -5439,12 +5429,7 @@ static int __init pmic_mt_init(void)
 	PMICLOG("pmic_regulator_init_OF\n");
 
 	/* PMIC device driver register*/
-	ret = platform_device_register(&pmic_mt_device);
-	if (ret) {
-		PMICLOG("****[pmic_mt_init] Unable to device register(%d)\n", ret);
-		return ret;
-	}
-	ret = platform_driver_register(&pmic_mt_driver);
+	ret = platform_driver_register(&pmic_mt_driver_probe);
 	if (ret) {
 		PMICLOG("****[pmic_mt_init] Unable to register driver (%d)\n", ret);
 		return ret;

@@ -67,25 +67,25 @@ enum pmic_clk_buf_id {
 };
 
 #if !defined(CONFIG_MTK_LEGACY)
-typedef enum {
+enum CLK_BUF_STATUS {
 	CLOCK_BUFFER_DISABLE	= 0,
 	CLOCK_BUFFER_SW_CONTROL = 1,
 	CLOCK_BUFFER_HW_CONTROL = 2,
-} CLK_BUF_STATUS;
+};
 
-typedef enum {
+enum MTK_CLK_BUF_DRIVING_CURR {
 	CLK_BUF_DRIVING_CURR_AUTO_K = -1,
 	CLK_BUF_DRIVING_CURR_0,
 	CLK_BUF_DRIVING_CURR_1,
 	CLK_BUF_DRIVING_CURR_2,
 	CLK_BUF_DRIVING_CURR_3
-} MTK_CLK_BUF_DRIVING_CURR;
+};
 #endif
 
-typedef enum {
+enum CLK_BUF_SWCTRL_STATUS_T {
 	CLK_BUF_SW_DISABLE = 0,
 	CLK_BUF_SW_ENABLE  = 1,
-} CLK_BUF_SWCTRL_STATUS_T;
+};
 
 #if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
 #define CLKBUF_NUM      7
@@ -101,7 +101,7 @@ typedef enum {
 /* #define CLKBUF_COVCTCXO_MODE */
 
 bool clk_buf_ctrl(enum clk_buf_id id, bool onoff);
-void clk_buf_get_swctrl_status(CLK_BUF_SWCTRL_STATUS_T *status);
+void clk_buf_get_swctrl_status(enum CLK_BUF_SWCTRL_STATUS_T *status);
 void clk_buf_get_rf_drv_curr(void *rf_drv_curr);
 void clk_buf_set_by_flightmode(bool is_flightmode_on);
 void clk_buf_save_afc_val(unsigned int afcdac);

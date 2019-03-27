@@ -32,7 +32,13 @@
 #if defined(CONFIG_IP6_NF_IPTABLES) || defined(CONFIG_IP6_NF_IPTABLES_MODULE)
 #include <linux/netfilter_ipv6/ip6_tables.h>
 #endif
-
+#ifdef CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT
+/*Here,mt_ccci_common.h modify to mtk_ccci_common.h in kernel-4.4*/
+#include "../../drivers/misc/mediatek/include/mt-plat/mtk_ccci_common.h"
+/*if kernel version is 3.18, Use this one*/
+/*#include "../../drivers/misc/mediatek/include/mt-plat/mt_ccci_common.h"*/
+#define ENABLE_MDT_DATAUSAGE_DEBUG 0
+#endif
 #include <linux/netfilter/xt_socket.h>
 #include "xt_qtaguid_internal.h"
 #include "xt_qtaguid_print.h"
@@ -321,7 +327,7 @@ static void sock_tag_tree_erase(struct rb_root *st_to_free_tree)
 			 st_entry->tag,
 			 get_uid_from_tag(st_entry->tag));
 		rb_erase(&st_entry->sock_node, st_to_free_tree);
-		sockfd_put(st_entry->socket);
+		sock_put(st_entry->sk);
 		kfree(st_entry);
 	}
 }
@@ -519,11 +525,13 @@ static struct tag_ref *get_tag_ref(tag_t full_tag,
 
 	DR_DEBUG("qtaguid: get_tag_ref(0x%llx)\n",
 		 full_tag);
+	spin_lock_bh(&uid_tag_data_tree_lock);
 	tr_entry = lookup_tag_ref(full_tag, &utd_entry);
 	BUG_ON(IS_ERR_OR_NULL(utd_entry));
 	if (!tr_entry)
 		tr_entry = new_tag_ref(full_tag, utd_entry);
 
+	spin_unlock_bh(&uid_tag_data_tree_lock);
 	if (utd_res)
 		*utd_res = utd_entry;
 	DR_DEBUG("qtaguid: get_tag_ref(0x%llx) utd=%p tr=%p\n",
@@ -673,6 +681,124 @@ static void pp_iface_stat_header(struct seq_file *m)
 	);
 }
 
+#ifdef CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT
+
+/*MD tethering ccmniX  return X*/
+static int get_ccmni_interface_index(const char *iface)
+{
+	int index = -1;
+	int i, len;
+
+	if (strncmp(iface, "ccmni", 4) != 0)
+		return -1;
+	/* index = 0 1 2 3 4 5 6 7 8*/
+	len = strlen(iface);
+	for (i = 0; i < len; i++) {
+		if (iface[i] >= '0' && iface[i] <= '8') {
+			index = iface[i] - '0';
+			break;
+		}
+	}
+	return index;
+}
+
+static int get_mdtethering_data(char *iface_name, struct mdt_data_t **mdt_sm_data)
+{
+	unsigned char *sm_addr = NULL;
+	unsigned int len;
+	int index = -1;
+
+	if (strncmp(iface_name, "ccmni", 4) != 0) {
+		return -1;
+	}
+	index = get_ccmni_interface_index(iface_name);
+	if (index < 0 || index > 8) {
+		return -2;
+	}
+	sm_addr = (unsigned char *)get_smem_start_addr(MD_SYS1, SMEM_USER_RAW_NETD, &len);
+	if (!sm_addr) {
+		pr_info("[mtk_net][mdt]get shareMemory Error %s\n", iface_name);
+		return -3;
+	}
+	*mdt_sm_data = (struct mdt_data_t *)(sm_addr) + index;
+	return 0;
+}
+
+static void pp_iface_stat_line(struct seq_file *m,
+			       struct iface_stat *iface_entry)
+{
+	struct mdt_data_t *mdt_sm_data = NULL;
+	int res = -1;
+	struct data_counters *cnts;
+	int cnt_set = 0;   /* We only use one set for the device */
+
+	cnts = &iface_entry->totals_via_skb;
+	res = get_mdtethering_data(iface_entry->ifname, &mdt_sm_data);
+#if ENABLE_MDT_DATAUSAGE_DEBUG
+	if (res < 0)
+		pr_info("[mtk_net][mdt]get_mdtethering_data fail %d\n", res);
+	if (mdt_sm_data) {
+		pr_info("[mtk_net][mdt]%s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu\n",
+			iface_entry->ifname,
+			mdt_sm_data->total_rx_bytes,
+			mdt_sm_data->total_rx_pkts,
+			mdt_sm_data->total_tx_bytes,
+			mdt_sm_data->total_tx_pkts,
+			mdt_sm_data->rx_tcp_bytes,
+			mdt_sm_data->rx_tcp_pkts,
+			mdt_sm_data->rx_udp_bytes,
+			mdt_sm_data->rx_udp_pkts,
+			mdt_sm_data->rx_others_bytes,
+			mdt_sm_data->rx_others_pkts,
+			mdt_sm_data->tx_tcp_bytes,
+			mdt_sm_data->tx_tcp_pkts,
+			mdt_sm_data->tx_udp_bytes,
+			mdt_sm_data->tx_udp_pkts,
+			mdt_sm_data->tx_others_bytes,
+			mdt_sm_data->tx_others_pkts);
+	}
+#endif
+	if (!mdt_sm_data) {
+		seq_printf(m, "%s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu\n",
+			   iface_entry->ifname,
+			   dc_sum_bytes(cnts, cnt_set, IFS_RX),
+			   dc_sum_packets(cnts, cnt_set, IFS_RX),
+			   dc_sum_bytes(cnts, cnt_set, IFS_TX),
+			   dc_sum_packets(cnts, cnt_set, IFS_TX),
+			   cnts->bpc[cnt_set][IFS_RX][IFS_TCP].bytes,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_TCP].packets,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_UDP].bytes,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_UDP].packets,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_PROTO_OTHER].bytes,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_PROTO_OTHER].packets,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_TCP].bytes,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_TCP].packets,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_UDP].bytes,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_UDP].packets,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_PROTO_OTHER].bytes,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_PROTO_OTHER].packets);
+	} else {
+		seq_printf(m, "%s %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu %llu\n",
+			   iface_entry->ifname,
+			   dc_sum_bytes(cnts, cnt_set, IFS_RX) + mdt_sm_data->total_rx_bytes,
+			   dc_sum_packets(cnts, cnt_set, IFS_RX) + mdt_sm_data->total_rx_pkts,
+			   dc_sum_bytes(cnts, cnt_set, IFS_TX) + mdt_sm_data->total_tx_bytes,
+			   dc_sum_packets(cnts, cnt_set, IFS_TX) + mdt_sm_data->total_tx_pkts,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_TCP].bytes + mdt_sm_data->rx_tcp_bytes,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_TCP].packets + mdt_sm_data->rx_tcp_pkts,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_UDP].bytes + mdt_sm_data->rx_udp_bytes,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_UDP].packets + mdt_sm_data->rx_udp_pkts,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_PROTO_OTHER].bytes + mdt_sm_data->rx_others_bytes,
+			   cnts->bpc[cnt_set][IFS_RX][IFS_PROTO_OTHER].packets + mdt_sm_data->rx_others_pkts,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_TCP].bytes + mdt_sm_data->tx_tcp_bytes,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_TCP].packets + mdt_sm_data->tx_tcp_pkts,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_UDP].bytes + mdt_sm_data->tx_udp_bytes,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_UDP].packets + mdt_sm_data->tx_udp_pkts,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_PROTO_OTHER].bytes + mdt_sm_data->tx_others_bytes,
+			   cnts->bpc[cnt_set][IFS_TX][IFS_PROTO_OTHER].packets + mdt_sm_data->tx_others_pkts);
+		}
+}
+#else
 static void pp_iface_stat_line(struct seq_file *m,
 			       struct iface_stat *iface_entry)
 {
@@ -699,6 +825,7 @@ static void pp_iface_stat_line(struct seq_file *m,
 		   cnts->bpc[cnt_set][IFS_TX][IFS_PROTO_OTHER].bytes,
 		   cnts->bpc[cnt_set][IFS_TX][IFS_PROTO_OTHER].packets);
 }
+#endif
 
 struct proc_iface_stat_fmt_info {
 	int fmt;
@@ -758,6 +885,36 @@ static int iface_stat_fmt_proc_show(struct seq_file *m, void *v)
 	 * string.
 	 */
 	if (p->fmt == 1) {
+#ifdef CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT
+		/*MD tethering*/
+		struct mdt_data_t *mdt_sm_data = NULL;
+		int res = -1;
+
+		res = get_mdtethering_data(iface_entry->ifname, &mdt_sm_data);
+		if (!mdt_sm_data) {
+			seq_printf(m, "%s %d %llu %llu %llu %llu %llu %llu %llu %llu\n",
+				   iface_entry->ifname,
+				   iface_entry->active,
+				   iface_entry->totals_via_dev[IFS_RX].bytes,
+				   iface_entry->totals_via_dev[IFS_RX].packets,
+				   iface_entry->totals_via_dev[IFS_TX].bytes,
+				   iface_entry->totals_via_dev[IFS_TX].packets,
+				   stats->rx_bytes, stats->rx_packets,
+				   stats->tx_bytes, stats->tx_packets);
+		} else {
+			seq_printf(m, "%s %d %llu %llu %llu %llu %llu %llu %llu %llu\n",
+				   iface_entry->ifname,
+				   iface_entry->active,
+				   iface_entry->totals_via_dev[IFS_RX].bytes,
+				   iface_entry->totals_via_dev[IFS_RX].packets,
+				   iface_entry->totals_via_dev[IFS_TX].bytes,
+				   iface_entry->totals_via_dev[IFS_TX].packets,
+				   stats->rx_bytes + mdt_sm_data->total_rx_bytes,
+				   stats->rx_packets + mdt_sm_data->total_rx_pkts,
+				   stats->tx_bytes + mdt_sm_data->total_tx_bytes,
+				   stats->tx_packets + mdt_sm_data->total_tx_pkts);
+		}
+#else
 		seq_printf(m, "%s %d %llu %llu %llu %llu %llu %llu %llu %llu\n",
 			   iface_entry->ifname,
 			   iface_entry->active,
@@ -768,6 +925,8 @@ static int iface_stat_fmt_proc_show(struct seq_file *m, void *v)
 			   stats->rx_bytes, stats->rx_packets,
 			   stats->tx_bytes, stats->tx_packets
 			   );
+#endif
+
 	} else {
 		pp_iface_stat_line(m, iface_entry);
 	}
@@ -1715,18 +1874,9 @@ static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	}
 	MT_DEBUG("qtaguid[%d]: sk=%p got_sock=%d fam=%d proto=%d\n",
 		 par->hooknum, sk, got_sock, par->family, ipx_proto(skb, par));
-	if (sk != NULL) {
-		set_sk_callback_lock = true;
-		read_lock_bh(&sk->sk_callback_lock);
-		MT_DEBUG("qtaguid[%d]: sk=%p->sk_socket=%p->file=%p\n",
-			par->hooknum, sk, sk->sk_socket,
-			sk->sk_socket ? sk->sk_socket->file : (void *)-1LL);
-		filp = sk->sk_socket ? sk->sk_socket->file : NULL;
-		MT_DEBUG("qtaguid[%d]: filp...uid=%u\n",
-			par->hooknum, filp ? from_kuid(&init_user_ns, filp->f_cred->fsuid) : -1);
-	}
 
-	if (sk == NULL || sk->sk_socket == NULL) {
+
+	if (sk == NULL) {
 		/*
 		 * Here, the qtaguid_find_sk() using connection tracking
 		 * couldn't find the owner, so for now we just count them
@@ -1739,9 +1889,7 @@ static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		 */
 		if (!(info->match & XT_QTAGUID_UID))
 			account_for_uid(skb, sk, 0, par);
-		MT_DEBUG("qtaguid[%d]: leaving (sk?sk->sk_socket)=%p\n",
-			par->hooknum,
-			sk ? sk->sk_socket : NULL);
+		MT_DEBUG("qtaguid[%d]: leaving (sk=NULL)\n", par->hooknum);
 		res = (info->match ^ info->invert) == 0;
 		atomic64_inc(&qtu_events.match_no_sk);
 		goto put_sock_ret_res;
@@ -1749,16 +1897,7 @@ static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		res = false;
 		goto put_sock_ret_res;
 	}
-	filp = sk->sk_socket->file;
-	if (filp == NULL) {
-		MT_DEBUG("qtaguid[%d]: leaving filp=NULL\n", par->hooknum);
-		account_for_uid(skb, sk, 0, par);
-		res = ((info->match ^ info->invert) &
-			(XT_QTAGUID_UID | XT_QTAGUID_GID)) == 0;
-		atomic64_inc(&qtu_events.match_no_sk_file);
-		goto put_sock_ret_res;
-	}
-	sock_uid = filp->f_cred->fsuid;
+	sock_uid = sk->sk_uid;
 	/*
 	 * TODO: unhack how to force just accounting.
 	 * For now we only do iface stats when the uid-owner is not requested
@@ -1776,8 +1915,8 @@ static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 		kuid_t uid_min = make_kuid(&init_user_ns, info->uid_min);
 		kuid_t uid_max = make_kuid(&init_user_ns, info->uid_max);
 
-		if ((uid_gte(filp->f_cred->fsuid, uid_min) &&
-		     uid_lte(filp->f_cred->fsuid, uid_max)) ^
+		if ((uid_gte(sk->sk_uid, uid_min) &&
+		     uid_lte(sk->sk_uid, uid_max)) ^
 		    !(info->invert & XT_QTAGUID_UID)) {
 			MT_DEBUG("qtaguid[%d]: leaving uid not matching\n",
 				 par->hooknum);
@@ -1788,7 +1927,19 @@ static bool qtaguid_mt(const struct sk_buff *skb, struct xt_action_param *par)
 	if (info->match & XT_QTAGUID_GID) {
 		kgid_t gid_min = make_kgid(&init_user_ns, info->gid_min);
 		kgid_t gid_max = make_kgid(&init_user_ns, info->gid_max);
-
+		set_sk_callback_lock = true;
+		read_lock_bh(&sk->sk_callback_lock);
+		MT_DEBUG("qtaguid[%d]: sk=%p->sk_socket=%p->file=%p\n",
+			par->hooknum, sk, sk->sk_socket,
+			sk->sk_socket ? sk->sk_socket->file : (void *)-1LL);
+		filp = sk->sk_socket ? sk->sk_socket->file : NULL;
+		if (!filp) {
+			res = ((info->match ^ info->invert) & XT_QTAGUID_GID) == 0;
+			atomic64_inc(&qtu_events.match_no_sk_gid);
+			goto put_sock_ret_res;
+		}
+		MT_DEBUG("qtaguid[%d]: filp...uid=%u\n",
+			par->hooknum, filp ? from_kuid(&init_user_ns, filp->f_cred->fsuid) : -1);
 		if ((gid_gte(filp->f_cred->fsgid, gid_min) &&
 				gid_lte(filp->f_cred->fsgid, gid_max)) ^
 			!(info->invert & XT_QTAGUID_GID)) {
@@ -1812,8 +1963,11 @@ ret_res:
 }
 
 #ifdef DDEBUG
-/* This function is not in xt_qtaguid_print.c because of locks visibility */
-static void prdebug_full_state(int indent_level, const char *fmt, ...)
+/*
+ * This function is not in xt_qtaguid_print.c because of locks visibility.
+ * The lock of sock_tag_list must be aquired before calling this function
+ */
+static void prdebug_full_state_locked(int indent_level, const char *fmt, ...)
 {
 	va_list args;
 	char *fmt_buff;
@@ -1834,16 +1988,12 @@ static void prdebug_full_state(int indent_level, const char *fmt, ...)
 	kfree(buff);
 	va_end(args);
 
-	spin_lock_bh(&sock_tag_list_lock);
 	prdebug_sock_tag_tree(indent_level, &sock_tag_tree);
-	spin_unlock_bh(&sock_tag_list_lock);
 
-	spin_lock_bh(&sock_tag_list_lock);
 	spin_lock_bh(&uid_tag_data_tree_lock);
 	prdebug_uid_tag_data_tree(indent_level, &uid_tag_data_tree);
 	prdebug_proc_qtu_data_tree(indent_level, &proc_qtu_data_tree);
 	spin_unlock_bh(&uid_tag_data_tree_lock);
-	spin_unlock_bh(&sock_tag_list_lock);
 
 	spin_lock_bh(&iface_stat_list_lock);
 	prdebug_iface_stat_list(indent_level, &iface_stat_list);
@@ -1852,7 +2002,7 @@ static void prdebug_full_state(int indent_level, const char *fmt, ...)
 	pr_debug("qtaguid: %s(): }\n", __func__);
 }
 #else
-static void prdebug_full_state(int indent_level, const char *fmt, ...) {}
+static void prdebug_full_state_locked(int indent_level, const char *fmt, ...) {}
 #endif
 
 struct proc_ctrl_print_info {
@@ -1928,12 +2078,12 @@ static int qtaguid_ctrl_proc_show(struct seq_file *m, void *v)
 {
 	struct sock_tag *sock_tag_entry = v;
 	uid_t uid;
-	long f_count;
 
 	CT_DEBUG("qtaguid: proc ctrl pid=%u tgid=%u uid=%u\n",
 		 current->pid, current->tgid, from_kuid(&init_user_ns, current_fsuid()));
 
 	if (sock_tag_entry != SEQ_START_TOKEN) {
+		int sk_ref_count;
 		uid = get_uid_from_tag(sock_tag_entry->tag);
 		CT_DEBUG("qtaguid: proc_read(): sk=%p tag=0x%llx (uid=%u) "
 			 "pid=%u\n",
@@ -1942,13 +2092,13 @@ static int qtaguid_ctrl_proc_show(struct seq_file *m, void *v)
 			 uid,
 			 sock_tag_entry->pid
 			);
-		f_count = atomic_long_read(
-			&sock_tag_entry->socket->file->f_count);
+		sk_ref_count = atomic_read(
+			&sock_tag_entry->sk->sk_refcnt);
 		seq_printf(m, "sock=%pK tag=0x%llx (uid=%u) pid=%u "
-			   "f_count=%lu\n",
+			   "f_count=%d\n",
 			   sock_tag_entry->sk,
 			   sock_tag_entry->tag, uid,
-			   sock_tag_entry->pid, f_count);
+			   sock_tag_entry->pid, sk_ref_count);
 	} else {
 		seq_printf(m, "events: sockets_tagged=%llu "
 			   "sockets_untagged=%llu "
@@ -1961,7 +2111,7 @@ static int qtaguid_ctrl_proc_show(struct seq_file *m, void *v)
 			   "match_found_sk_in_ct=%llu "
 			   "match_found_no_sk_in_ct=%llu "
 			   "match_no_sk=%llu "
-			   "match_no_sk_file=%llu\n",
+			   "match_no_sk_gid=%llu\n",
 			   (u64)atomic64_read(&qtu_events.sockets_tagged),
 			   (u64)atomic64_read(&qtu_events.sockets_untagged),
 			   (u64)atomic64_read(&qtu_events.counter_set_changes),
@@ -1973,10 +2123,13 @@ static int qtaguid_ctrl_proc_show(struct seq_file *m, void *v)
 			   (u64)atomic64_read(&qtu_events.match_found_sk_in_ct),
 			   (u64)atomic64_read(&qtu_events.match_found_no_sk_in_ct),
 			   (u64)atomic64_read(&qtu_events.match_no_sk),
-			   (u64)atomic64_read(&qtu_events.match_no_sk_file));
+			   (u64)atomic64_read(&qtu_events.match_no_sk_gid));
 
-		/* Count the following as part of the last item_index */
-		prdebug_full_state(0, "proc ctrl");
+		/* Count the following as part of the last item_index. No need
+		 * to lock the sock_tag_list here since it is already locked when
+		 * starting the seq_file operation
+		 */
+		prdebug_full_state_locked(0, "proc ctrl");
 	}
 
 	return 0;
@@ -2036,7 +2189,6 @@ static int ctrl_cmd_delete(const char *input)
 
 	/* Delete socket tags */
 	spin_lock_bh(&sock_tag_list_lock);
-	spin_lock_bh(&uid_tag_data_tree_lock);
 	node = rb_first(&sock_tag_tree);
 	while (node) {
 		st_entry = rb_entry(node, struct sock_tag, sock_node);
@@ -2066,7 +2218,6 @@ static int ctrl_cmd_delete(const char *input)
 				list_del(&st_entry->list);
 		}
 	}
-	spin_unlock_bh(&uid_tag_data_tree_lock);
 	spin_unlock_bh(&sock_tag_list_lock);
 
 	sock_tag_tree_erase(&st_to_free_tree);
@@ -2243,8 +2394,8 @@ static int ctrl_cmd_tag(const char *input)
 			from_kuid(&init_user_ns, current_fsuid()));
 		goto err;
 	}
-	CT_DEBUG("qtaguid: ctrl_tag(%s): socket->...->f_count=%ld ->sk=%p\n",
-		 input, atomic_long_read(&el_socket->file->f_count),
+	CT_DEBUG("qtaguid: ctrl_tag(%s): socket->...->sk_refcnt=%d ->sk=%p\n",
+		 input, atomic_read(&el_socket->sk->sk_refcnt),
 		 el_socket->sk);
 	if (argc < 3) {
 		acct_tag = make_atag_from_value(0);
@@ -2276,12 +2427,10 @@ static int ctrl_cmd_tag(const char *input)
 	full_tag = combine_atag_with_uid(acct_tag, uid_int);
 
 	spin_lock_bh(&sock_tag_list_lock);
-	spin_lock_bh(&uid_tag_data_tree_lock);
 	sock_tag_entry = get_sock_stat_nl(el_socket->sk);
 	tag_ref_entry = get_tag_ref(full_tag, &uid_tag_data_entry);
 	if (IS_ERR(tag_ref_entry)) {
 		res = PTR_ERR(tag_ref_entry);
-		spin_unlock_bh(&uid_tag_data_tree_lock);
 		spin_unlock_bh(&sock_tag_list_lock);
 		goto err_put;
 	}
@@ -2290,16 +2439,9 @@ static int ctrl_cmd_tag(const char *input)
 		struct tag_ref *prev_tag_ref_entry;
 
 		CT_DEBUG("qtaguid: ctrl_tag(%s): retag for sk=%p "
-			 "st@%p ...->f_count=%ld\n",
+			 "st@%p ...->sk_refcnt=%d\n",
 			 input, el_socket->sk, sock_tag_entry,
-			 atomic_long_read(&el_socket->file->f_count));
-		/*
-		 * This is a re-tagging, so release the sock_fd that was
-		 * locked at the time of the 1st tagging.
-		 * There is still the ref from this call's sockfd_lookup() so
-		 * it can be done within the spinlock.
-		 */
-		sockfd_put(sock_tag_entry->socket);
+			 atomic_read(&el_socket->sk->sk_refcnt));
 		prev_tag_ref_entry = lookup_tag_ref(sock_tag_entry->tag,
 						    &uid_tag_data_entry);
 		BUG_ON(IS_ERR_OR_NULL(prev_tag_ref_entry));
@@ -2315,19 +2457,19 @@ static int ctrl_cmd_tag(const char *input)
 			pr_err("qtaguid: ctrl_tag(%s): "
 			       "socket tag alloc failed\n",
 			       input);
-			BUG_ON(tag_ref_entry->num_sock_tags <= 0);
-			tag_ref_entry->num_sock_tags--;
-			free_tag_ref_from_utd_entry(tag_ref_entry,
-						    uid_tag_data_entry);
-			spin_unlock_bh(&uid_tag_data_tree_lock);
 			spin_unlock_bh(&sock_tag_list_lock);
 			res = -ENOMEM;
-			goto err_put;
+			goto err_tag_unref_put;
 		}
+		/*
+		 * Hold the sk refcount here to make sure the sk pointer cannot
+		 * be freed and reused
+		 */
+		sock_hold(el_socket->sk);
 		sock_tag_entry->sk = el_socket->sk;
-		sock_tag_entry->socket = el_socket;
 		sock_tag_entry->pid = current->tgid;
 		sock_tag_entry->tag = combine_atag_with_uid(acct_tag, uid_int);
+		spin_lock_bh(&uid_tag_data_tree_lock);
 		pqd_entry = proc_qtu_data_tree_search(
 			&proc_qtu_data_tree, current->tgid);
 		/*
@@ -2345,21 +2487,26 @@ static int ctrl_cmd_tag(const char *input)
 		else
 			list_add(&sock_tag_entry->list,
 				 &pqd_entry->sock_tag_list);
+		spin_unlock_bh(&uid_tag_data_tree_lock);
 
 		sock_tag_tree_insert(sock_tag_entry, &sock_tag_tree);
 		atomic64_inc(&qtu_events.sockets_tagged);
 	}
-	spin_unlock_bh(&uid_tag_data_tree_lock);
 	spin_unlock_bh(&sock_tag_list_lock);
-	/* We keep the ref to the socket (file) until it is untagged */
-	CT_DEBUG("qtaguid: ctrl_tag(%s): done st@%p ...->f_count=%ld\n",
+	/* We keep the ref to the sk until it is untagged */
+	CT_DEBUG("qtaguid: ctrl_tag(%s): done st@%p ...->sk_refcnt=%d\n",
 		 input, sock_tag_entry,
-		 atomic_long_read(&el_socket->file->f_count));
+		 atomic_read(&el_socket->sk->sk_refcnt));
+	sockfd_put(el_socket);
 	return 0;
 
+err_tag_unref_put:
+	BUG_ON(tag_ref_entry->num_sock_tags <= 0);
+	tag_ref_entry->num_sock_tags--;
+	free_tag_ref_from_utd_entry(tag_ref_entry, uid_tag_data_entry);
 err_put:
-	CT_DEBUG("qtaguid: ctrl_tag(%s): done. ...->f_count=%ld\n",
-		 input, atomic_long_read(&el_socket->file->f_count) - 1);
+	CT_DEBUG("qtaguid: ctrl_tag(%s): done. ...->sk_refcnt=%d\n",
+		 input, atomic_read(&el_socket->sk->sk_refcnt) - 1);
 	/* Release the sock_fd that was grabbed by sockfd_lookup(). */
 	sockfd_put(el_socket);
 	return res;
@@ -2375,17 +2522,13 @@ static int ctrl_cmd_untag(const char *input)
 	int sock_fd = 0;
 	struct socket *el_socket;
 	int res, argc;
-	struct sock_tag *sock_tag_entry;
-	struct tag_ref *tag_ref_entry;
-	struct uid_tag_data *utd_entry;
-	struct proc_qtu_data *pqd_entry;
 
 	argc = sscanf(input, "%c %d", &cmd, &sock_fd);
 	CT_DEBUG("qtaguid: ctrl_untag(%s): argc=%d cmd=%c sock_fd=%d\n",
 		 input, argc, cmd, sock_fd);
 	if (argc < 2) {
 		res = -EINVAL;
-		goto err;
+		return res;
 	}
 	el_socket = sockfd_lookup(sock_fd, &res);  /* This locks the file */
 	if (!el_socket) {
@@ -2393,17 +2536,31 @@ static int ctrl_cmd_untag(const char *input)
 			" sock_fd=%d err=%d pid=%u tgid=%u uid=%u\n",
 			input, sock_fd, res, current->pid, current->tgid,
 			from_kuid(&init_user_ns, current_fsuid()));
-		goto err;
+		return res;
 	}
 	CT_DEBUG("qtaguid: ctrl_untag(%s): socket->...->f_count=%ld ->sk=%p\n",
 		 input, atomic_long_read(&el_socket->file->f_count),
 		 el_socket->sk);
+	res = qtaguid_untag(el_socket, false);
+	sockfd_put(el_socket);
+	return res;
+}
+
+int qtaguid_untag(struct socket *el_socket, bool kernel)
+{
+	int res;
+	pid_t pid;
+	struct sock_tag *sock_tag_entry;
+	struct tag_ref *tag_ref_entry;
+	struct uid_tag_data *utd_entry;
+	struct proc_qtu_data *pqd_entry;
+
 	spin_lock_bh(&sock_tag_list_lock);
 	sock_tag_entry = get_sock_stat_nl(el_socket->sk);
 	if (!sock_tag_entry) {
 		spin_unlock_bh(&sock_tag_list_lock);
 		res = -EINVAL;
-		goto err_put;
+		return res;
 	}
 	/*
 	 * The socket already belongs to the current process
@@ -2415,20 +2572,26 @@ static int ctrl_cmd_untag(const char *input)
 	BUG_ON(!tag_ref_entry);
 	BUG_ON(tag_ref_entry->num_sock_tags <= 0);
 	spin_lock_bh(&uid_tag_data_tree_lock);
+	if (kernel)
+		pid = sock_tag_entry->pid;
+	else
+		pid = current->tgid;
 	pqd_entry = proc_qtu_data_tree_search(
-		&proc_qtu_data_tree, current->tgid);
+		&proc_qtu_data_tree, pid);
 	/*
 	 * TODO: remove if, and start failing.
 	 * At first, we want to catch user-space code that is not
 	 * opening the /dev/xt_qtaguid.
 	 */
-	if (IS_ERR_OR_NULL(pqd_entry))
+	if (IS_ERR_OR_NULL(pqd_entry) || !sock_tag_entry->list.next) {
 		pr_warn_once("qtaguid: %s(): "
 			     "User space forgot to open /dev/xt_qtaguid? "
-			     "pid=%u tgid=%u uid=%u\n", __func__,
-			     current->pid, current->tgid, from_kuid(&init_user_ns, current_fsuid()));
-	else
+			     "pid=%u tgid=%u sk_pid=%u, uid=%u\n", __func__,
+			     current->pid, current->tgid, sock_tag_entry->pid,
+			     from_kuid(&init_user_ns, current_fsuid()));
+	} else {
 		list_del(&sock_tag_entry->list);
+	}
 	spin_unlock_bh(&uid_tag_data_tree_lock);
 	/*
 	 * We don't free tag_ref from the utd_entry here,
@@ -2437,30 +2600,17 @@ static int ctrl_cmd_untag(const char *input)
 	tag_ref_entry->num_sock_tags--;
 	spin_unlock_bh(&sock_tag_list_lock);
 	/*
-	 * Release the sock_fd that was grabbed at tag time,
-	 * and once more for the sockfd_lookup() here.
+	 * Release the sock_fd that was grabbed at tag time.
 	 */
-	sockfd_put(sock_tag_entry->socket);
-	CT_DEBUG("qtaguid: ctrl_untag(%s): done. st@%p ...->f_count=%ld\n",
-		 input, sock_tag_entry,
-		 atomic_long_read(&el_socket->file->f_count) - 1);
-	sockfd_put(el_socket);
+	sock_put(sock_tag_entry->sk);
+	CT_DEBUG("qtaguid: done. st@%p ...->sk_refcnt=%d\n",
+		 sock_tag_entry,
+		 atomic_read(&el_socket->sk->sk_refcnt));
 
 	kfree(sock_tag_entry);
 	atomic64_inc(&qtu_events.sockets_untagged);
 
 	return 0;
-
-err_put:
-	CT_DEBUG("qtaguid: ctrl_untag(%s): done. socket->...->f_count=%ld\n",
-		 input, atomic_long_read(&el_socket->file->f_count) - 1);
-	/* Release the sock_fd that was grabbed by sockfd_lookup(). */
-	sockfd_put(el_socket);
-	return res;
-
-err:
-	CT_DEBUG("qtaguid: ctrl_untag(%s): done.\n", input);
-	return res;
 }
 
 static ssize_t qtaguid_ctrl_parse(const char *input, size_t count)
@@ -2889,8 +3039,10 @@ static int qtudev_release(struct inode *inode, struct file *file)
 
 	sock_tag_tree_erase(&st_to_free_tree);
 
-	prdebug_full_state(0, "%s(): pid=%u tgid=%u", __func__,
+	spin_lock_bh(&sock_tag_list_lock);
+	prdebug_full_state_locked(0, "%s(): pid=%u tgid=%u", __func__,
 			   current->pid, current->tgid);
+	spin_unlock_bh(&sock_tag_list_lock);
 	return 0;
 }
 

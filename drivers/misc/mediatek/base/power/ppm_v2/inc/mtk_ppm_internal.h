@@ -112,12 +112,10 @@ static const struct file_operations ppm_ ## name ## _proc_fops = {		\
 #undef TAG
 #define TAG     "[Power/PPM] "
 
-#define ppm_err(fmt, args...)		\
-	pr_err(TAG"[ERROR]"fmt, ##args)
-#define ppm_warn(fmt, args...)		\
-	pr_warn(TAG"[WARNING]"fmt, ##args)
+#define ppm_err		ppm_info
+#define ppm_warn	ppm_info
 #define ppm_info(fmt, args...)		\
-	pr_warn(TAG""fmt, ##args)
+	pr_notice(TAG""fmt, ##args)
 #define ppm_dbg(type, fmt, args...)				\
 	do {							\
 		if (ppm_debug & ALL || ppm_debug & type)	\
@@ -150,7 +148,7 @@ static const struct file_operations ppm_ ## name ## _proc_fops = {		\
 /* Enum								*/
 /*==============================================================*/
 enum {
-	NONE	= 0,
+	NO_LOG	= 0,
 	ALL	= 1 << 0,
 	MAIN	= 1 << 1,
 	HICA	= 1 << 2,
@@ -165,6 +163,7 @@ enum {
 enum ppm_policy {
 	PPM_POLICY_PTPOD = 0,		/* highest priority if priority value is the same */
 	PPM_POLICY_UT,
+	PPM_POLICY_FORCE_LIMIT,
 	PPM_POLICY_PWR_THRO,
 	PPM_POLICY_THERMAL,
 	PPM_POLICY_DLPT,
@@ -247,6 +246,7 @@ struct ppm_data {
 	bool is_in_suspend;
 	int fixed_root_cluster;
 	unsigned int min_power_budget;
+	unsigned int min_freq_1LL;
 	unsigned int smart_detect_boost;
 
 #ifdef PPM_VPROC_5A_LIMIT_CHECK
@@ -312,6 +312,17 @@ struct ppm_state_transfer_data {
 		bool (*transition_rule)(struct ppm_hica_algo_data data, struct ppm_state_transfer *settings);
 
 		/* parameters */
+#ifdef PPM_HICA_2P0
+		unsigned int capacity_hold_time;
+		unsigned int capacity_hold_cnt;
+		unsigned int capacity_bond;
+		unsigned int bigtsk_hold_time;
+		unsigned int bigtsk_hold_cnt;
+		unsigned int bigtsk_l_bond;
+		unsigned int bigtsk_h_bond;
+		unsigned int freq_hold_time;
+		unsigned int freq_hold_cnt;
+#else /* 1p0, 1p5, 1p75 */
 		unsigned int loading_delta;
 		unsigned int loading_hold_time;
 		unsigned int loading_hold_cnt;
@@ -324,6 +335,7 @@ struct ppm_state_transfer_data {
 		unsigned int overutil_l_hold_cnt;
 		unsigned int overutil_h_hold_time;
 		unsigned int overutil_h_hold_cnt;
+#endif
 #endif
 	} *transition_data;
 	size_t size;
@@ -405,6 +417,9 @@ extern int ppm_profile_init(void);
 extern void ppm_profile_exit(void);
 extern void ppm_profile_state_change_notify(enum ppm_power_state old_state, enum ppm_power_state new_state);
 extern void ppm_profile_update_client_exec_time(enum ppm_client client, unsigned long long time);
+#ifdef PPM_SSPM_SUPPORT
+extern void ppm_profile_update_ipi_exec_time(int id, unsigned long long time);
+#endif
 
 /* SRAM debugging */
 #ifdef CONFIG_MTK_RAM_CONSOLE

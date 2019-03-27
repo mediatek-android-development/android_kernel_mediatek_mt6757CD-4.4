@@ -20,21 +20,17 @@
 #include <core/met_drv.h>
 #endif
 
-#define IDLE_PROF_TAG                   "Power/swap "
-#define idle_prof_emerg(fmt, args...)   pr_emerg(IDLE_PROF_TAG fmt, ##args)
-#define idle_prof_alert(fmt, args...)   pr_alert(IDLE_PROF_TAG fmt, ##args)
-#define idle_prof_crit(fmt, args...)    pr_crit(IDLE_PROF_TAG fmt, ##args)
-#define idle_prof_err(fmt, args...)     pr_err(IDLE_PROF_TAG fmt, ##args)
-#define idle_prof_warn(fmt, args...)    pr_warn(IDLE_PROF_TAG fmt, ##args)
+#define IDLE_PROF_TAG     "Power/swap "
+#define idle_prof_emerg(fmt, args...)   pr_notice(IDLE_PROF_TAG fmt, ##args)
+#define idle_prof_alert(fmt, args...)   pr_notice(IDLE_PROF_TAG fmt, ##args)
+#define idle_prof_crit(fmt, args...)    pr_notice(IDLE_PROF_TAG fmt, ##args)
+#define idle_prof_err(fmt, args...)     pr_notice(IDLE_PROF_TAG fmt, ##args)
+#define idle_prof_warn(fmt, args...)	pr_notice(IDLE_PROF_TAG fmt, ##args)
 #define idle_prof_notice(fmt, args...)  pr_notice(IDLE_PROF_TAG fmt, ##args)
 #define idle_prof_info(fmt, args...)    pr_debug(IDLE_PROF_TAG fmt, ##args)
 #define idle_prof_ver(fmt, args...)     pr_debug(IDLE_PROF_TAG fmt, ##args)
 #define idle_prof_dbg(fmt, args...)     pr_debug(IDLE_PROF_TAG fmt, ##args)
 
-#ifndef FREE_RUN_TIMER
-#undef SPM_MCSODI_PROFILE_RATIO
-#define SPM_MCSODI_PROFILE_RATIO 0
-#endif
 
 /* idle ratio */
 static bool idle_ratio_en;
@@ -45,15 +41,17 @@ static unsigned long long idle_ratio_value[NR_TYPES];
 
 /* idle block information */
 static unsigned long long idle_block_log_prev_time;
-static unsigned int idle_block_log_time_criteria = 5000;    /* 5 sec */
+static unsigned int idle_block_log_time_criteria = 5000;	/* 5 sec */
 static unsigned long long idle_cnt_dump_prev_time;
-static unsigned int idle_cnt_dump_criteria = 5000;          /* 5 sec */
+static unsigned int idle_cnt_dump_criteria = 5000;			/* 5 sec */
 
 static struct mtk_idle_buf idle_log;
 
 #define reset_log()              reset_idle_buf(idle_log)
 #define get_log()                get_idle_buf(idle_log)
 #define append_log(fmt, args...) idle_buf_append(idle_log, fmt, ##args)
+
+static DEFINE_SPINLOCK(idle_cnt_spin_lock);
 
 struct mtk_idle_block {
 	u64 prev_time;
@@ -82,11 +80,6 @@ static struct mtk_idle_block idle_block[NR_TYPES] = {
 		.time_critera = 30000, /* 30sec */
 		.init = false,
 	},
-	[IDLE_TYPE_MCSODI] = {
-		.name = "mcsodi",
-		.time_critera = 30000, /* 30sec */
-		.init = false,
-	},
 	[IDLE_TYPE_MC] = {
 		.name = "mcidle",
 		.init = false,
@@ -109,7 +102,7 @@ static struct mtk_idle_block idle_block[NR_TYPES] = {
 #define GET_EVENT_RATIO_SPEED(x)    ((x)/(WINDOW_LEN_SPEED/1000))
 #define GET_EVENT_RATIO_NORMAL(x)   ((x)/(WINDOW_LEN_NORMAL/1000))
 
-idle_twam_t idle_twam;
+struct mtk_idle_twam idle_twam;
 
 #if SPM_MET_TAGGING
 #define idle_get_current_time_us(x) do {\
@@ -124,27 +117,21 @@ static const char *idle_met_label[NR_TYPES] = {
 	[IDLE_TYPE_DP] = "deep idle residency",
 	[IDLE_TYPE_SO3] = "SODI3 residency",
 	[IDLE_TYPE_SO] = "SODI residency",
-	[IDLE_TYPE_MCSODI] = "MC-SODI residency",
 };
 #endif
 
-#if SPM_MCSODI_PROFILE_RATIO
-mcsodi_timestamp_t mcsodi_prof[MCSODI_RATIO_NUM];
-#endif
-
-#define IDLE_PROF_MAX_IDX 32
 
 #ifdef SPM_SODI3_PROFILE_TIME
-unsigned int	soidle3_profile[IDLE_PROF_MAX_IDX];
+unsigned int			soidle3_profile[4];
 #endif
 #ifdef SPM_SODI_PROFILE_TIME
-unsigned int	soidle_profile[IDLE_PROF_MAX_IDX];
+unsigned int			soidle_profile[4];
 #endif
 #ifdef SPM_DEEPIDLE_PROFILE_TIME
-unsigned int	dpidle_profile[IDLE_PROF_MAX_IDX];
+unsigned int            dpidle_profile[4];
 #endif
 
-p_idle_twam_t mtk_idle_get_twam(void)
+struct mtk_idle_twam *mtk_idle_get_twam(void)
 {
 	return &idle_twam;
 }
@@ -152,8 +139,6 @@ p_idle_twam_t mtk_idle_get_twam(void)
 void  dpidle_profile_time(int idx)
 {
 #ifdef SPM_DEEPIDLE_PROFILE_TIME
-	if (unlikely(idx >= IDLE_PROF_MAX_IDX))
-		return;
 #ifdef IDLE_PROF_USING_STD_TIMER
 	dpidle_profile[idx] = lower_32_bits(mtk_timer_get_cnt(2));
 #else
@@ -166,8 +151,6 @@ void  dpidle_profile_time(int idx)
 void  soidle3_profile_time(int idx)
 {
 #ifdef SPM_SODI3_PROFILE_TIME
-	if (unlikely(idx >= IDLE_PROF_MAX_IDX))
-		return;
 #ifdef IDLE_PROF_USING_STD_TIMER
 	soidle3_profile[idx] = lower_32_bits(mtk_timer_get_cnt(2));
 #else
@@ -180,8 +163,6 @@ void  soidle3_profile_time(int idx)
 void  soidle_profile_time(int idx)
 {
 #ifdef SPM_SODI_PROFILE_TIME
-	if (unlikely(idx >= IDLE_PROF_MAX_IDX))
-		return;
 #ifdef IDLE_PROF_USING_STD_TIMER
 	soidle_profile[idx] = lower_32_bits(mtk_timer_get_cnt(2));
 #else
@@ -290,46 +271,6 @@ void mtk_idle_ratio_calc_stop(int type, int cpu)
 #endif
 }
 
-#if SPM_MCSODI_PROFILE_RATIO
-void mtk_mcsodi_ratio_start(int cpu, mcsodi_ratio_t type)
-{
-	mcsodi_prof[type].start = idle_readl(FREE_RUN_TIMER);
-}
-
-
-void mtk_mcsodi_ratio_stop(int cpu, mcsodi_ratio_t type)
-{
-	u64 curr;
-
-	if (mcsodi_prof[type].start == 0)
-		return;
-
-	curr = (u64) idle_readl(FREE_RUN_TIMER);
-	mcsodi_prof[type].duration += ((u32)(((curr+0xffffffff) - (u64)mcsodi_prof[type].start)&0xffffffff));
-	mcsodi_prof[type].start = 0;
-}
-
-void mtk_mcsodi_prof_reset(void)
-{
-	int i;
-
-	for (i = 0; i < MCSODI_RATIO_NUM; i++) {
-		mcsodi_prof[i].start = 0;
-		mcsodi_prof[i].duration = 0;
-	}
-}
-
-u32 mtk_mcsodi_timestamp(void)
-{
-	return idle_readl(FREE_RUN_TIMER);
-}
-
-u32 mtk_mcsodi_duration(mcsodi_ratio_t type)
-{
-	return mcsodi_prof[type].duration;
-}
-#endif
-
 bool mtk_idle_get_ratio_status(void)
 {
 	return idle_ratio_en;
@@ -388,13 +329,25 @@ void mtk_idle_dump_cnt_in_interval(void)
 {
 	int i = 0;
 	unsigned long long idle_cnt_dump_curr_time = 0;
+	unsigned long flags;
+	bool dump_cnt_info = false;
 
 	idle_cnt_dump_curr_time = idle_get_current_time_ms();
 
 	if (idle_cnt_dump_prev_time == 0)
 		idle_cnt_dump_prev_time = idle_cnt_dump_curr_time;
 
-	if (!((idle_cnt_dump_curr_time - idle_cnt_dump_prev_time) > idle_cnt_dump_criteria))
+	spin_lock_irqsave(&idle_cnt_spin_lock, flags);
+
+	dump_cnt_info = ((idle_cnt_dump_curr_time - idle_cnt_dump_prev_time) > idle_cnt_dump_criteria);
+
+	/* update time base */
+	if (dump_cnt_info)
+		idle_cnt_dump_prev_time = idle_cnt_dump_curr_time;
+
+	spin_unlock_irqrestore(&idle_cnt_spin_lock, flags);
+
+	if (!dump_cnt_info)
 		return;
 
 	/* dump idle count */
@@ -409,35 +362,29 @@ void mtk_idle_dump_cnt_in_interval(void)
 	append_log("SODI: ");
 	mtk_idle_dump_cnt(IDLE_TYPE_SO);
 
-	append_log("MCSODI: ");
-	mtk_idle_dump_cnt(IDLE_TYPE_MCSODI);
-
 	/* dump log */
 	idle_prof_warn("%s\n", get_log());
 
 	/* dump idle ratio */
 	if (idle_ratio_en) {
 		idle_ratio_profile_duration = idle_get_current_time_ms() - idle_ratio_profile_start_time;
-		idle_prof_warn("--- CPU 0 idle: %llu, DP = %llu, SO3 = %llu, SO = %llu, MCSODI = %llu, RG = %llu --- (ms)\n",
+		idle_prof_warn("--- CPU 0 idle: %llu, DP = %llu, SO3 = %llu, SO = %llu, RG = %llu --- (ms)\n",
 				idle_ratio_profile_duration,
 				idle_ratio_value[IDLE_TYPE_DP],
 				idle_ratio_value[IDLE_TYPE_SO3],
 				idle_ratio_value[IDLE_TYPE_SO],
-				idle_ratio_value[IDLE_TYPE_MCSODI],
 				idle_ratio_value[IDLE_TYPE_RG]);
 
 		for (i = 0; i < NR_TYPES; i++)
 			idle_ratio_value[i] = 0;
 		idle_ratio_profile_start_time = idle_get_current_time_ms();
 	}
-
-	/* update time base */
-	idle_cnt_dump_prev_time = idle_cnt_dump_curr_time;
 }
 static DEFINE_SPINLOCK(idle_blocking_spin_lock);
 
 bool mtk_idle_state_pick(int type, int cpu, int reason)
 {
+	struct mtk_idle_buf idle_state_log;
 	struct mtk_idle_block *p_idle;
 	u64 curr_time;
 	int i;
@@ -476,27 +423,29 @@ bool mtk_idle_state_pick(int type, int cpu, int reason)
 
 	if (dump_block_info) {
 		/* xxidle, rgidle count */
-		reset_log();
+		reset_idle_buf(idle_state_log);
 
-		append_log("CNT(%s,rgidle): ", p_idle->name);
+		idle_buf_append(idle_state_log, "CNT(%s,rgidle): ", p_idle->name);
 		for (i = 0; i < nr_cpu_ids; i++)
-			append_log("[%d] = (%lu,%lu), ", i, p_idle->cnt[i], idle_block[IDLE_TYPE_RG].cnt[i]);
-		idle_prof_warn("%s\n", get_log());
+			idle_buf_append(idle_state_log, "[%d] = (%lu,%lu), ",
+				i, p_idle->cnt[i], idle_block[IDLE_TYPE_RG].cnt[i]);
+		idle_prof_warn("%s\n", get_idle_buf(idle_state_log));
 
 		/* block category */
-		reset_log();
+		reset_idle_buf(idle_state_log);
 
-		append_log("%s_block_cnt: ", p_idle->name);
+		idle_buf_append(idle_state_log, "%s_block_cnt: ", p_idle->name);
 		for (i = 0; i < NR_REASONS; i++)
-			append_log("[%s] = %lu, ", reason_name[i], p_idle->block_cnt[i]);
-		idle_prof_warn("%s\n", get_log());
+			idle_buf_append(idle_state_log, "[%s] = %lu, ",
+				reason_name[i], p_idle->block_cnt[i]);
+		idle_prof_warn("%s\n", get_idle_buf(idle_state_log));
 
-		reset_log();
+		reset_idle_buf(idle_state_log);
 
-		append_log("%s_block_mask: ", p_idle->name);
+		idle_buf_append(idle_state_log, "%s_block_mask: ", p_idle->name);
 		for (i = 0; i < NR_GRPS; i++)
-			append_log("0x%08x, ", p_idle->block_mask[i]);
-		idle_prof_warn("%s\n", get_log());
+			idle_buf_append(idle_state_log, "0x%08x, ", p_idle->block_mask[i]);
+		idle_prof_warn("%s\n", get_idle_buf(idle_state_log));
 
 		spm_resource_req_dump();
 

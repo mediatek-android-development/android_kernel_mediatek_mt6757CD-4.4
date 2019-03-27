@@ -21,6 +21,18 @@
 #include "tcpci_config.h"
 #include "tcpm.h"
 
+/*---------------------------------------------------------------------------*/
+
+#ifndef CONFIG_TCPC_SOURCE_VCONN
+#undef CONFIG_USB_PD_VCONN_SWAP
+#undef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
+#undef CONFIG_USB_PD_DFP_READY_DISCOVER_ID
+#undef CONFIG_USB_PD_DISCOVER_CABLE_REQUEST_VCONN
+#undef CONFIG_USB_PD_DISCOVER_CABLE_RETURN_VCONN
+#undef CONFIG_USB_PD_ALT_MODE_SVID
+#undef CONFIG_USB_PD_RESET_CABLE
+#endif	/* CONFIG_TCPC_SOURCE_VCONN */
+
 #ifdef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
 #define CONFIG_PD_DISCOVER_CABLE_ID
 #endif /* CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID */
@@ -30,14 +42,19 @@
 #define CONFIG_PD_DISCOVER_CABLE_ID
 #endif /* CONFIG_USB_PD_DFP_READY_DISCOVER_ID */
 
-#ifdef CONFIG_USB_PD_ALT_MODE
-#define CONFIG_USB_PD_MODE_OPERATION
-#endif	/* CONFIG_USB_PD_ALT_MODE */
+#ifdef CONFIG_USB_PD_RESET_CABLE
 
-#ifdef CONFIG_USB_PD_ALT_MODE_RTDC
-#undef CONFIG_USB_PD_MODE_OPERATION
-#define CONFIG_USB_PD_MODE_OPERATION
-#endif	/* CONFIG_USB_PD_ALT_MODE_RTDC */
+#ifdef CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID
+#define CONFIG_PD_SRC_RESET_CABLE
+#endif	/* CONFIG_USB_PD_SRC_STARTUP_DISCOVER_ID */
+
+#ifdef CONFIG_USB_PD_DFP_READY_DISCOVER_ID
+#define CONFIG_PD_DFP_RESET_CABLE
+#endif	/* CONFIG_USB_PD_DFP_READY_DISCOVER_ID */
+
+#endif	/* CONFIG_USB_PD_RESET_CABLE */
+
+#define CONFIG_PD_TA_WAKELOCK
 
 /*---------------------------------------------------------------------------*/
 
@@ -67,6 +84,7 @@
 #define PDO_TYPE_FIXED    (0 << 30)
 #define PDO_TYPE_BATTERY  (1 << 30)
 #define PDO_TYPE_VARIABLE (2 << 30)
+#define PDO_TYPE_APDO	(3 << 30)
 #define PDO_TYPE_MASK     (3 << 30)
 
 #define PDO_FIXED_DUAL_ROLE (1 << 29) /* Dual role device */
@@ -84,6 +102,7 @@
 	((((ma)/10) & 0x3fff) << 0)  /* Max current in 10mA units */
 
 #define PDO_TYPE(raw)	(raw & PDO_TYPE_MASK)
+#define PDO_TYPE_VAL(raw)	(PDO_TYPE(raw) >> 30)
 
 #define PDO_FIXED_EXTRACT_VOLT_RAW(raw)	(((raw) >> 10) & 0x3ff)
 #define PDO_FIXED_EXTRACT_CURR_RAW(raw)	(((raw) >> 0) & 0x3ff)
@@ -137,6 +156,36 @@
 				 PDO_BATT_OP_POWER(op_mw) | \
 				 PDO_TYPE_BATTERY)
 
+/* APDO : Augmented Power Data Object */
+
+#define APDO_TYPE_MASK		(3 << 28)
+#define APDO_TYPE_PPS		(0 << 28)
+
+#define APDO_TYPE(raw)	(raw & APDO_TYPE_MASK)
+#define APDO_TYPE_VAL(raw)	(APDO_TYPE(raw) >> 28)
+
+#define APDO_PPS_CURR_FOLDBACK	(1<<26)
+#define APDO_PPS_MAX_VOLT(mv) ((((mv) / 100) & 0xff) << 17)
+#define APDO_PPS_MIN_VOLT(mv) ((((mv) / 100) & 0xff) << 8)
+#define APDO_PPS_CURR(ma) ((((ma) / 50) & 0x7f) << 0)
+
+#define APDO_PPS_EXTRACT_MAX_VOLT_RAW(raw)	(((raw) >> 17) & 0xff)
+#define APDO_PPS_EXTRACT_MIN_VOLT_RAW(raw)	(((raw) >> 8) & 0Xff)
+#define APDO_PPS_EXTRACT_CURR_RAW(raw)	(((raw) >> 0) & 0x7f)
+
+#define APDO_PPS_EXTRACT_MAX_VOLT(raw)	\
+	(APDO_PPS_EXTRACT_MAX_VOLT_RAW(raw) * 100)
+#define APDO_PPS_EXTRACT_MIN_VOLT(raw)	\
+	(APDO_PPS_EXTRACT_MIN_VOLT_RAW(raw) * 100)
+#define APDO_PPS_EXTRACT_CURR(raw)	\
+	(APDO_PPS_EXTRACT_CURR_RAW(raw) * 50)
+
+#define APDO_PPS(min_mv, max_mv, ma, flags)	\
+	(APDO_PPS_MIN_VOLT(min_mv)	 | \
+	APDO_PPS_MAX_VOLT(max_mv) | \
+	APDO_PPS_CURR(ma) | \
+	flags | PDO_TYPE_APDO | APDO_TYPE_PPS)
+
 /* RDO : Request Data Object */
 #define RDO_OBJ_POS(n)             (((n) & 0x7) << 28)
 #define RDO_POS(rdo)               (((rdo) >> 28) & 0x7)
@@ -144,6 +193,9 @@
 #define RDO_CAP_MISMATCH           (1 << 26)
 #define RDO_COMM_CAP               (1 << 25)
 #define RDO_NO_SUSPEND             (1 << 24)
+#define RDO_EXTEND_MESSAGE	(1 << 23)
+#define RDO_CURR_FOLDBACK	(1 << 22)
+
 #define RDO_FIXED_VAR_OP_CURR(ma)  ((((ma) / 10) & 0x3FF) << 10)
 #define RDO_FIXED_VAR_MAX_CURR(ma) ((((ma) / 10) & 0x3FF) << 0)
 
@@ -156,16 +208,26 @@
 #define RDO_BATT_EXTRACT_OP_POWER(raw)	(((raw >> 10 & 0x3ff)) * 250)
 #define RDO_BATT_EXTRACT_MAX_POWER(raw)	(((raw >> 0 & 0x3ff)) * 250)
 
+#define RDO_APDO_OP_MV(mv)	((((mv) / 20) & 0x7FF) << 9)
+#define RDO_APDO_OP_MA(ma)	((((ma) / 50) & 0x7F) << 0)
+
+#define RDO_APDO_EXTRACT_OP_MV(raw)	(((raw >> 9 & 0x7FF)) * 20)
+#define RDO_APDO_EXTRACT_OP_MA(raw)	(((raw >> 0 & 0x7F)) * 50)
+
 #define RDO_FIXED(n, op_ma, max_ma, flags) \
 				(RDO_OBJ_POS(n) | (flags) | \
 				RDO_FIXED_VAR_OP_CURR(op_ma) | \
 				RDO_FIXED_VAR_MAX_CURR(max_ma))
 
-
 #define RDO_BATT(n, op_mw, max_mw, flags) \
 				(RDO_OBJ_POS(n) | (flags) | \
 				RDO_BATT_OP_POWER(op_mw) | \
 				RDO_BATT_MAX_POWER(max_mw))
+
+#define RDO_APDO(n, op_mv, op_ma, flags)	\
+				(RDO_OBJ_POS(n) | (flags) | \
+				RDO_APDO_OP_MV(op_mv) | \
+				RDO_APDO_OP_MA(op_ma))
 
 /* BDO : BIST Data Object */
 #define BDO_MODE_RECV       (0 << 28)
@@ -186,24 +248,54 @@
 /* Protocol revision */
 #define PD_REV10 0
 #define PD_REV20 1
+#define PD_REV30 2
 
 /* build message header */
 
-#define PD_HEADER_SOP(msg_type, prole, drole, id, cnt) \
-		((msg_type) | (PD_REV20 << 6) | \
+#define PD_HEADER_SOP(msg_type, rev, prole, drole, id, cnt, ext) \
+		((msg_type) | (rev << 6) | \
 		 ((drole) << 5) | ((prole) << 8) | \
-		 ((id) << 9) | ((cnt) << 12))
+		 ((id) << 9) | ((cnt) << 12) | ((ext) << 15))
 
-#define PD_HEADER_SOP_PRIME(msg_type, cable_plug, id, cnt) \
-		((msg_type) | (PD_REV20 << 6) | \
+#define PD_HEADER_SOP_PRIME(msg_type, rev, cable_plug, id, cnt, ext) \
+		((msg_type) | (rev << 6) | \
 		 ((cable_plug) << 8) | \
-		 ((id) << 9) | ((cnt) << 12))
+		 ((id) << 9) | ((cnt) << 12) | ((ext) << 15))
 
+#define PD_HEADER_EXT(header) (((header) >> 15) & 1)	/* pd30 */
+#define PD_HEADER_REV(header)  (((header) >> 6) & 3)
 #define PD_HEADER_CNT(header)  (((header) >> 12) & 7)
-#define PD_HEADER_TYPE(header) ((header) & 0xF)
+#define PD_HEADER_TYPE(header) ((header) & 0x1F)
 #define PD_HEADER_ID(header)   (((header) >> 9) & 7)
 #define PD_HEADER_PR(header)	(((header) >> 8) & 1)
 #define PD_HEADER_DR(header)	(((header) >> 5) & 1)
+
+#define PD_EXT_HEADER_PAYLOAD_INDEX	2
+
+#define PD_EXT_HEADER_CHUNKED(header)	(((header) >> 15) & 1)
+#define PD_EXT_HEADER_CHUNK_NR(header)	(((header) >> 11) & 0xF)
+#define PD_EXT_HEADER_REQUEST(header)	(((header) >> 10) & 1)
+#define PD_EXT_HEADER_DATA_SIZE(header)	(((header) >> 0) & 0x1FF)
+
+#define PD_EXT_HEADER_CK(data_size, req, chunk_nr, chunked)	\
+		((data_size) | (req << 10) | \
+		 ((chunk_nr) << 11) | (chunked << 15))
+
+#ifdef CONFIG_USB_PD_REV30
+
+static inline uint8_t *pd_get_ext_msg_payload(struct pd_event *pd_event)
+{
+	uint8_t *payload;
+	struct pd_msg *pd_msg = pd_event->pd_msg;
+
+	/* PD_BUG_ON(pd_msg == NULL); */
+
+	payload = (uint8_t *) pd_msg->payload;
+
+	return payload + PD_EXT_HEADER_PAYLOAD_INDEX;
+}
+
+#endif	/* CONFIG_USB_PD_REV30 */
 
 /*
  * VDO : Vendor Defined Message Object
@@ -235,8 +327,6 @@
 #define VDO_SVDM_VERS(x)  (x << 13)
 #define VDO_OPOS(x)       (x << 8)
 #define VDO_CMDT(x)       (x << 6)
-#define VDO_OPOS_MASK     VDO_OPOS(0x7)
-#define VDO_CMDT_MASK     VDO_CMDT(0x3)
 
 #define CMDT_INIT     0
 #define CMDT_RSP_ACK  1
@@ -312,6 +402,7 @@
  * <25:16>  :: SBZ
  * <15:0>   :: USB-IF assigned VID for this cable vendor
  */
+
 #define IDH_PTYPE_UNDEF  0
 #define IDH_PTYPE_HUB    1
 #define IDH_PTYPE_PERIPH 2
@@ -569,14 +660,6 @@
 #define VDO_DP_CFG(pin, sig, cfg) \
 	(((pin) & 0xff) << 8 | ((sig) & 0xf) << 2 | ((cfg) & 0x3))
 
-#if 0
-#define VDO_DP_DFP_CFG(pin, sig) \
-	(((pin) & 0xff) << 8 | ((sig) & 0xf) << 2 | (DP_CONFIG_DFP_D))
-
-#define VDO_DP_UFP_CFG(pin, sig) \
-	(((pin) & 0xff) << 16 | ((sig) & 0xf) << 2 | (DP_CONFIG_UFP_D))
-#endif
-
 #define VDO_DP_DFP_CFG(pin, sig) VDO_DP_CFG(pin, sig, DP_CONFIG_DFP_D)
 #define VDO_DP_UFP_CFG(pin, sig) VDO_DP_CFG(pin, sig, DP_CONFIG_UFP_D)
 
@@ -639,6 +722,11 @@
 #define USB_SID_RICHTEK	0x29cf  /* demo uvdm */
 #define USB_SID_DIRECTCHARGE	0x29cf  /* direct charge */
 
+/* Extend Message Data Object */
+
+#define PD_SDB_SIZE	5
+#define PD_PPSDB_SIZE	4
+
 /* PD counter definitions */
 #define PD_MESSAGE_ID_COUNT	7
 #define PD_HARD_RESET_COUNT	2
@@ -658,32 +746,38 @@ enum {
 	PD_WAIT_VBUS_STABLE_ONCE = 4,
 };
 
-typedef struct __pd_port_power_cababilities {
+struct pd_port_power_capabilities {
 	uint8_t nr;
 	uint32_t pdos[7];
-} pd_port_power_caps;
+};
 
-typedef struct __svdm_mode {
+struct svdm_mode {
 	uint8_t mode_cnt;
 	uint32_t mode_vdo[VDO_MAX_NR];
-} svdm_mode_t;
+};
 
-struct __svdm_svid_ops;
-typedef struct __svdm_svid_data {
+struct svdm_svid_ops;
+struct svdm_svid_data {
 	bool exist;
 	uint16_t svid;
 	uint8_t active_mode;
-	svdm_mode_t local_mode;
-	svdm_mode_t remote_mode;
-	const struct __svdm_svid_ops *ops;
-} svdm_svid_data_t;
+	struct svdm_mode local_mode;
+	struct svdm_mode remote_mode;
+	const struct svdm_svid_ops *ops;
+};
 
-typedef struct __svdm_svid_list {
+struct svdm_svid_list {
 	uint8_t cnt;
 	uint16_t svids[VDO_MAX_SVID_NR];
-} svdm_svid_list_t;
+};
 
-typedef struct __pd_port {
+#if 0
+struct pd_port;
+static void (*pe_state_action_fcn_t)
+	(struct pd_port *pd_port, struct pd_event *pd_event);
+#endif
+
+struct pd_port {
 	struct tcpc_device *tcpc_dev;
 	struct mutex pd_lock;
 
@@ -730,6 +824,10 @@ typedef struct __pd_port {
 	uint8_t wait_retry_cnt;
 	uint8_t wait_retry_type;
 
+#ifdef CONFIG_USB_PD_REV30
+	uint8_t pd_revision[2];
+#endif	/* CONFIG_USB_PD_REV30 */
+
 	uint8_t msg_id_rx[PD_SOP_NR];
 	uint8_t msg_id_rx_init[PD_SOP_NR];
 	uint8_t msg_id_tx[PD_SOP_NR];
@@ -742,6 +840,10 @@ typedef struct __pd_port {
 	uint32_t cable_vdos[VDO_MAX_NR];
 	bool power_cable_present;
 
+#ifdef CONFIG_USB_PD_RESET_CABLE
+	bool reset_cable;
+#endif	/* CONFIG_USB_PD_RESET_CABLE */
+
 	uint8_t id_vdo_nr;
 	uint32_t id_vdos[VDO_MAX_NR];
 
@@ -751,12 +853,13 @@ typedef struct __pd_port {
 #endif	/* CONFIG_USB_PD_KEEP_PARTNER_ID */
 
 #ifdef CONFIG_USB_PD_KEEP_SVIDS
-	svdm_svid_list_t remote_svid_list;
+	struct svdm_svid_list remote_svid_list;
 #endif	/* CONFIG_USB_PD_KEEP_SVIDS */
 
 	uint8_t svid_data_cnt;
-	svdm_svid_data_t *svid_data;
+	struct svdm_svid_data *svid_data;
 
+	bool pd_wait_sender_response;
 	bool during_swap;	/* pr or dr swap */
 
 /* DPM */
@@ -767,17 +870,27 @@ typedef struct __pd_port {
 	int request_i_op;
 	int request_i_max;
 
+#ifdef CONFIG_USB_PD_REV30_PPS_SINK
+	int request_v_apdo;
+	int request_i_apdo;
+	bool request_apdo;
+	uint8_t request_apdo_pos;
+	uint8_t dpm_pps_retry_cnt;
+#endif	/* CONFIG_USB_PD_REV30_PPS_SINK */
+
 	uint8_t local_selected_cap;
 	uint8_t remote_selected_cap;
-	pd_port_power_caps local_src_cap;
-	pd_port_power_caps local_snk_cap;
-	pd_port_power_caps local_src_cap_default;
-	pd_port_power_caps remote_src_cap;
-	pd_port_power_caps remote_snk_cap;
+	struct pd_port_power_capabilities local_src_cap;
+	struct pd_port_power_capabilities local_snk_cap;
+	struct pd_port_power_capabilities local_src_cap_default;
+	struct pd_port_power_capabilities remote_src_cap;
+	struct pd_port_power_capabilities remote_snk_cap;
 
 	uint16_t mode_svid;
 	uint8_t mode_obj_pos;
 	bool modal_operation;
+	bool svdm_ready;
+	bool dpm_reset_vdm;
 	bool dpm_ack_immediately;
 
 #ifdef CONFIG_USB_PD_DFP_FLOW_DELAY
@@ -794,6 +907,7 @@ typedef struct __pd_port {
 	uint32_t dpm_dfp_retry_cnt;
 
 	uint8_t dpm_charging_policy;
+	uint8_t dpm_charging_policy_default;
 
 /* ALT Mode */
 #ifdef CONFIG_USB_PD_ALT_MODE
@@ -822,6 +936,9 @@ typedef struct __pd_port {
 #ifdef CONFIG_USB_PD_ALT_MODE_RTDC
 	uint8_t dc_dfp_state;
 	uint32_t dc_pass_code;
+#ifdef CONFIG_USB_PD_REV30_PPS_SINK
+	bool dc_pps_mode;
+#endif	/* CONFIG_USB_PD_REV30_PPS_SINK */
 #endif	/* CONFIG_USB_PD_ALT_MODE_RTDC */
 
 #ifdef CONFIG_USB_PD_CUSTOM_DBGACC
@@ -832,16 +949,42 @@ typedef struct __pd_port {
 	bool richtek_init_done;
 #endif	/* CONFIG_USB_PD_RICHTEK_UVDM */
 
-	tcp_dpm_event_t tcp_event;
-} pd_port_t;
+	struct tcp_dpm_event tcp_event;
+	uint8_t tcp_event_id_1st;
+
+#ifdef CONFIG_USB_PD_TCPM_CB_2ND
+	uint8_t tcp_event_id_2nd;
+	bool tcp_event_drop_reset_once;
+#endif	/* CONFIG_USB_PD_TCPM_CB_2ND */
+
+#ifdef CONFIG_USB_PD_BLOCK_TCPM
+	int tcpm_bk_ret;
+	bool tcpm_bk_done;
+	struct mutex tcpm_bk_lock;
+	wait_queue_head_t tcpm_bk_wait_que;
+#endif	/* CONFIG_USB_PD_BLOCK_TCPM */
+
+#ifdef CONFIG_USB_PD_REV30
+	uint8_t local_status[PD_SDB_SIZE];
+	uint8_t local_pps_status[PD_PPSDB_SIZE];
+
+	uint8_t remote_status[PD_SDB_SIZE];
+	uint8_t remote_pps_status[PD_PPSDB_SIZE];
+#endif	/* CONFIG_USB_PD_REV30 */
+};
 
 extern int pd_core_init(struct tcpc_device *tcpc_dev);
-int pd_alert_vbus_changed(pd_port_t *pd_port, int vbus_level);
+int pd_alert_vbus_changed(struct pd_port *pd_port, int vbus_level);
 
-static inline int pd_is_auto_discover_cable_id(pd_port_t *pd_port)
+static inline int pd_is_auto_discover_cable_id(struct pd_port *pd_port)
 {
 	if (pd_port->dpm_flags & DPM_FLAGS_CHECK_CABLE_ID) {
 
+#ifdef CONFIG_USB_PD_REV30
+		if ((!pd_port->vconn_source) &&
+			(pd_port->pd_revision[0] == PD_REV30))
+			return false;
+#endif /* CONFIG_USB_PD_REV30 */
 		if (pd_port->discover_id_counter < PD_DISCOVER_ID_COUNT)
 			return true;
 
@@ -852,14 +995,32 @@ static inline int pd_is_auto_discover_cable_id(pd_port_t *pd_port)
 	return false;
 }
 
-static inline int pd_is_support_modal_operation(pd_port_t *pd_port)
+static inline int pd_is_support_modal_operation(struct pd_port *pd_port)
 {
 	if (!(pd_port->id_vdos[0] & PD_IDH_MODAL_SUPPORT))
 		return false;
 
-	return (pd_port->svid_data_cnt > 0);
+	return pd_port->svid_data_cnt > 0;
 }
 
+static inline int pd_is_source_support_apdo(struct pd_port *pd_port)
+{
+#ifdef CONFIG_USB_PD_REV30_PPS_SINK
+	uint8_t i;
+	uint32_t pdo;
+
+	struct pd_port_power_capabilities *src_cap = &pd_port->remote_src_cap;
+
+	for (i = 0; i < src_cap->nr; i++) {
+		pdo = src_cap->pdos[i];
+
+		if (PDO_TYPE(pdo) == PDO_TYPE_APDO)
+			return true;
+	}
+#endif	/* CONFIG_USB_PD_REV30_PPS_SINK */
+
+	return false;
+}
 /* new definitions*/
 
 #define PD_RX_CAP_PE_IDLE				(0)
@@ -886,104 +1047,106 @@ enum {
 	PD_BIST_MODE_TEST_DATA,
 };
 
-void pd_reset_svid_data(pd_port_t *pd_port);
-int pd_reset_protocol_layer(pd_port_t *pd_port);
+void pd_reset_svid_data(struct pd_port *pd_port);
+int pd_reset_protocol_layer(struct pd_port *pd_port, bool sop_only);
 
-int pd_set_rx_enable(pd_port_t *pd_port, uint8_t enable);
+int pd_set_rx_enable(struct pd_port *pd_port, uint8_t enable);
 
-int pd_enable_vbus_valid_detection(pd_port_t *pd_port, bool wait_valid);
-int pd_enable_vbus_safe0v_detection(pd_port_t *pd_port);
-int pd_enable_vbus_stable_detection(pd_port_t *pd_port);
+int pd_enable_vbus_valid_detection(struct pd_port *pd_port, bool wait_valid);
+int pd_enable_vbus_safe0v_detection(struct pd_port *pd_port);
+int pd_enable_vbus_stable_detection(struct pd_port *pd_port);
 
 uint32_t pd_reset_pdo_power(uint32_t pdo, uint32_t imax);
 
 void pd_extract_rdo_power(
 	uint32_t rdo, uint32_t pdo, uint32_t *op_curr, uint32_t *max_curr);
 
-void pd_extract_pdo_power(uint32_t pdo,
-	uint32_t *vmin, uint32_t *vmax, uint32_t *ioper);
-
-uint32_t pd_get_cable_curr_lvl(pd_port_t *pd_port);
-uint32_t pd_get_cable_current_limit(pd_port_t *pd_port);
+uint32_t pd_get_cable_curr_lvl(struct pd_port *pd_port);
+uint32_t pd_get_cable_current_limit(struct pd_port *pd_port);
 
 
-int pd_set_data_role(pd_port_t *pd_port, uint8_t dr);
-int pd_set_power_role(pd_port_t *pd_port, uint8_t pr);
-int pd_init_role(pd_port_t *pd_port, uint8_t pr, uint8_t dr, bool vr);
+int pd_set_data_role(struct pd_port *pd_port, uint8_t dr);
+int pd_set_power_role(struct pd_port *pd_port, uint8_t pr);
+int pd_init_message_hdr(struct pd_port *pd_port, bool act_as_sink);
 
-int pd_set_cc_res(pd_port_t *pd_port, int pull);
-int pd_set_vconn(pd_port_t *pd_port, int enable);
-int pd_reset_local_hw(pd_port_t *pd_port);
+int pd_set_cc_res(struct pd_port *pd_port, int pull);
+int pd_set_vconn(struct pd_port *pd_port, int enable);
+int pd_reset_local_hw(struct pd_port *pd_port);
 
-int pd_enable_bist_test_mode(pd_port_t *pd_port, bool en);
+int pd_enable_bist_test_mode(struct pd_port *pd_port, bool en);
 
-void pd_lock_msg_output(pd_port_t *pd_port);
-void pd_unlock_msg_output(pd_port_t *pd_port);
+void pd_lock_msg_output(struct pd_port *pd_port);
+void pd_unlock_msg_output(struct pd_port *pd_port);
 
-int pd_update_connect_state(pd_port_t *pd_port, uint8_t state);
+int pd_update_connect_state(struct pd_port *pd_port, uint8_t state);
 
 /* ---- PD notify TCPC Policy Engine State Changed ---- */
 
-extern void pd_try_put_pe_idle_event(pd_port_t *pd_port);
-extern void pd_notify_pe_transit_to_default(pd_port_t *pd_port);
-extern void pd_notify_pe_hard_reset_completed(pd_port_t *pd_port);
-extern void pd_notify_pe_send_hard_reset(pd_port_t *pd_port);
-extern void pd_notify_pe_running(pd_port_t *pd_port);
-extern void pd_notify_pe_idle(pd_port_t *pd_port);
-extern void pd_notify_pe_wait_vbus_once(pd_port_t *pd_port, int wait_evt);
-extern void pd_notify_pe_error_recovery(pd_port_t *pd_port);
-extern void pd_notify_pe_execute_pr_swap(pd_port_t *pd_port, bool start_swap);
-extern void pd_notify_pe_cancel_pr_swap(pd_port_t *pd_port);
-extern void pd_notify_pe_reset_protocol(pd_port_t *pd_port);
-extern void pd_noitfy_pe_bist_mode(pd_port_t *pd_port, uint8_t mode);
-extern void pd_notify_pe_pr_changed(pd_port_t *pd_port);
-extern void pd_notify_pe_src_explicit_contract(pd_port_t *pd_port);
-extern void pd_notify_pe_transmit_msg(pd_port_t *pd_port, uint8_t type);
-extern void pd_notify_pe_recv_ping_event(pd_port_t *pd_port);
+extern void pd_try_put_pe_idle_event(struct pd_port *pd_port);
+extern void pd_notify_pe_transit_to_default(struct pd_port *pd_port);
+extern void pd_notify_pe_hard_reset_completed(struct pd_port *pd_port);
+extern void pd_notify_pe_send_hard_reset(struct pd_port *pd_port);
+extern void pd_notify_pe_running(struct pd_port *pd_port);
+extern void pd_notify_pe_idle(struct pd_port *pd_port);
+extern void pd_notify_pe_wait_vbus_once(struct pd_port *pd_port, int wait_evt);
+extern void pd_notify_pe_error_recovery(struct pd_port *pd_port);
+extern void pd_notify_pe_execute_pr_swap(
+			struct pd_port *pd_port, bool start_swap);
+extern void pd_notify_pe_cancel_pr_swap(struct pd_port *pd_port);
+extern void pd_notify_pe_reset_protocol(struct pd_port *pd_port);
+extern void pd_noitfy_pe_bist_mode(struct pd_port *pd_port, uint8_t mode);
+extern void pd_notify_pe_pr_changed(struct pd_port *pd_port);
+extern void pd_notify_pe_src_explicit_contract(struct pd_port *pd_port);
+extern void pd_notify_pe_transmit_msg(struct pd_port *pd_port, uint8_t type);
 
-#ifdef CONFIG_USB_PD_ALT_MODE_RTDC
-extern void pd_notify_pe_direct_charge(pd_port_t *pd_port, bool en);
-#endif	/* CONFIG_USB_PD_ALT_MODE_RTDC */
+#ifdef CONFIG_USB_PD_DIRECT_CHARGE
+extern void pd_notify_pe_direct_charge(struct pd_port *pd_port, bool en);
+#endif	/* CONFIG_USB_PD_DIRECT_CHARGE */
 
 #ifdef CONFIG_USB_PD_RECV_HRESET_COUNTER
-extern void pd_notify_pe_over_recv_hreset(pd_port_t *pd_port);
+extern void pd_notify_pe_over_recv_hreset(struct pd_port *pd_port);
 #endif	/* CONFIG_USB_PD_RECV_HRESET_COUNTER */
 
-extern void pd_notify_tcp_event_buf_reset(pd_port_t *pd_port, uint8_t reason);
-extern void pd_notify_current_tcp_event_result(pd_port_t *pd_port, int ret);
+extern void pd_notify_tcp_event_buf_reset(
+		struct pd_port *pd_port, uint8_t reason);
+extern void pd_notify_tcp_event_1st_result(struct pd_port *pd_port, int ret);
+extern void pd_notify_tcp_event_2nd_result(struct pd_port *pd_port, int ret);
+extern void pd_notify_tcp_vdm_event_2nd_result(
+		struct pd_port *pd_port, bool ack);
 
 /* ---- pd_timer ---- */
 
-static inline void pd_restart_timer(pd_port_t *pd_port, uint32_t timer_id)
+static inline void pd_restart_timer(struct pd_port *pd_port, uint32_t timer_id)
 {
 	return tcpc_restart_timer(pd_port->tcpc_dev, timer_id);
 }
 
-static inline void pd_enable_timer(pd_port_t *pd_port, uint32_t timer_id)
+static inline void pd_enable_timer(struct pd_port *pd_port, uint32_t timer_id)
 {
 	return tcpc_enable_timer(pd_port->tcpc_dev, timer_id);
 }
 
-static inline void pd_disable_timer(pd_port_t *pd_port, uint32_t timer_id)
+static inline void pd_disable_timer(struct pd_port *pd_port, uint32_t timer_id)
 {
 	return tcpc_disable_timer(pd_port->tcpc_dev, timer_id);
 }
 
-static inline void pd_reset_pe_timer(pd_port_t *pd_port)
+static inline void pd_reset_pe_timer(struct pd_port *pd_port)
 {
 	tcpc_reset_pe_timer(pd_port->tcpc_dev);
 }
 
 /* ---- pd_event ---- */
 
-static inline void pd_free_pd_event(pd_port_t *pd_port, pd_event_t *pd_event)
+static inline void pd_free_pd_event(
+		struct pd_port *pd_port, struct pd_event *pd_event)
 {
 	pd_free_event(pd_port->tcpc_dev, pd_event);
 }
 
-static inline bool pd_put_pe_event(pd_port_t *pd_port, uint8_t pe_event)
+static inline bool pd_put_pe_event(struct pd_port *pd_port, uint8_t pe_event)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_PE_MSG,
 		.msg = pe_event,
 		.pd_msg = NULL,
@@ -992,9 +1155,9 @@ static inline bool pd_put_pe_event(pd_port_t *pd_port, uint8_t pe_event)
 	return pd_put_event(pd_port->tcpc_dev, &evt, false);
 }
 
-static inline bool pd_put_dpm_event(pd_port_t *pd_port, uint8_t event)
+static inline bool pd_put_dpm_event(struct pd_port *pd_port, uint8_t event)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_DPM_MSG,
 		.msg = event,
 		.pd_msg = NULL,
@@ -1003,9 +1166,10 @@ static inline bool pd_put_dpm_event(pd_port_t *pd_port, uint8_t event)
 	return pd_put_event(pd_port->tcpc_dev, &evt, false);
 }
 
-static inline bool pd_put_dpm_notify_event(pd_port_t *pd_port, uint8_t notify)
+static inline bool pd_put_dpm_notify_event(
+		struct pd_port *pd_port, uint8_t notify)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_DPM_MSG,
 		.msg = PD_DPM_NOTIFIED,
 		.msg_sec = notify,
@@ -1015,9 +1179,9 @@ static inline bool pd_put_dpm_notify_event(pd_port_t *pd_port, uint8_t notify)
 	return pd_put_event(pd_port->tcpc_dev, &evt, false);
 }
 
-static inline bool pd_put_dpm_ack_event(pd_port_t *pd_port)
+static inline bool pd_put_dpm_ack_event(struct pd_port *pd_port)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_DPM_MSG,
 		.msg = PD_DPM_ACK,
 		.pd_msg = NULL,
@@ -1026,9 +1190,9 @@ static inline bool pd_put_dpm_ack_event(pd_port_t *pd_port)
 	return pd_put_event(pd_port->tcpc_dev, &evt, false);
 }
 
-static inline bool pd_put_dpm_nak_event(pd_port_t *pd_port, uint8_t notify)
+static inline bool pd_put_dpm_nak_event(struct pd_port *pd_port, uint8_t notify)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_DPM_MSG,
 		.msg = PD_DPM_NAK,
 		.msg_sec = notify,
@@ -1038,9 +1202,9 @@ static inline bool pd_put_dpm_nak_event(pd_port_t *pd_port, uint8_t notify)
 	return pd_put_event(pd_port->tcpc_dev, &evt, false);
 }
 
-static inline bool pd_put_tcp_pd_event(pd_port_t *pd_port, uint8_t event)
+static inline bool pd_put_tcp_pd_event(struct pd_port *pd_port, uint8_t event)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_TCP_MSG,
 		.msg = event,
 		.msg_sec = PD_TCP_FROM_PE,
@@ -1050,10 +1214,10 @@ static inline bool pd_put_tcp_pd_event(pd_port_t *pd_port, uint8_t event)
 	return pd_put_event(pd_port->tcpc_dev, &evt, false);
 };
 
-static inline bool pd_put_tcp_vdm_event(pd_port_t *pd_port, uint8_t event)
+static inline bool pd_put_tcp_vdm_event(struct pd_port *pd_port, uint8_t event)
 {
 	bool ret;
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_TCP_MSG,
 		.msg = event,
 		.msg_sec = PD_TCP_FROM_PE,
@@ -1062,10 +1226,8 @@ static inline bool pd_put_tcp_vdm_event(pd_port_t *pd_port, uint8_t event)
 
 	ret = pd_put_vdm_event(pd_port->tcpc_dev, &evt, false);
 
-	if (ret) {
+	if (ret)
 		pd_port->reset_vdm_state = true;
-		pd_port->pe_vdm_state = pd_port->pe_pd_state;
-	}
 
 	return ret;
 };
@@ -1073,7 +1235,7 @@ static inline bool pd_put_tcp_vdm_event(pd_port_t *pd_port, uint8_t event)
 static inline bool vdm_put_hw_event(
 	struct tcpc_device *tcpc_dev, uint8_t hw_event)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_HW_MSG,
 		.msg = hw_event,
 		.pd_msg = NULL,
@@ -1083,9 +1245,9 @@ static inline bool vdm_put_hw_event(
 }
 
 static inline bool vdm_put_dpm_event(
-	pd_port_t *pd_port, uint8_t dpm_event, pd_msg_t *pd_msg)
+	struct pd_port *pd_port, uint8_t dpm_event, struct pd_msg *pd_msg)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_DPM_MSG,
 		.msg = dpm_event,
 		.pd_msg = pd_msg,
@@ -1094,20 +1256,21 @@ static inline bool vdm_put_dpm_event(
 	return pd_put_vdm_event(pd_port->tcpc_dev, &evt, false);
 }
 
-static inline bool vdm_put_dpm_notified_event(pd_port_t *pd_port)
+static inline bool vdm_put_dpm_notified_event(struct pd_port *pd_port)
 {
 	return vdm_put_dpm_event(pd_port, PD_DPM_NOTIFIED, NULL);
 }
 
-static inline bool vdm_put_dpm_discover_cable_event(pd_port_t *pd_port)
+static inline bool vdm_put_dpm_discover_cable_event(struct pd_port *pd_port)
 {
+	/* waiting for dpm_ack event */
 	return pd_put_tcp_vdm_event(pd_port, TCP_DPM_EVT_DISCOVER_CABLE);
 }
 
 static inline bool pd_put_hw_event(
 	struct tcpc_device *tcpc_dev, uint8_t hw_event)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_HW_MSG,
 		.msg = hw_event,
 		.pd_msg = NULL,
@@ -1119,7 +1282,7 @@ static inline bool pd_put_hw_event(
 static inline bool pd_put_cc_attached_event(
 		struct tcpc_device *tcpc_dev, uint8_t type)
 {
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_HW_MSG,
 		.msg = PD_HW_CC_ATTACHED,
 		.msg_sec = type,
@@ -1131,93 +1294,106 @@ static inline bool pd_put_cc_attached_event(
 
 /* ---- Handle PD Message ----*/
 
-int pd_handle_soft_reset(pd_port_t *pd_port, uint8_t state_machine);
+int pd_handle_soft_reset(struct pd_port *pd_port, uint8_t state_machine);
 
 /* ---- Send PD Message ----*/
 
 int pd_send_ctrl_msg(
-	pd_port_t *pd_port, uint8_t sop_type, uint8_t msg);
+	struct pd_port *pd_port, uint8_t sop_type, uint8_t msg);
 
-int pd_send_data_msg(pd_port_t *pd_port,
+int pd_send_data_msg(struct pd_port *pd_port,
 	uint8_t sop_type, uint8_t msg, uint8_t cnt, uint32_t *payload);
 
-int pd_send_soft_reset(pd_port_t *pd_port, uint8_t state_machine);
-int pd_send_hard_reset(pd_port_t *pd_port);
+#ifdef CONFIG_USB_PD_REV30
+int pd_send_ext_msg(struct pd_port *pd_port,
+	uint8_t sop_type, uint8_t msg, bool request,
+	uint8_t chunk_nr, uint8_t size, uint8_t *data);
 
-int pd_send_bist_mode2(pd_port_t *pd_port);
-int pd_disable_bist_mode2(pd_port_t *pd_port);
+int pd_send_status(struct pd_port *pd_port);
+
+#endif	/* CONFIG_USB_PD_REV30 */
+
+#ifdef CONFIG_USB_PD_RESET_CABLE
+int pd_send_cable_soft_reset(struct pd_port *pd_port);
+#endif	/* CONFIG_USB_PD_RESET_CABLE */
+
+int pd_send_soft_reset(struct pd_port *pd_port, uint8_t state_machine);
+int pd_send_hard_reset(struct pd_port *pd_port);
+
+int pd_send_bist_mode2(struct pd_port *pd_port);
+int pd_disable_bist_mode2(struct pd_port *pd_port);
 
 
 /* ---- Send / Reply SVDM Command ----*/
 
 /* Auto enable timer if success */
-int pd_send_svdm_request(pd_port_t *pd_port,
+int pd_send_svdm_request(struct pd_port *pd_port,
 	uint8_t sop_type, uint16_t svid, uint8_t vdm_cmd,
 	uint8_t obj_pos, uint8_t cnt, uint32_t *data_obj,
 	uint32_t timer_id);
 
-int pd_reply_svdm_request(pd_port_t *pd_port,
-	pd_event_t *pd_event, uint8_t reply, uint8_t cnt, uint32_t *data_obj);
+int pd_reply_svdm_request(struct pd_port *pd_port, struct pd_event *pd_event,
+				uint8_t reply, uint8_t cnt, uint32_t *data_obj);
 
 #ifdef CONFIG_USB_POWER_DELIVERY
 
 static inline int pd_send_vdm_discover_id(
-	pd_port_t *pd_port, uint8_t sop_type)
+	struct pd_port *pd_port, uint8_t sop_type)
 {
 	return pd_send_svdm_request(pd_port, sop_type, USB_SID_PD,
 		CMD_DISCOVER_IDENT, 0, 0, NULL, PD_TIMER_VDM_RESPONSE);
 }
 
 static inline int pd_send_vdm_discover_svids(
-	pd_port_t *pd_port, uint8_t sop_type)
+	struct pd_port *pd_port, uint8_t sop_type)
 {
 	return pd_send_svdm_request(pd_port, sop_type, USB_SID_PD,
 		CMD_DISCOVER_SVID, 0, 0, NULL, PD_TIMER_VDM_RESPONSE);
 }
 
 static inline int pd_send_vdm_discover_modes(
-	pd_port_t *pd_port, uint8_t sop_type, uint16_t svid)
+	struct pd_port *pd_port, uint8_t sop_type, uint16_t svid)
 {
 	return pd_send_svdm_request(pd_port, sop_type, svid,
 		CMD_DISCOVER_MODES, 0, 0, NULL, PD_TIMER_VDM_RESPONSE);
 }
 
-static inline int pd_send_vdm_enter_mode(
-	pd_port_t *pd_port, uint8_t sop_type, uint16_t svid, uint8_t obj_pos)
+static inline int pd_send_vdm_enter_mode(struct pd_port *pd_port,
+			uint8_t sop_type, uint16_t svid, uint8_t obj_pos)
 {
 	return pd_send_svdm_request(pd_port, sop_type, svid,
 		CMD_ENTER_MODE, obj_pos, 0, NULL, PD_TIMER_VDM_MODE_ENTRY);
 }
 
-static inline int pd_send_vdm_exit_mode(
-	pd_port_t *pd_port, uint8_t sop_type, uint16_t svid, uint8_t obj_pos)
+static inline int pd_send_vdm_exit_mode(struct pd_port *pd_port,
+			uint8_t sop_type, uint16_t svid, uint8_t obj_pos)
 {
 	return pd_send_svdm_request(pd_port, sop_type, svid,
 		CMD_EXIT_MODE, obj_pos, 0, NULL, PD_TIMER_VDM_MODE_EXIT);
 }
 
-static inline int pd_send_vdm_attention(
-	pd_port_t *pd_port, uint8_t sop_type, uint16_t svid, uint8_t obj_pos)
+static inline int pd_send_vdm_attention(struct pd_port *pd_port,
+			uint8_t sop_type, uint16_t svid, uint8_t obj_pos)
 {
 	return pd_send_svdm_request(pd_port, sop_type, svid,
 		CMD_ATTENTION, obj_pos, 0, NULL, 0);
 }
 
-static inline int pd_send_vdm_dp_attention(pd_port_t *pd_port,
+static inline int pd_send_vdm_dp_attention(struct pd_port *pd_port,
 	uint8_t sop_type, uint8_t obj_pos, uint32_t dp_status)
 {
 	return pd_send_svdm_request(pd_port, sop_type, USB_SID_DISPLAYPORT,
 		CMD_ATTENTION, obj_pos, 1, &dp_status, 0);
 }
 
-static inline int pd_send_vdm_dp_status(pd_port_t *pd_port,
+static inline int pd_send_vdm_dp_status(struct pd_port *pd_port,
 	uint8_t sop_type, uint8_t obj_pos, uint8_t cnt, uint32_t *data_obj)
 {
 	return pd_send_svdm_request(pd_port, sop_type, USB_SID_DISPLAYPORT,
 		CMD_DP_STATUS, obj_pos, cnt, data_obj, PD_TIMER_VDM_RESPONSE);
 }
 
-static inline int pd_send_vdm_dp_config(pd_port_t *pd_port,
+static inline int pd_send_vdm_dp_config(struct pd_port *pd_port,
 	uint8_t sop_type, uint8_t obj_pos, uint8_t cnt, uint32_t *data_obj)
 {
 	return pd_send_svdm_request(pd_port, sop_type, USB_SID_DISPLAYPORT,
@@ -1225,7 +1401,7 @@ static inline int pd_send_vdm_dp_config(pd_port_t *pd_port,
 }
 
 static inline int pd_reply_svdm_request_simply(
-	pd_port_t *pd_port, pd_event_t *pd_event, uint8_t reply)
+	struct pd_port *pd_port, struct pd_event *pd_event, uint8_t reply)
 {
 	return pd_reply_svdm_request(pd_port, pd_event, reply, 0, NULL);
 }
@@ -1233,14 +1409,14 @@ static inline int pd_reply_svdm_request_simply(
 #endif	/* CONFIG_USB_POWER_DELIVERY */
 
 #ifdef CONFIG_USB_PD_UVDM
-static inline int pd_send_uvdm(pd_port_t *pd_port, uint8_t sop_type)
+static inline int pd_send_uvdm(struct pd_port *pd_port, uint8_t sop_type)
 {
 	return pd_send_data_msg(
 			pd_port, sop_type, PD_DATA_VENDOR_DEF,
 			pd_port->uvdm_cnt, pd_port->uvdm_data);
 }
 
-static inline int pd_reply_uvdm(pd_port_t *pd_port, uint8_t sop_type,
+static inline int pd_reply_uvdm(struct pd_port *pd_port, uint8_t sop_type,
 	uint8_t cnt, uint32_t *payload)
 {
 	return pd_send_data_msg(
@@ -1249,4 +1425,8 @@ static inline int pd_reply_uvdm(pd_port_t *pd_port, uint8_t sop_type,
 }
 #endif	/* CONFIG_USB_PD_UVDM */
 
+#ifdef CONFIG_USB_PD_REV30
+void pd_sync_sop_spec_revision(struct pd_port *pd_port, uint8_t rev);
+void pd_sync_sop_prime_spec_revision(struct pd_port *pd_port, uint8_t rev);
+#endif	/* CONFIG_USB_PD_REV30 */
 #endif /* PD_CORE_H_ */

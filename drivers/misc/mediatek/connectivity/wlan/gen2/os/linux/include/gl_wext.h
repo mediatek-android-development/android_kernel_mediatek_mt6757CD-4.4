@@ -112,7 +112,6 @@ struct iw_mlme {
 #define IW_AUTH_ALG_SHARED_KEY  0x00000002
 #define IW_AUTH_ALG_LEAP        0x00000004
 
-
 /* IW_AUTH_ROAMING_CONTROL values */
 #define IW_AUTH_ROAMING_ENABLE  0	/* driver/firmware based roaming */
 #define IW_AUTH_ROAMING_DISABLE 1	/*
@@ -244,7 +243,6 @@ enum {
 #endif
 
 #define IW_AUTH_ALG_FT			0x00000008
-
 /*******************************************************************************
 *                            P U B L I C   D A T A
 ********************************************************************************
@@ -280,30 +278,30 @@ struct iw_statistics *wext_get_wireless_stats(struct net_device *prDev);
 
 BOOLEAN
 wextSrchDesiredWPAIE(IN PUINT_8 pucIEStart,
-		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PUINT_8 *ppucDesiredIE);
+		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PPUINT_8 ppucDesiredIE);
 
 #if CFG_SUPPORT_WPS
 BOOLEAN
 wextSrchDesiredWPSIE(IN PUINT_8 pucIEStart,
-		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PUINT_8 *ppucDesiredIE);
+		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PPUINT_8 ppucDesiredIE);
 #endif
 
 #if CFG_SUPPORT_HOTSPOT_2_0
-BOOLEAN wextSrchDesiredHS20IE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE);
+BOOLEAN wextSrchDesiredHS20IE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE);
 
-BOOLEAN wextSrchDesiredInterworkingIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE);
+BOOLEAN wextSrchDesiredInterworkingIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE);
 
-BOOLEAN wextSrchDesiredAdvProtocolIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE);
+BOOLEAN wextSrchDesiredAdvProtocolIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE);
 
-BOOLEAN wextSrchDesiredRoamingConsortiumIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE);
-BOOLEAN wextSrchDesiredOsenIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE);
+BOOLEAN wextSrchDesiredRoamingConsortiumIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE);
+BOOLEAN wextSrchDesiredOsenIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE);
 #endif
 
 #if CFG_SUPPORT_WAPI
-BOOLEAN wextSrchDesiredWAPIIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE);
+BOOLEAN wextSrchDesiredWAPIIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE);
 #endif
 
-BOOLEAN wextSrchOkcAndPMKID(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucPMKID, OUT PUINT_8 okc);
+BOOLEAN wextSrchOkcAndPMKID(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucPMKID, OUT PUINT_8 okc);
 /*******************************************************************************
 *                              F U N C T I O N S
 ********************************************************************************

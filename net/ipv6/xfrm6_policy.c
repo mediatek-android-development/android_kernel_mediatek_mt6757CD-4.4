@@ -36,7 +36,7 @@ static struct dst_entry *xfrm6_dst_lookup(struct net *net, int tos, int oif,
 	int err;
 
 	memset(&fl6, 0, sizeof(fl6));
-	fl6.flowi6_oif = l3mdev_master_ifindex_by_index(net,oif);
+	fl6.flowi6_oif = l3mdev_master_ifindex_by_index(net, oif);
 	fl6.flowi6_flags = FLOWI_FLAG_SKIP_NH_OIF;
 	memcpy(&fl6.daddr, daddr, sizeof(fl6.daddr));
 	if (saddr)
@@ -265,7 +265,7 @@ static void xfrm6_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 		if (xdst->u.rt6.rt6i_idev->dev == dev) {
 			struct inet6_dev *loopback_idev =
 				in6_dev_get(dev_net(dev)->loopback_dev);
-			WARN_ON(!loopback_idev);
+			BUG_ON(!loopback_idev);
 
 			do {
 				in6_dev_put(xdst->u.rt6.rt6i_idev);
@@ -279,7 +279,6 @@ static void xfrm6_dst_ifdown(struct dst_entry *dst, struct net_device *dev,
 	} else {
 		pr_info("xfrm6_dst_ifdown-->xdst->u.rt6.rt6i_idev ==NULL");
 	}
-
 	xfrm_dst_ifdown(dst, dev);
 }
 

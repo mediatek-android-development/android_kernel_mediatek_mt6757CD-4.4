@@ -65,12 +65,12 @@ static void spin_dump(raw_spinlock_t *lock, const char *msg)
 	printk(KERN_EMERG "BUG: spinlock %s on CPU#%d, %s/%d\n",
 		msg, raw_smp_processor_id(),
 		current->comm, task_pid_nr(current));
-	printk(KERN_EMERG " lock: %pS, .magic: %08x, .owner: %s/%d, "
-			".owner_cpu: %d\n",
+	pr_emerg("lock: %pS, .magic: %08x, .owner: %s/%d, .owner_cpu: %d,value: 0x%08x\n",
 		lock, lock->magic,
 		owner ? owner->comm : "<none>",
 		owner ? task_pid_nr(owner) : -1,
-		lock->owner_cpu);
+		lock->owner_cpu,
+		*((unsigned int *)&lock->raw_lock));
 	dump_stack();
 }
 
@@ -78,10 +78,9 @@ static void spin_bug(raw_spinlock_t *lock, const char *msg)
 {
 	char aee_str[50];
 
-	/*
 	if (!debug_locks_off())
 		return;
-	*/
+
 	spin_dump(lock, msg);
 	snprintf(aee_str, 50, "Spinlock %s :%s\n", current->comm, msg);
 	if ((!strcmp(msg, "bad magic")) || (!strcmp(msg, "already unlocked"))

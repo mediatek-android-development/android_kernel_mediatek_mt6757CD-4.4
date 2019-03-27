@@ -23,25 +23,34 @@
 #include <mt-plat/upmu_common.h>
 #include "include/pmic.h"
 #include "include/pmic_debugfs.h"
+#include "include/pmic_irq.h"
 #include "include/pmic_throttling_dlpt.h"
-/*#ifdef CONFIG_MTK_AUXADC_INTF*/
+#include "include/pmic_lbat_service.h"
+#ifdef CONFIG_MTK_AUXADC_INTF
 #include <mt-plat/mtk_auxadc_intf.h>
-/*#endif*/ /* CONFIG_MTK_AUXADC_INTF */
+#endif /* CONFIG_MTK_AUXADC_INTF */
 
 /*-------pmic_dbg_level global variable-------*/
 unsigned int gPMICDbgLvl;
+unsigned int gPMICHKDbgLvl;
+unsigned int gPMICCOMDbgLvl;
+unsigned int gPMICIRQDbgLvl;
+unsigned int gPMICREGDbgLvl;
+
 #define DUMP_ALL_REG 0
 
 int pmic_pre_wdt_reset(void)
 {
 	int ret = 0;
-
+/* remove dump exception status before wdt, since we will recore it at next boot preloader */
+#if 0
 	preempt_disable();
 	local_irq_disable();
 	pr_err(PMICTAG "[%s][pmic_boot_status]\n", __func__);
 	pmic_dump_exception_reg();
 #if DUMP_ALL_REG
 	pmic_dump_register();
+#endif
 #endif
 	return ret;
 
@@ -158,6 +167,7 @@ static DEVICE_ATTR(pmic_dvt, 0664, show_pmic_dvt, store_pmic_dvt);
 /*
  * auxadc
  */
+#ifdef CONFIG_MTK_AUXADC_INTF
 unsigned char g_auxadc_pmic;
 
 static ssize_t show_pmic_auxadc(struct device *dev, struct device_attribute *attr, char *buf)
@@ -191,6 +201,7 @@ static ssize_t store_pmic_auxadc(struct device *dev, struct device_attribute *at
 }
 
 static DEVICE_ATTR(pmic_auxadc_ut, 0664, show_pmic_auxadc, store_pmic_auxadc);
+#endif /*--CONFIG_MTK_AUXADC_INTF--*/
 
 /*
  * PMIC dump exception
@@ -231,13 +242,15 @@ static ssize_t pmic_dbg_level_write(struct file *file, const char __user *buf, s
 
 	if (value < 5) {
 		pmic_dbg_level_set(value);
-		pr_err("pmic_dbg_level_write = %d\n", gPMICDbgLvl);
+		pr_err("D %d, HK %d, COM %d, IRQ %d, REG %d\n",
+				gPMICDbgLvl, gPMICHKDbgLvl, gPMICCOMDbgLvl,
+				gPMICIRQDbgLvl, gPMICREGDbgLvl);
 	} else {
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 		pmic_ipi_test_code();
-		pr_err("pmic_ipi_test_code\n");
+		pr_debug("pmic_ipi_test_code\n");
 #else
-		pr_err("pmic_dbg_level should < 5\n");
+		pr_debug("pmic_dbg_level should < 5\n");
 #endif
 	}
 
@@ -252,6 +265,10 @@ static int pmic_dbg_level_show(struct seq_file *s, void *unused)
 	seq_puts(s, "1:PMIC_LOG_WARN\n");
 	seq_puts(s, "0:PMIC_LOG_ERR\n");
 	seq_printf(s, "PMIC_Dbg_Lvl = %d\n", gPMICDbgLvl);
+	seq_printf(s, "PMIC_HK_Dbg_Lvl = %d\n", gPMICHKDbgLvl);
+	seq_printf(s, "PMIC_COM_Dbg_Lvl = %d\n", gPMICCOMDbgLvl);
+	seq_printf(s, "PMIC_IRQ_Dbg_Lvl = %d\n", gPMICIRQDbgLvl);
+	seq_printf(s, "PMIC_REG_Dbg_Lvl = %d\n", gPMICREGDbgLvl);
 	return 0;
 }
 
@@ -290,6 +307,11 @@ static const struct file_operations pmic_dump_register_proc_fops = {
 	.read = seq_read,
 };
 
+int __attribute__ ((weak)) pmic_irq_debug_init(struct dentry *debug_dir)
+{
+	return 0;
+}
+
 int pmic_debug_init(struct platform_device *dev)
 {
 	struct dentry *mtk_pmic_dir;
@@ -310,13 +332,21 @@ int pmic_debug_init(struct platform_device *dev)
 				mtk_pmic_dir, NULL, &pmic_dbg_level_operations);
 
 	pmic_regulator_debug_init(dev, mtk_pmic_dir);
+
 	pmic_throttling_dlpt_debug_init(dev, mtk_pmic_dir);
+
+	pmic_irq_debug_init(mtk_pmic_dir);
+
+	lbat_debug_init(mtk_pmic_dir);
+
 	PMICLOG("pmic_debug_init debugfs done\n");
 
 	/*--/sys/devices/platform/mt-pmic/ --*/
 	ret_device_file = device_create_file(&(dev->dev), &dev_attr_pmic_access);
 	ret_device_file = device_create_file(&(dev->dev), &dev_attr_pmic_dvt);
+#ifdef CONFIG_MTK_AUXADC_INTF
 	ret_device_file = device_create_file(&(dev->dev), &dev_attr_pmic_auxadc_ut);
+#endif /*CONFIG_MTK_AUXADC_INTF*/
 	PMICLOG("pmic_debug_init dev attr done\n");
 
 	return 0;

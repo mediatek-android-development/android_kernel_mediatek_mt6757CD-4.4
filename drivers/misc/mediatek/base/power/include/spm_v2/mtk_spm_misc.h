@@ -90,19 +90,6 @@ extern void aee_rr_rec_spm_suspend_val(u32 val);
 extern u32 aee_rr_curr_spm_suspend_val(void);
 #endif
 
-/* SPM common scenario: MT6797 used */
-#if defined(CONFIG_ARCH_MT6797)
-
-#define SPM_COMMON_SCENARIO_SUSPEND     0x1111
-#define SPM_COMMON_SCENARIO_DEEPIDLE    0x2222
-#define SPM_COMMON_SCENARIO_SODI        0x3333
-
-#if SPM_AEE_RR_REC
-extern void aee_rr_rec_spm_common_scenario_val(u32 val);
-u32 aee_rr_curr_spm_common_scenario_val(void);
-#endif
-#endif
-
 /* MCDI */
 extern void mcidle_before_wfi(int cpu);
 extern void mcidle_after_wfi(int cpu);
@@ -119,6 +106,7 @@ extern bool is_already_snap_shot;
 extern void mt_power_gs_dump_suspend(void);
 extern void mt_power_gs_dump_dpidle(void);
 extern void mt_power_gs_dump_sodi3(void);
+extern bool slp_dump_golden_setting;
 extern bool slp_chk_golden;
 int __attribute__((weak)) snapshot_golden_setting(const char *func, const unsigned int line)
 {

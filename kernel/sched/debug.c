@@ -18,7 +18,7 @@
 #include <linux/mempolicy.h>
 #include <linux/sched.h>
 #include "mtk_ram_console.h"
-#ifdef CONFIG_MT_RT_THROTTLE_MON
+#ifdef CONFIG_MTK_RT_THROTTLE_MON
 #include "mtk_rt_mon.h"
 #endif
 
@@ -49,7 +49,7 @@ DECLARE_PER_CPU(u64, rt_period_time);
 	if (m)					\
 		seq_printf(m, x);		\
 	else					\
-		pr_debug(x);			\
+		printk(x);			\
  } while (0)
 
 #define SEQ_printf_at_AEE(m, x...)		\
@@ -1302,7 +1302,7 @@ void sysrq_sched_debug_show_at_AEE(void)
 	}
 	if (locked)
 		read_unlock_irqrestore(&tasklist_lock, flags);
-#ifdef CONFIG_MT_RT_THROTTLE_MON
+#ifdef CONFIG_MTK_RT_THROTTLE_MON
 	/* sched:rt throttle monitor */
 	mt_rt_mon_print_task_from_buffer();
 #endif

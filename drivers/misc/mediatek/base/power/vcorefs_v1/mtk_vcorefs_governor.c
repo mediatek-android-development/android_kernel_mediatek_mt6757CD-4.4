@@ -72,7 +72,6 @@ __weak int sdio_autok(void)
 #define VCORE_BASE_UV		600000
 #endif
 
-
 #define VCORE_STEP_UV		6250
 
 #define VCORE_PRCISE_ADJUST_UV (VCORE_STEP_UV * 3)
@@ -196,6 +195,7 @@ static char *kicker_name[] = {
 	"KIR_CPU",
 	"KIR_THERMAL",
 	"KIR_FB",
+	"KIR_FBT",
 	"NUM_KICKER",
 
 	"KIR_LATE_INIT",
@@ -304,6 +304,7 @@ int vcorefs_get_curr_vcore(void)
 
 	return vcore < VCORE_INVALID ? vcore_pmic_to_uv(vcore) : 0;
 }
+EXPORT_SYMBOL(vcorefs_get_curr_vcore);
 
 int vcorefs_get_curr_ddr(void)
 {
@@ -406,6 +407,7 @@ int vcorefs_get_dvfs_kicker_group(int kicker)
 	case KIR_CPU:
 	case KIR_THERMAL:
 	case KIR_FB:
+	case KIR_FBT:
 	default:
 		group = KIR_GROUP_HPM;
 	break;
@@ -440,6 +442,7 @@ static u32 sram_debug_info[SRAM_DEBUG_COUNT];
 static char *vcorefs_get_sram_debug_info(char *p)
 {
 	char *buff_end = p + PAGE_SIZE;
+
 	if (p) {
 		p += snprintf(p, buff_end - p,
 				"dvfs  up/down count: %u / %u\n",

@@ -116,6 +116,16 @@ bool mtk_is_usb_id_pin_short_gnd(void)
 	return (mtk_idpin_cur_stat != IDPIN_OUT) ? true : false;
 }
 
+void mtk_set_host_mode_in_host(void)
+{
+	mtk_idpin_cur_stat = IDPIN_IN_HOST;
+}
+
+void mtk_set_host_mode_out(void)
+{
+	mtk_idpin_cur_stat = IDPIN_OUT;
+}
+
 
 void mtk_enable_host(void)
 {
@@ -246,10 +256,6 @@ static int otg_iddig_probe(struct platform_device *pdev)
 		pinctrl_select_state(pinctrl, pinctrl_iddig_disable);
 #endif
 
-	mtk_idpin_irqnum = irq_of_parse_and_map(node, 0);
-	if (mtk_idpin_irqnum < 0)
-		return -ENODEV;
-
 	retval = of_property_read_u32_array(node, "debounce", ints, ARRAY_SIZE(ints));
 	if (!retval) {
 		iddig_gpio = ints[0];
@@ -363,8 +369,8 @@ static ssize_t otg_mode_store(struct device *dev, struct device_attribute *attr,
 				cancel_delayed_work_sync(&mtk_xhci_delaywork);
 				if (mtk_is_host_mode() == true)
 					mtk_xhci_driver_unload(true);
-
 				mtk_idpin_cur_stat = IDPIN_OUT;
+
 
 				if (!IS_ERR(pinctrl_iddig_disable))
 					pinctrl_select_state(pinctrl, pinctrl_iddig_disable);

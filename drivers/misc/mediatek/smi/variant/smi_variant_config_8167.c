@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
+
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/of_address.h>
@@ -24,6 +37,7 @@ static void mt8167_rest_setting(void)
 {
 	int i;
 
+	return;
 	/* initialize OSTD to 1 */
 	for (i = 0; i < SMI_LARB0_PORT_NUM; i++)
 		M4U_WriteReg32(LARB0_BASE, 0x200 + i * 4, 0x1);
@@ -38,6 +52,7 @@ static void mt8167_rest_setting(void)
 static void mt8167_init_setting(struct mtk_smi_data *smidev, bool *default_saved,
 			u32 *default_smi_val, unsigned int larbid)
 {
+	return;
 	/* save default larb regs */
 	if (!(*default_saved)) {
 		SMIMSG("Save default config:\n");

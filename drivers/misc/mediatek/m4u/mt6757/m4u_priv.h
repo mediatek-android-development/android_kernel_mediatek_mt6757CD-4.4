@@ -24,7 +24,7 @@
 #include "m4u_reg.h"
 #include "../2.0/m4u_pgtable.h"
 
-#define M4UMSG(string, args...)	pr_err("[M4U] "string, ##args)
+#define M4UMSG(string, args...)	pr_debug("[M4U] "string, ##args)
 #define M4UINFO(string, args...) pr_debug("[M4U] "string, ##args)
 
 #if defined(CONFIG_TRUSTONIC_TEE_SUPPORT) && defined(CONFIG_MTK_SEC_VIDEO_PATH_SUPPORT)
@@ -42,17 +42,13 @@
 #define M4U_DVT 0
 
 #ifndef M4U_PROFILE
-#define MMProfileLogEx(...)
-#define MMProfileEnable(...)
-#define MMProfileStart(...)
-#define MMProfileEnableEvent(...)
-#define MMP_Event unsigned int
+#define mmprofile_log_ex(...)
+#define mmprofile_enable(...)
+#define mmprofile_start(...)
+#define mmprofile_enable_event(...)
+#define mmp_event unsigned int
 #else
 #include <mmprofile.h>
-
-extern void MMProfileEnable(int enable);
-extern void MMProfileStart(int start);
-
 #endif
 
 #ifdef CONFIG_PM
@@ -300,7 +296,7 @@ extern int gM4U_log_to_uart;
 		if (seq_file)\
 			seq_printf(seq_file, fmt, ##args);\
 		else\
-			pr_err(fmt, ##args);\
+			pr_debug(fmt, ##args);\
 	} while (0)
 
 /* ======================================= */
@@ -317,7 +313,7 @@ typedef enum {
 	M4U_MMP_TOGGLE_CG,
 	M4U_MMP_MAX,
 } M4U_MMP_TYPE;
-extern MMP_Event M4U_MMP_Events[M4U_MMP_MAX];
+extern mmp_event M4U_MMP_Events[M4U_MMP_MAX];
 
 
 typedef struct {

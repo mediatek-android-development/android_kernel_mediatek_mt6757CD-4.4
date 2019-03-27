@@ -122,7 +122,6 @@ static INT32 opfunc_cmd_test(P_WMT_OP pWmtOp);
 static INT32 opfunc_hw_rst(P_WMT_OP pWmtOp);
 static INT32 opfunc_sw_rst(P_WMT_OP pWmtOp);
 static INT32 opfunc_stp_rst(P_WMT_OP pWmtOp);
-static INT32 opfunc_therm_ctrl(P_WMT_OP pWmtOp);
 static INT32 opfunc_efuse_rw(P_WMT_OP pWmtOp);
 static INT32 opfunc_therm_ctrl(P_WMT_OP pWmtOp);
 static INT32 opfunc_gpio_ctrl(P_WMT_OP pWmtOp);
@@ -131,8 +130,11 @@ static INT32 opfunc_pin_state(P_WMT_OP pWmtOp);
 static INT32 opfunc_bgw_ds(P_WMT_OP pWmtOp);
 static INT32 opfunc_set_mcu_clk(P_WMT_OP pWmtOp);
 static INT32 opfunc_adie_lpbk_test(P_WMT_OP pWmtOp);
+static INT32 wmt_core_gen2_set_mcu_clk(UINT32 kind);
+static INT32 wmt_core_gen3_set_mcu_clk(UINT32 kind);
 static VOID wmt_core_dump_func_state(PINT8 pSource);
 static INT32 wmt_core_stp_init(VOID);
+static INT32 wmt_core_trigger_assert(VOID);
 static INT32 wmt_core_stp_deinit(VOID);
 static INT32 wmt_core_hw_check(VOID);
 #ifdef CONFIG_MTK_COMBO_ANT
@@ -145,7 +147,6 @@ static INT32 opfunc_idc_msg_handling(P_WMT_OP pWmtOp);
 static INT32 opfunc_trigger_stp_assert(P_WMT_OP pWmtOp);
 static INT32 opfunc_flash_patch_down(P_WMT_OP pWmtOp);
 static INT32 opfunc_flash_patch_ver_get(P_WMT_OP pWmtOp);
-
 
 
 /*******************************************************************************
@@ -363,7 +364,6 @@ INT32 wmt_core_rx(PUINT8 pBuf, UINT32 bufLen, PUINT32 readSize)
 	if (iRet) {
 		/* ERROR */
 		WMT_ERR_FUNC("WMT-CORE: wmt_core_ctrl failed: WMT_CTRL_RX, iRet:%d\n", iRet);
-		mtk_wcn_stp_dbg_dump_package();
 		osal_assert(0);
 	}
 	return iRet;
@@ -396,8 +396,6 @@ INT32 wmt_core_func_ctrl_cmd(ENUM_WMTDRV_TYPE_T type, MTK_WCN_BOOL fgEn)
 	WMT_PKT rWmtPktCmd;
 	WMT_PKT rWmtPktEvent;
 	MTK_WCN_BOOL fgFail;
-	unsigned long ctrlPa1;
-	unsigned long ctrlPa2;
 
 	/* TODO:[ChangeFeature][George] remove WMT_PKT. replace it with hardcoded arrays. */
 	/* Using this struct relies on compiler's implementation and pack() settings */
@@ -433,14 +431,7 @@ INT32 wmt_core_func_ctrl_cmd(ENUM_WMTDRV_TYPE_T type, MTK_WCN_BOOL fgEn)
 			WMT_ERR_FUNC
 				("WMT firwmare no rx event, trigger f/w assert. sub-driver type:%d, state(%d)\n",
 				type, fgEn);
-			if (wmt_detect_get_chip_type() == WMT_CHIP_TYPE_COMBO) {
-				ctrlPa1 = type;
-				ctrlPa2 = 32;
-				wmt_core_set_coredump_state(DRV_STS_FUNC_ON);
-				mtk_wcn_stp_dbg_dump_package();
-				wmt_lib_stp_dbg_poll_cpupcr(5, 1, 1);
-				wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &ctrlPa1, &ctrlPa2);
-			}
+			wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, 32);
 			break;
 		}
 
@@ -601,6 +592,8 @@ INT32 wmt_core_reg_rw_raw(UINT32 isWrite, UINT32 offset, PUINT32 pVal, UINT32 ma
 	iRet = wmt_core_rx(evtBuf, evtLen, &u4Res);
 	if ((iRet) || (u4Res != evtLen)) {
 		WMT_ERR_FUNC("Rx REG_EVT fail!(%d) len(%d, %d)\n", iRet, u4Res, evtLen);
+		mtk_wcn_stp_dbg_dump_package();
+		wmt_core_trigger_assert();
 		return -3;
 	}
 
@@ -673,6 +666,32 @@ INT32 wmt_core_init_script(struct init_script *script, INT32 count)
 	return (i == count) ? 0 : -1;
 }
 
+static INT32 wmt_core_trigger_assert(VOID)
+{
+	INT32 ret = 0;
+	UINT32 u4Res;
+	UINT32 tstCmdSz = 0;
+	UINT32 tstEvtSz = 0;
+	UINT8 tstCmd[64];
+	UINT8 tstEvt[64];
+	UINT8 WMT_ASSERT_CMD[] = { 0x01, 0x02, 0x01, 0x00, 0x08 };
+	UINT8 WMT_ASSERT_EVT[] = { 0x02, 0x02, 0x00, 0x00, 0x00 };
+
+	WMT_INFO_FUNC("Send Assert command !\n");
+	tstCmdSz = osal_sizeof(WMT_ASSERT_CMD);
+	tstEvtSz = osal_sizeof(WMT_ASSERT_EVT);
+	osal_memcpy(tstCmd, WMT_ASSERT_CMD, tstCmdSz);
+	osal_memcpy(tstEvt, WMT_ASSERT_EVT, tstEvtSz);
+
+	ret = wmt_core_tx((PUINT8) tstCmd, tstCmdSz, &u4Res, MTK_WCN_BOOL_FALSE);
+	if (ret || (u4Res != tstCmdSz)) {
+		WMT_ERR_FUNC("WMT-CORE: wmt_cmd_test iRet(%d) cmd len err(%d, %d)\n", ret, u4Res,
+			     tstCmdSz);
+		ret = -1;
+	}
+	return ret;
+}
+
 static INT32 wmt_core_stp_init(VOID)
 {
 	INT32 iRet = -1;
@@ -694,6 +713,8 @@ static INT32 wmt_core_stp_init(VOID)
 		osal_assert(0);
 		return -1;
 	}
+
+
 	/* 4 <0> turn on SDIO2 for common SDIO */
 	if (pctx->wmtHifConf.hifType == WMT_HIF_SDIO) {
 		ctrlPa1 = WMT_SDIO_SLOT_SDIO2;
@@ -773,6 +794,11 @@ static INT32 wmt_core_stp_init(VOID)
 	}
 	/* TODO: [ChangeFeature][GeorgeKuo] can we apply raise UART baud rate firstly for ALL supported chips??? */
 
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+	WMT_DBG_FUNC("disable deep sleep featrue before the first command to firmware\n");
+	wmt_lib_deep_sleep_flag_set(MTK_WCN_BOOL_FALSE);
+#endif
+
 	iRet = wmt_core_hw_check();
 	if (iRet) {
 		WMT_ERR_FUNC("hw_check fail:%d\n", iRet);
@@ -801,7 +827,6 @@ static INT32 wmt_core_stp_init(VOID)
 	ctrlPa1 = WMT_STP_CONF_RDY;
 	ctrlPa2 = 1;
 	iRet = wmt_core_ctrl(WMT_CTRL_STP_CONF, &ctrlPa1, &ctrlPa2);
-
 	return iRet;
 }
 
@@ -847,7 +872,7 @@ deinit_ic_ops_done:
 			WMT_WARN_FUNC("turn off SDIO_FUNC_STP fail (%d)\n", iRet);
 			/* Anyway, continue turning SDIO HW off */
 		} else {
-			WMT_INFO_FUNC("turn off SDIO_FUNC_STP ok\n");
+			WMT_DBG_FUNC("turn off SDIO_FUNC_STP ok\n");
 		}
 
 		ctrlPa1 = WMT_SDIO_SLOT_SDIO2;
@@ -857,7 +882,7 @@ deinit_ic_ops_done:
 			WMT_WARN_FUNC("turn off SDIO2 HW fail (%d)\n", iRet);
 			/* Anyway, continue turning STP SDIO to POWER OFF state */
 		} else
-			WMT_INFO_FUNC("turn off SDIO2 HW ok\n");
+			WMT_DBG_FUNC("turn off SDIO2 HW ok\n");
 		gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_SDIO2] = DRV_STS_POWER_OFF;
 	}
 
@@ -882,12 +907,10 @@ static VOID wmt_core_dump_func_state(PINT8 pSource)
 
 }
 
-#if WMT_FOR_SDIO_1V_AUTOK
 ENUM_DRV_STS wmt_core_get_drv_status(ENUM_WMTDRV_TYPE_T type)
 {
 	return gMtkWmtCtx.eDrvStatus[type];
 }
-#endif
 
 MTK_WCN_BOOL wmt_core_patch_check(UINT32 u4PatchVer, UINT32 u4HwVer)
 {
@@ -941,6 +964,7 @@ static INT32 wmt_core_hw_check(VOID)
 		break;
 #endif
 #if CFG_CORE_SOC_SUPPORT
+	case 0x0690:
 	case 0x6572:
 	case 0x6582:
 	case 0x6592:
@@ -956,6 +980,8 @@ static INT32 wmt_core_hw_check(VOID)
 	case 0x6580:
 	case 0x0551:
 	case 0x8167:
+	case 0x0507:
+	case 0x0688:
 		p_ops = &wmt_ic_ops_soc;
 		break;
 #endif
@@ -992,7 +1018,7 @@ static INT32 wmt_core_hw_check(VOID)
 		return -5;
 	}
 
-	WMT_INFO_FUNC("chip id(0x%x) ver_check ok\n", chipid);
+	WMT_DBG_FUNC("chip id(0x%x) ver_check ok\n", chipid);
 	gMtkWmtCtx.p_ic_ops = p_ops;
 	return 0;
 }
@@ -1118,7 +1144,7 @@ static INT32 opfunc_pwr_off(P_WMT_OP pWmtOp)
 	if (iRet)
 		WMT_WARN_FUNC("HW_PWR_OFF fail (%d)\n", iRet);
 	else
-		WMT_WARN_FUNC("HW_PWR_OFF ok\n");
+		WMT_DBG_FUNC("HW_PWR_OFF ok\n");
 
 	/*anyway, set to POWER_OFF state */
 	gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_WMT] = DRV_STS_POWER_OFF;
@@ -1332,7 +1358,7 @@ static INT32 opfunc_func_off(P_WMT_OP pWmtOp)
 			gMtkWmtCtx.eDrvStatus[drvType] = DRV_STS_POWER_OFF;
 		else if (drvType == WMTDRV_TYPE_COREDUMP)
 			gMtkWmtCtx.eDrvStatus[drvType] = DRV_STS_POWER_OFF;
-			iRet = 0;
+		iRet = 0;
 	}
 
 	/* shall we put device state to POWER_OFF state when fail? */
@@ -1419,14 +1445,12 @@ static INT32 opfunc_pwr_sv(P_WMT_OP pWmtOp)
 		evt_len = sizeof(WMT_SLEEP_EVT);
 		ret = wmt_core_rx(evt_buf, evt_len, &u4_result);
 		if (ret || (u4_result != evt_len)) {
-			ULONG type = WMTDRV_TYPE_WMT;
 			ULONG reason = 33;
 
 			wmt_core_rx_flush(WMT_TASK_INDX);
 			WMT_ERR_FUNC
 				("wmt_core: read SLEEP_EVT fail(%d) len(%d, %d), host trigger firmware assert\n",
 				 ret, u4_result, evt_len);
-			mtk_wcn_stp_dbg_dump_package();
 			if (mtk_wcn_stp_is_btif_fullset_mode()) {
 				ULONG ctrlpa = 1;
 
@@ -1436,7 +1460,7 @@ static INT32 opfunc_pwr_sv(P_WMT_OP pWmtOp)
 					WMT_WARN_FUNC("This evt error may be caused by system schedule issue\n");
 				}
 			}
-			wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &type, &reason);
+			wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, reason);
 			goto pwr_sv_done;
 		}
 
@@ -1474,13 +1498,11 @@ static INT32 opfunc_pwr_sv(P_WMT_OP pWmtOp)
 		evt_len = sizeof(WMT_WAKEUP_EVT);
 		ret = wmt_core_rx(evt_buf, evt_len, &u4_result);
 		if (ret || (u4_result != evt_len)) {
-			ULONG type = WMTDRV_TYPE_WMT;
 			ULONG reason = 34;
 
 			WMT_ERR_FUNC
 				("wmt_core: read WAKEUP_EVT fail(%d) len(%d, %d), host grigger firmaware assert\n",
 					ret, u4_result, evt_len);
-			mtk_wcn_stp_dbg_dump_package();
 			if (mtk_wcn_stp_is_btif_fullset_mode()) {
 				ULONG ctrlpa = 2;
 
@@ -1490,7 +1512,7 @@ static INT32 opfunc_pwr_sv(P_WMT_OP pWmtOp)
 					WMT_WARN_FUNC("This evt error may be caused by system schedule issue\n");
 				}
 			}
-			wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &type, &reason);
+			wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, reason);
 			goto pwr_sv_done;
 		}
 
@@ -1524,14 +1546,12 @@ static INT32 opfunc_pwr_sv(P_WMT_OP pWmtOp)
 		evt_len = sizeof(WMT_HOST_AWAKE_EVT);
 		ret = wmt_core_rx(evt_buf, evt_len, &u4_result);
 		if (ret || (u4_result != evt_len)) {
-			ULONG type = WMTDRV_TYPE_WMT;
 			ULONG reason = 35;
 
 			wmt_core_rx_flush(WMT_TASK_INDX);
 			WMT_ERR_FUNC
 				("wmt_core:read HOST_AWAKE_EVT fail(%d) len(%d, %d), host trigger f/w assert\n",
 				 ret, u4_result, evt_len);
-			mtk_wcn_stp_dbg_dump_package();
 			if (mtk_wcn_stp_is_btif_fullset_mode()) {
 				ULONG ctrlpa = 3;
 
@@ -1541,7 +1561,7 @@ static INT32 opfunc_pwr_sv(P_WMT_OP pWmtOp)
 					WMT_WARN_FUNC("This evt error may be caused by system schedule issue\n");
 				}
 			}
-			wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &type, &reason);
+			wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, reason);
 			goto pwr_sv_done;
 		}
 
@@ -1682,8 +1702,6 @@ static INT32 opfunc_lpbk(P_WMT_OP pWmtOp)
 	/* UINT32 offset; */
 	UINT8 WMT_TEST_LPBK_CMD[] = { 0x1, 0x2, 0x0, 0x0, 0x7 };
 	UINT8 WMT_TEST_LPBK_EVT[] = { 0x2, 0x2, 0x0, 0x0, 0x0 };
-	ULONG ctrlpa1;
-	ULONG ctrlpa2;
 	/* UINT8 lpbk_buf[1024 + 5] = {0}; */
 	MTK_WCN_BOOL fgFail;
 
@@ -1754,11 +1772,8 @@ static INT32 opfunc_lpbk(P_WMT_OP pWmtOp)
 	/*return result */
 	/* WMT_DBG_FUNC("WMT-CORE: <--wmt_do_lpbk, fgFail = %d\n", fgFail); */
 	if (fgFail == MTK_WCN_BOOL_TRUE) {
-		ctrlpa1 = WMTDRV_TYPE_WMT;
-		ctrlpa2 = 37;
 		WMT_ERR_FUNC("LPBK fail and trigger assert\n");
-		mtk_wcn_stp_dbg_dump_package();
-		wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &ctrlpa1, &ctrlpa2);
+		wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, 37);
 	}
 	return fgFail;
 
@@ -1931,7 +1946,7 @@ static INT32 opfunc_hw_rst(P_WMT_OP pWmtOp)
 	gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_FM] = DRV_STS_POWER_OFF;
 	gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_GPS] = DRV_STS_POWER_OFF;
 	/* gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_WIFI] = DRV_STS_POWER_OFF; */
-	gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_LPBK] = DRV_STS_POWER_OFF;
+	/*gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_LPBK] = DRV_STS_POWER_OFF;*/
 	/* gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_SDIO1]= DRV_STS_POWER_OFF; */
 	/* gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_SDIO2]= DRV_STS_POWER_OFF; */
 	gMtkWmtCtx.eDrvStatus[WMTDRV_TYPE_STP] = DRV_STS_POWER_OFF;
@@ -2113,23 +2128,9 @@ static INT32 opfunc_therm_ctrl(P_WMT_OP pWmtOp)
 	evtLen = 16;
 
 	iRet = wmt_core_rx(evtBuf, evtLen, &u4Res);
-	if (iRet
-	    || ((u4Res != osal_sizeof(WMT_THERM_CTRL_EVT))
-		&& (u4Res != osal_sizeof(WMT_THERM_READ_EVT)))) {
-#if 0
-		unsigned long ctrlpa1 = WMTDRV_TYPE_WMT;
-		unsigned long ctrlpa2 = 36;
-
-		WMT_ERR_FUNC
-		    ("WMT-CORE: read THERM_CTRL_EVT/THERM_READ_EVENT fail(%d) len(%d, %d)\n", iRet,
-		     u4Res, evtLen);
-		mtk_wcn_stp_dbg_dump_package();
-		wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &ctrlpa1, &ctrlpa2);
-#else
-		WMT_ERR_FUNC
-		    ("WMT-CORE: read THERM_CTRL_EVT/THERM_READ_EVENT fail(%d) len(%d, %d)\n", iRet,
-		     u4Res, evtLen);
-#endif
+	if (iRet || ((u4Res != osal_sizeof(WMT_THERM_CTRL_EVT)) && (u4Res != osal_sizeof(WMT_THERM_READ_EVT)))) {
+		WMT_ERR_FUNC("WMT-CORE: read THERM_CTRL_EVT/THERM_READ_EVENT fail(%d) len(%d)\n", iRet, u4Res);
+		wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, 36);
 		return iRet;
 	}
 	if (u4Res == osal_sizeof(WMT_THERM_CTRL_EVT)) {
@@ -2144,7 +2145,7 @@ static INT32 opfunc_therm_ctrl(P_WMT_OP pWmtOp)
 			pWmtOp->au4OpData[1] = MTK_WCN_BOOL_FALSE;	/*will return to function driver */
 			mtk_wcn_stp_dbg_dump_package();
 		} else {
-			WMT_INFO_FUNC("Send WMT_THERM_CTRL_CMD command OK!\n");
+			WMT_DBG_FUNC("Send WMT_THERM_CTRL_CMD command OK!\n");
 			pWmtOp->au4OpData[1] = MTK_WCN_BOOL_TRUE;	/*will return to function driver */
 		}
 	} else {
@@ -2349,24 +2350,23 @@ static INT32 opfunc_bgw_ds(P_WMT_OP pWmtOp)
 	return fgFail;
 }
 
-static INT32 opfunc_set_mcu_clk(P_WMT_OP pWmtOp)
+static INT32 wmt_core_gen2_set_mcu_clk(UINT32 kind)
 {
-	UINT32 kind = 0;
 	INT32 iRet = -1;
 	UINT32 u4WrittenSize = 0;
 	UINT32 u4ReadSize = 0;
 	UINT8 evt_buffer[12] = { 0 };
 	MTK_WCN_BOOL fgFail;
 	PUINT8 set_mcu_clk_str[] = {
-		"Enable MCU PLL",
-		"SET MCU CLK to 26M",
-		"SET MCU CLK to 37M",
-		"SET MCU CLK to 64M",
-		"SET MCU CLK to 69M",
-		"SET MCU CLK to 104M",
-		"SET MCU CLK to 118.857M",
-		"SET MCU CLK to 138.67M",
-		"Disable MCU PLL"
+		"Enable GEN2 MCU PLL",
+		"SET GEN2 MCU CLK to 26M",
+		"SET GEN2 MCU CLK to 37M",
+		"SET GEN2 MCU CLK to 64M",
+		"SET GEN2 MCU CLK to 69M",
+		"SET GEN2 MCU CLK to 104M",
+		"SET GEN2 MCU CLK to 118.857M",
+		"SET GEN2 MCU CLK to 138.67M",
+		"Disable GEN2 MCU PLL"
 	};
 	UINT8 WMT_SET_MCU_CLK_CMD[] = {
 		0x01, 0x08, 0x10, 0x00,
@@ -2387,7 +2387,6 @@ static INT32 opfunc_set_mcu_clk(P_WMT_OP pWmtOp)
 	UINT8 WMT_138_MCU_CLK_CMD[] = { 0x0c, 0x01, 0x00, 0x80, 0x59, 0x4d, 0x84, 0x00 };	/* set 138.67M */
 	UINT8 WMT_DIS_MCU_CLK_CMD[] = { 0x34, 0x03, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00 };	/* disable pll clk */
 
-	kind = pWmtOp->au4OpData[0];
 	WMT_INFO_FUNC("do %s\n", set_mcu_clk_str[kind]);
 
 	switch (kind) {
@@ -2437,6 +2436,7 @@ static INT32 opfunc_set_mcu_clk(P_WMT_OP pWmtOp)
 		iRet = wmt_core_rx(evt_buffer, osal_sizeof(WMT_SET_MCU_CLK_EVT), &u4ReadSize);
 		if (iRet || (u4ReadSize != osal_sizeof(WMT_SET_MCU_CLK_EVT))) {
 			WMT_ERR_FUNC("WMT_SET_MCU_CLK_EVT fail(%d),size(%d)\n", iRet, u4ReadSize);
+			mtk_wcn_stp_dbg_dump_package();
 			break;
 		}
 
@@ -2454,10 +2454,106 @@ static INT32 opfunc_set_mcu_clk(P_WMT_OP pWmtOp)
 
 	if (fgFail == MTK_WCN_BOOL_FALSE)
 		WMT_INFO_FUNC("wmt-core:%s: ok!\n", set_mcu_clk_str[kind]);
-
-	WMT_INFO_FUNC("wmt-core:%s: fail!\n", set_mcu_clk_str[kind]);
+	else
+		WMT_INFO_FUNC("wmt-core:%s: fail!\n", set_mcu_clk_str[kind]);
 
 	return fgFail;
+}
+
+static INT32 wmt_core_gen3_set_mcu_clk(UINT32 kind)
+{
+	INT32 iRet = -1;
+	UINT32 u4WrittenSize = 0;
+	UINT32 u4ReadSize = 0;
+	UINT8 evt_buffer[12] = { 0 };
+	MTK_WCN_BOOL fgFail;
+	PUINT8 set_mcu_clk_str[] = {
+		"SET GEN3 MCU CLK to 26M",
+		"SET GEN3 MCU CLK to 46M",
+		"SET GEN3 MCU CLK to 97M",
+		"SET GEN3 MCU CLK to 104M",
+		"SET GEN3 MCU CLK to 184M",
+		"SET GEN3 MCU CLK to 208M",
+	};
+	UINT8 set_mcu_clk_vel[] = {
+		0x1a,	/* set 26M*/
+		0x2e,	/* set 46M*/
+		0x61,	/* set 97M*/
+		0x68,	/* set 104M */
+		0xb8,	/* set 184M */
+		0xd0,	/* set 208M */
+	};
+	UINT8 WMT_SET_MCU_CLK_CMD[] = { 0x01, 0x0a, 0x04, 0x00, 0x09, 0x03, 0x00, 0x00 };
+	UINT8 WMT_SET_MCU_CLK_EVT[] = { 0x02, 0x0a, 0x01, 0x00, 0x00 };
+
+
+	if (kind < osal_sizeof(set_mcu_clk_vel)) {
+		WMT_INFO_FUNC("do %s\n", set_mcu_clk_str[kind]);
+		WMT_SET_MCU_CLK_CMD[6] = set_mcu_clk_vel[kind];
+	} else {
+		WMT_ERR_FUNC("unknown kind(%d)!\n", kind);
+		return MTK_WCN_BOOL_TRUE;
+	}
+
+	do {
+		fgFail = MTK_WCN_BOOL_TRUE;
+
+		iRet = wmt_core_tx(&WMT_SET_MCU_CLK_CMD[0], osal_sizeof(WMT_SET_MCU_CLK_CMD), &u4WrittenSize,
+				MTK_WCN_BOOL_FALSE);
+		if (iRet || (u4WrittenSize != osal_sizeof(WMT_SET_MCU_CLK_CMD))) {
+			WMT_ERR_FUNC("WMT_SET_MCU_CLK_CMD fail(%d),size(%d)\n", iRet, u4WrittenSize);
+			break;
+		}
+
+		iRet = wmt_core_rx(evt_buffer, osal_sizeof(WMT_SET_MCU_CLK_EVT), &u4ReadSize);
+		if (iRet || (u4ReadSize != osal_sizeof(WMT_SET_MCU_CLK_EVT))) {
+			WMT_ERR_FUNC("WMT_SET_MCU_CLK_EVT fail(%d),size(%d)\n", iRet, u4ReadSize);
+			mtk_wcn_stp_dbg_dump_package();
+			break;
+		}
+
+		if (osal_memcmp(evt_buffer, WMT_SET_MCU_CLK_EVT, osal_sizeof(WMT_SET_MCU_CLK_EVT)) != 0) {
+			WMT_ERR_FUNC("WMT_SET_MCU_CLK_EVT compare fail, [0-3]:0x%02x,0x%02x,0x%02x,0x%02x\n",
+				     evt_buffer[0], evt_buffer[1], evt_buffer[2], evt_buffer[3]);
+			WMT_ERR_FUNC("WMT_SET_MCU_CLK_EVT compare fail, [4-7]:0x%02x,0x%02x,0x%02x,0x%02x\n",
+				     evt_buffer[4], evt_buffer[5], evt_buffer[6], evt_buffer[7]);
+			break;
+		}
+
+		fgFail = MTK_WCN_BOOL_FALSE;
+
+	} while (0);
+
+	if (fgFail == MTK_WCN_BOOL_FALSE)
+		WMT_INFO_FUNC("wmt-core:%s: ok!\n", set_mcu_clk_str[kind]);
+	else
+		WMT_INFO_FUNC("wmt-core:%s: fail!\n", set_mcu_clk_str[kind]);
+
+	return fgFail;
+}
+
+static INT32 opfunc_set_mcu_clk(P_WMT_OP pWmtOp)
+{
+	UINT32 kind = 0;
+	UINT32 version = 0;
+	MTK_WCN_BOOL ret;
+
+	kind = pWmtOp->au4OpData[0];
+	version = pWmtOp->au4OpData[1];
+
+	switch (version) {
+	case 0:
+		ret = wmt_core_gen2_set_mcu_clk(kind);
+		break;
+	case 1:
+		ret = wmt_core_gen3_set_mcu_clk(kind);
+		break;
+	default:
+		WMT_ERR_FUNC("wmt-core: version(%d) is not gen2 or gen3!\n", version);
+		ret = MTK_WCN_BOOL_TRUE;
+	}
+
+	return ret;
 }
 
 static INT32 opfunc_adie_lpbk_test(P_WMT_OP pWmtOp)
@@ -2509,6 +2605,7 @@ MTK_WCN_BOOL wmt_core_trigger_stp_assert(VOID)
 
 	if (mtk_wcn_stp_coredump_flag_get() == 0) {
 		WMT_INFO_FUNC("coredump is disabled, omit trigger STP assert\n");
+		wmt_lib_trigger_reset();
 		return MTK_WCN_BOOL_FALSE;
 	}
 
@@ -2525,8 +2622,23 @@ MTK_WCN_BOOL wmt_core_trigger_stp_assert(VOID)
 
 	return bRet;
 }
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+MTK_WCN_BOOL wmt_core_deep_sleep_ctrl(INT32 value)
+{
+	MTK_WCN_BOOL bRet = MTK_WCN_BOOL_FALSE;
+	P_WMT_CTX pctx = &gMtkWmtCtx;
 
-
+	if ((pctx->p_ic_ops != NULL) && (pctx->p_ic_ops->deep_sleep_ctrl != NULL)) {
+		bRet = (*(pctx->p_ic_ops->deep_sleep_ctrl)) (value);
+	} else {
+		if (pctx->p_ic_ops != NULL)
+			WMT_INFO_FUNC("deep sleep function is not supported by 0x%x\n",
+				pctx->p_ic_ops->icId);
+		bRet = MTK_WCN_BOOL_FALSE;
+	}
+	return bRet;
+}
+#endif
 INT32 opfunc_pin_state(P_WMT_OP pWmtOp)
 {
 	ULONG ctrlPa1 = 0;
@@ -2776,8 +2888,6 @@ INT32 opfunc_flash_patch_down(P_WMT_OP pWmtOp)
 	UINT16 wmtPktLen = 0;
 	UINT32 u4Res = 0;
 	UINT8 evtBuf[osal_sizeof(WMT_FLASH_PATCH_DWN_EVT)];
-	ULONG ctrlpa1 = 0;
-	ULONG ctrlpa2 = 0;
 	UINT32 i = 0;
 
 	do {
@@ -2829,9 +2939,7 @@ INT32 opfunc_flash_patch_down(P_WMT_OP pWmtOp)
 		if (iRet || (u4Res != sizeof(WMT_FLASH_PATCH_DWN_EVT))) {
 			WMT_ERR_FUNC("wmt_core: read WMT_FLASH_PATCH_DWN_EVT length(%zu, %d) fail(%d)\n",
 				     sizeof(WMT_FLASH_PATCH_DWN_EVT), u4Res, iRet);
-			ctrlpa1 = WMTDRV_TYPE_WMT;
-			ctrlpa2 = 39;
-			wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &ctrlpa1, &ctrlpa2);
+			wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, 39);
 
 			iRet = -5;
 			u4Res = -2;
@@ -2868,8 +2976,6 @@ INT32 opfunc_flash_patch_ver_get(P_WMT_OP pWmtOp)
 	UINT32 u4PatchType = pWmtOp->au4OpData[3];
 	UINT32 u4PatchVer = 0;
 	UINT8 evtBuf[osal_sizeof(WMT_FLASH_PATCH_VER_GET_EVT)];
-	ULONG ctrlpa1 = 0;
-	ULONG ctrlpa2 = 0;
 
 	do {
 		osal_memcpy(&WMT_FLASH_PATCH_VER_GET_CMD[5], &u4PatchType, sizeof(u4PatchType));
@@ -2888,10 +2994,7 @@ INT32 opfunc_flash_patch_ver_get(P_WMT_OP pWmtOp)
 		if (iRet || (u4Res != sizeof(WMT_FLASH_PATCH_VER_GET_EVT))) {
 			WMT_ERR_FUNC("wmt_core: read WMT_FLASH_PATCH_VER_GET_EVT length(%zu, %d) fail(%d)\n",
 					sizeof(WMT_FLASH_PATCH_VER_GET_EVT), u4Res, iRet);
-
-			ctrlpa1 = WMTDRV_TYPE_WMT;
-			ctrlpa2 = 38;
-			wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &ctrlpa1, &ctrlpa2);
+			wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, 38);
 
 			iRet = -5;
 			u4Res = -2;
@@ -2938,6 +3041,7 @@ static INT32 opfunc_idc_msg_handling(P_WMT_OP pWmtOp)
 	UINT16 msg_len = 0;
 	UINT32 total_len = 0;
 	UINT32 index = 0;
+	UINT32 evtLen;
 
 	pTxBuf = (UINT8 *) pWmtOp->au4OpData[0];
 	if (pTxBuf == NULL) {
@@ -2982,10 +3086,12 @@ static INT32 opfunc_idc_msg_handling(P_WMT_OP pWmtOp)
 			break;
 		}
 		osal_memset(evtbuf, 0, osal_sizeof(evtbuf));
-		iRet = wmt_core_rx(evtbuf, osal_sizeof(host_lte_btwf_coex_evt), &u4Res);
-		if (iRet || (u4Res != osal_sizeof(host_lte_btwf_coex_evt))) {
-			WMT_ERR_FUNC("wmt_core:recv host_lte_btwf_coex_evt fail(%d),size(%d)\n",
-				     iRet, u4Res);
+		evtLen = osal_sizeof(host_lte_btwf_coex_evt);
+		iRet = wmt_core_rx(evtbuf, evtLen, &u4Res);
+		if (iRet || (u4Res != evtLen)) {
+			WMT_ERR_FUNC("wmt_core:recv host_lte_btwf_coex_evt fail(%d) len(%d, %d)\n",
+				iRet, u4Res, evtLen);
+			wmt_lib_trigger_assert(WMTDRV_TYPE_WMT, 41);
 			break;
 		}
 
@@ -3009,3 +3115,12 @@ UINT32 wmt_core_get_flag_for_test(VOID)
 }
 
 #endif
+
+P_WMT_GEN_CONF wmt_get_gen_conf_pointer(VOID)
+{
+	P_WMT_GEN_CONF pWmtGenConf = NULL;
+
+	pWmtGenConf = wmt_conf_get_cfg();
+	return pWmtGenConf;
+}
+

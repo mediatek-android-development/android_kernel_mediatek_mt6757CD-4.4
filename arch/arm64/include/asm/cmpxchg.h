@@ -19,8 +19,8 @@
 #define __ASM_CMPXCHG_H
 
 #include <linux/bug.h>
-#include <linux/mmdebug.h>
 
+#include <asm/alternative.h>
 #include <asm/atomic.h>
 #include <asm/barrier.h>
 #include <asm/lse.h>
@@ -38,6 +38,7 @@ static inline unsigned long __xchg_case_##name(unsigned long x,		\
 									\
 	asm volatile(ARM64_LSE_ATOMIC_INSN(				\
 	/* LL/SC */							\
+	ALTERNATIVE("nop", "dmb sy", ARM64_WORKAROUND_855872)		\
 	"	prfm	pstl1strm, %2\n"				\
 	"1:	ld" #acq "xr" #sz "\t%" #w "0, %2\n"			\
 	"	st" #rel "xr" #sz "\t%w1, %" #w "3, %2\n"		\
@@ -49,7 +50,7 @@ static inline unsigned long __xchg_case_##name(unsigned long x,		\
 	"	swp" #acq_lse #rel #sz "\t%" #w "3, %" #w "0, %2\n"	\
 	"	nop\n"							\
 	"	" #nop_lse)						\
-	: "=&r" (ret), "=&r" (tmp), "+Q" (*(u8 *)ptr)			\
+	: "=&r" (ret), "=&r" (tmp), "+Q" (*(unsigned long *)ptr)	\
 	: "r" (x)							\
 	: cl);								\
 									\

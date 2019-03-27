@@ -76,6 +76,9 @@ static DEFINE_SPINLOCK(lowmem_shrink_lock);
 #define CREATE_TRACE_POINTS
 #include "trace/lowmemorykiller.h"
 
+#include "internal.h"
+#include <mt-plat/mlog_logger.h>
+
 static u32 lowmem_debug_level = 1;
 static short lowmem_adj[9] = {
 	0,
@@ -94,7 +97,7 @@ static int lowmem_minfree[9] = {
 
 static int lowmem_minfree_size = 9;
 
-static struct task_struct *lowmem_deathpending;
+#define LOWMEM_DEATHPENDING_TIMEOUT	(HZ)
 static unsigned long lowmem_deathpending_timeout;
 
 #define lowmem_print(level, x...)			\
@@ -102,24 +105,6 @@ static unsigned long lowmem_deathpending_timeout;
 		if (lowmem_debug_level >= (level))	\
 			pr_info(x);			\
 	} while (0)
-
-static int
-task_notify_func(struct notifier_block *self, unsigned long val, void *data);
-
-static struct notifier_block task_nb = {
-	.notifier_call	= task_notify_func,
-};
-
-static int
-task_notify_func(struct notifier_block *self, unsigned long val, void *data)
-{
-	struct task_struct *task = data;
-
-	if (task == lowmem_deathpending)
-		lowmem_deathpending = NULL;
-
-	return NOTIFY_DONE;
-}
 
 static unsigned long lowmem_count(struct shrinker *s,
 				  struct shrink_control *sc)
@@ -133,6 +118,19 @@ static unsigned long lowmem_count(struct shrinker *s,
 		global_page_state(NR_ACTIVE_FILE) +
 		global_page_state(NR_INACTIVE_ANON) +
 		global_page_state(NR_INACTIVE_FILE);
+}
+
+static void dump_memory_status(void)
+{
+	show_free_areas(0);
+#ifdef CONFIG_MTK_ION
+	/* Show ION status */
+	ion_mm_heap_memory_detail();
+#endif
+#ifdef CONFIG_MTK_GPU_SUPPORT
+	if (mtk_dump_gpu_memory_usage() == false)
+		lowmem_print(1, "mtk_dump_gpu_memory_usage not support\n");
+#endif
 }
 
 static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
@@ -150,14 +148,19 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 	int other_free = global_page_state(NR_FREE_PAGES) - totalreserve_pages;
 	int other_file = global_page_state(NR_FILE_PAGES) -
 						global_page_state(NR_SHMEM) -
+						global_page_state(NR_UNEVICTABLE) -
 						total_swapcache_pages();
 
 	int print_extra_info = 0;
 	static unsigned long lowmem_print_extra_info_timeout;
 	enum zone_type high_zoneidx = gfp_zone(sc->gfp_mask);
+	int d_state_is_found = 0;
+	int unreclaimable_zones = 0;
+#ifdef CONFIG_SWAP
+	unsigned long swap_pages = 0;
+#endif
 #if defined(CONFIG_SWAP) && defined(CONFIG_MTK_GMO_RAM_OPTIMIZE)
 	int to_be_aggressive = 0;
-	unsigned long swap_pages = 0;
 #endif
 #ifdef CONFIG_MTK_ENG_BUILD
 	int pid_dump = -1; /* process to be dump */
@@ -167,16 +170,16 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 	int log_offset = 0, log_ret;
 #endif
 
-	/*
-	* If we already have a death outstanding, then
-	* bail out right away; indicating to vmscan
-	* that we have nothing further to offer on
-	* this pass.
-	*
-	*/
-	if (lowmem_deathpending &&
-	    time_before_eq(jiffies, lowmem_deathpending_timeout))
-		return SHRINK_STOP;
+#if defined(CONFIG_SWAP) && !defined(CONFIG_MTK_GMO_RAM_OPTIMIZE)
+	/* Adjust vm_swappiness according to the percentage of swap space in free */
+	swap_pages = atomic_long_read(&nr_swap_pages);
+	/* More than 1/2 swap usage */
+	if (swap_pages * 2 < total_swap_pages)
+		vm_swappiness = 10;
+	/* Less than 1/4 swap usage */
+	if (swap_pages * 4 > total_swap_pages * 3)
+		vm_swappiness = 60;
+#endif
 
 	/* Subtract CMA free pages from other_free if this is an unmovable page allocation */
 	if (IS_ENABLED(CONFIG_CMA))
@@ -217,6 +220,10 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 					zone_page_state(z, NR_ACTIVE_ANON) +
 					zone_page_state(z, NR_INACTIVE_ANON) +
 					new_other_free;
+
+				/* Check whether there is any unreclaimable memory zone */
+				if (populated_zone(z) && !zone_reclaimable(z))
+					unreclaimable_zones++;
 			}
 		}
 
@@ -238,17 +245,6 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			other_file = new_other_file;
 		}
 	}
-
-	/*
-	 * Accumulate swappiness if reaching minfree[0]
-	if (IS_ENABLED(CONFIG_SWAP) && other_file < lowmem_minfree[0]) {
-		if (vm_swappiness < 200) {
-			vm_swappiness += 5;
-			other_file = lowmem_minfree[0];
-		}
-	} else
-		vm_swappiness = 100;
-	 */
 
 	/* Let other_free be positive or zero */
 	if (other_free < 0) {
@@ -293,6 +289,10 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 		}
 	}
 
+	/* Promote its priority */
+	if (unreclaimable_zones > 0)
+		min_score_adj = lowmem_adj[0];
+
 	lowmem_print(3, "lowmem_scan %lu, %x, ofree %d %d, ma %hd\n",
 			sc->nr_to_scan, sc->gfp_mask, other_free,
 			other_file, min_score_adj);
@@ -327,10 +327,10 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			lowmem_print(1, "Free memory other_free: %d, other_file:%d pages\n", other_free, other_file);
 #ifdef CONFIG_MTK_ENG_BUILD
 			log_offset = snprintf(lmk_log_buf, LMK_LOG_BUF_SIZE, "%s",
-					      "<lmk>  pid  adj  score_adj     rss   rswap name\n");
+					      "<lmk>  pid  score_adj     rss   rswap name\n");
 #else
 			lowmem_print(1,
-				     "<lmk>  pid  adj  score_adj     rss   rswap name\n");
+				     "<lmk>  pid  score_adj     rss   rswap name\n");
 #endif
 		}
 	}
@@ -353,6 +353,14 @@ static unsigned long lowmem_scan(struct shrinker *s, struct shrink_control *sc)
 			continue;
 		}
 #endif
+		/* Bypass D-state process */
+		if (p->state & TASK_UNINTERRUPTIBLE) {
+			lowmem_print(2, "lowmem_scan filter D state process: %d (%s) state:0x%lx\n",
+				     p->pid, p->comm, p->state);
+			task_unlock(p);
+			d_state_is_found = 1;
+			continue;
+		}
 
 		if (task_lmk_waiting(p) && p->mm &&
 		    time_before_eq(jiffies, lowmem_deathpending_timeout)) {
@@ -451,39 +459,28 @@ log_again:
 		long cache_limit = minfree * (long)(PAGE_SIZE / 1024);
 		long free = other_free * (long)(PAGE_SIZE / 1024);
 
+		if (selected_oom_score_adj <= 0)
+			mlog(MLOG_TRIGGER_LMK);
+
 		task_lock(selected);
 		send_sig(SIGKILL, selected, 0);
 		if (selected->mm)
 			task_set_lmk_waiting(selected);
 		task_unlock(selected);
 		trace_lowmemory_kill(selected, cache_size, cache_limit, free);
-		lowmem_print(1, "Killing '%s' (%d), adj %hd,\n" \
-			        "   to free %ldkB on behalf of '%s' (%d) because\n" \
-			        "   cache %ldkB is below limit %ldkB for oom_score_adj %hd\n" \
-			        "   Free memory is %ldkB above reserved\n",
+		lowmem_print(1, "Killing '%s' (%d), adj %hd, state(%ld)\n"
+				"   to free %ldkB on behalf of '%s' (%d) because\n"
+				"   cache %ldkB is below limit %ldkB for oom_score_adj %hd\n"
+				"   Free memory is %ldkB above reserved\n",
 			     selected->comm, selected->pid,
-			     selected_oom_score_adj,
+			     selected_oom_score_adj, selected->state,
 			     selected_tasksize * (long)(PAGE_SIZE / 1024),
 			     current->comm, current->pid,
 			     cache_size, cache_limit,
 			     min_score_adj,
 			     free);
-		lowmem_deathpending = selected;
-		lowmem_deathpending_timeout = jiffies + HZ;
 
-		if (output_expect(enable_candidate_log)) {
-			if (print_extra_info) {
-				show_free_areas(0);
-			#ifdef CONFIG_MTK_ION
-				/* Show ION status */
-				ion_mm_heap_memory_detail();
-			#endif
-			#ifdef CONFIG_MTK_GPU_SUPPORT
-				if (mtk_dump_gpu_memory_usage() == false)
-					lowmem_print(1, "mtk_dump_gpu_memory_usage not support\n");
-			#endif
-			}
-		}
+		lowmem_deathpending_timeout = jiffies + LOWMEM_DEATHPENDING_TIMEOUT;
 
 #if defined(CONFIG_MTK_AEE_FEATURE) && defined(CONFIG_MTK_ENG_BUILD)
 		/*
@@ -511,12 +508,12 @@ log_again:
 				if (pid_dump == selected->pid) {/*select 1st time, filter it*/
 					pid_flm_warn = pid_dump;
 					flm_warn_timeout = jiffies + 60 * HZ;
-					lowmem_deathpending = NULL;
 					lowmem_print(1, "'%s' (%d) max RSS, not kill\n",
 						     selected->comm, selected->pid);
 					send_sig(SIGSTOP, selected, 0);
 					rcu_read_unlock();
 					spin_unlock(&lowmem_shrink_lock);
+					dump_memory_status();
 					return rem;
 				}
 			} else {
@@ -535,12 +532,21 @@ log_again:
 		}
 #endif
 		rem += selected_tasksize;
+	} else {
+		if (d_state_is_found == 1)
+			lowmem_print(2, "No selected (full of D-state processes at %d)\n", (int)min_score_adj);
 	}
 
 	lowmem_print(4, "lowmem_scan %lu, %x, return %lu\n",
 		     sc->nr_to_scan, sc->gfp_mask, rem);
 	rcu_read_unlock();
 	spin_unlock(&lowmem_shrink_lock);
+
+	/* Dump HW memory outside the lock */
+	if (selected && output_expect(enable_candidate_log))
+		if (print_extra_info)
+			dump_memory_status();
+
 	return rem;
 }
 
@@ -552,16 +558,9 @@ static struct shrinker lowmem_shrinker = {
 
 static int __init lowmem_init(void)
 {
-/* [wuzhe start] Modify zram options
-#ifdef CONFIG_ZRAM
-#ifdef CONFIG_MTK_GMO_RAM_OPTIMIZE
+#if defined(CONFIG_ZRAM) && defined(CONFIG_MTK_GMO_RAM_OPTIMIZE)
 	vm_swappiness = 150;
-#else
-	vm_swappiness = 100;
 #endif
-#endif
-[wuzhe end] */
-	task_free_register(&task_nb);
 	register_shrinker(&lowmem_shrinker);
 	return 0;
 }

@@ -22,7 +22,9 @@
 #include <linux/types.h>
 
 #include "disp_drv_platform.h"
+#ifdef CONFIG_MTK_M4U
 #include "m4u_priv.h"
+#endif
 #include "mtkfb.h"
 #include "debug.h"
 #include "lcm_drv.h"
@@ -115,7 +117,8 @@ static struct PM_TOOL_S pm_params = {
 	.pLcm_params = NULL,
 	.pLcm_drv = NULL,
 };
-struct mutex fb_config_lock;
+static struct mutex fb_config_lock;
+
 static void *pm_get_handle(void)
 {
 	return (void *)&pm_params;
@@ -181,26 +184,7 @@ void Panel_Master_DDIC_config(void)
 
 	}
 	mutex_unlock(&fb_config_lock);
-
 }
-
-/*static void print_from_head_to_tail(void)*/
-/*{*/
-/*	int i;*/
-/*	struct list_head *p;*/
-/*	CONFIG_RECORD_LIST *print;*/
-/*	pr_debug("DDIC=====>:print_from_head_to_tail  START\n");*/
-
-/*	list_for_each_prev(p, &head_list.list) {*/
-/*		print = list_entry(p, CONFIG_RECORD_LIST, list);*/
-/*		pr_debug("type:%d num %d value:\r\n", print->record.type, print->record.ins_num);*/
-/*		for (i = 0; i < print->record.ins_num; i++)*/
-/*			pr_debug("0x%x\t", print->record.ins_array[i]);*/
-/*		pr_debug("\r\n");*/
-/*	}*/
-/*	pr_debug("DDIC=====>:print_from_head_to_tail  END\n");*/
-
-/*}*/
 
 static void free_list_memory(void)
 {
@@ -223,10 +207,14 @@ static void free_list_memory(void)
 
 static int fbconfig_open(struct inode *inode, struct file *file)
 {
-	struct PM_TOOL_S *pm_params;
+	struct PM_TOOL_S *pm_params = NULL;
 
 	file->private_data = inode->i_private;
 	pm_params = (struct PM_TOOL_S *) pm_get_handle();
+	if (pm_params == NULL) {
+		pr_debug("fbconfig_open=>pm_params is empty!!\n");
+		return -EFAULT;
+	}
 	PanelMaster_set_PM_enable(1);
 	pm_params->pLcm_drv = DISP_GetLcmDrv();
 	pm_params->pLcm_params = DISP_GetLcmPara();
@@ -319,6 +307,9 @@ static long fbconfig_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	case DRIVER_IC_CONFIG:
 	{
 		struct CONFIG_RECORD_LIST *record_tmp_list = kmalloc(sizeof(*record_tmp_list), GFP_KERNEL);
+
+		if (!record_tmp_list)
+			return -ENOMEM;
 
 		if (copy_from_user(&record_tmp_list->record, (void __user *)arg, sizeof(struct CONFIG_RECORD))) {
 			pr_debug("list_add: copy_from_user failed! line:%d\n", __LINE__);
@@ -465,16 +456,19 @@ static long fbconfig_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 		pr_debug("[FB_LAYER_GET_EN] not support any more\n");
 		return  0;
 	}
+
 	case FB_LAYER_GET_INFO:
 	{
 		pr_debug("[FB_LAYER_GET_INFO] not support any more\n");
 		return  0;
 	}
+
 	case FB_LAYER_DUMP:
 	{
 		pr_debug("[FB_LAYER_DUMP] not support any more\n");
 		return  0;
 	}
+
 	case LCM_GET_ESD:
 	{
 		struct ESD_PARA esd_para;
@@ -485,6 +479,14 @@ static long fbconfig_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 				 __LINE__);
 			return -EFAULT;
 		}
+
+		if (esd_para.para_num < 0 || esd_para.para_num > 0x30) {
+
+			pr_debug("[LCM_GET_ESD]: wrong esd_para.para_num= %d! line:%d\n",
+						 esd_para.para_num, __LINE__);
+			return -EFAULT;
+		}
+
 		buffer = kzalloc(esd_para.para_num + 6, GFP_KERNEL);
 		if (!buffer)
 			return -ENOMEM;
@@ -1298,8 +1300,10 @@ static const struct file_operations fbconfig_fops = {
 
 void PanelMaster_Init(void)
 {
+#if defined(CONFIG_MTK_ENG_BUILD)
 	ConfigPara_dbgfs = debugfs_create_file("fbconfig",
 					       S_IFREG | S_IRUGO, NULL, (void *)0, &fbconfig_fops);
+#endif
 
 	INIT_LIST_HEAD(&head_list.list);
 	mutex_init(&fb_config_lock);

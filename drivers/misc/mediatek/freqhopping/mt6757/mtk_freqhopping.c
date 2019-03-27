@@ -103,7 +103,7 @@ static unsigned int	g_initialize;
 #define TVDPLL_DEF_FREQ		1782000
 
 /* keep track the status of each PLL */
-static fh_pll_t g_fh_pll[FH_PLL_NUM] = {
+static struct fh_pll_t g_fh_pll[FH_PLL_NUM] = {
 	{FH_FH_DISABLE,		FH_PLL_ENABLE,		0,	ARMPLL1_DEF_FREQ,		0},
 	{FH_FH_DISABLE,		FH_PLL_ENABLE,		0,	ARMPLL2_DEF_FREQ,		0},
 	{FH_FH_DISABLE,		FH_PLL_ENABLE,		0,	ARMPLL3_DEF_FREQ,		0},
@@ -417,6 +417,7 @@ static void __enable_ssc(unsigned int pll_id, const struct freqhopping_ssc *sett
 		__func__, setting->lowbnd, setting->upbnd,
 		setting->df, setting->dt, setting->dds);
 
+	/* to make sure the operation sequence on register access*/
 	mb();
 
 	g_fh_pll[pll_id].fh_status = FH_FH_ENABLE_SSC;
@@ -456,6 +457,8 @@ static void __enable_ssc(unsigned int pll_id, const struct freqhopping_ssc *sett
 
 	/* Switch to FHCTL */
 	fh_switch2fhctl(pll_id, 1);
+
+	/* to make sure the operation sequence on register access*/
 	mb();
 
 	/* Enable SSC */
@@ -497,10 +500,14 @@ static void __disable_ssc(unsigned int pll_id, const struct freqhopping_ssc *ssc
 		break;
 	};
 
+	/* to make sure the operation sequence on register access*/
 	mb();
+
 	fh_switch2fhctl(pll_id, 0);
 	g_fh_pll[pll_id].fh_status = FH_FH_DISABLE;
 	local_irq_restore(flags);
+
+	/* to make sure the operation sequence on register access*/
 	mb();
 }
 
@@ -527,7 +534,7 @@ static int __freqhopping_ctrl(struct freqhopping_ioctl *fh_ctl, bool enable)
 	const struct freqhopping_ssc *pSSC_setting = NULL;
 	unsigned int    ssc_setting_id = 0;
 	int retVal = 1;
-	fh_pll_t *pfh_pll = NULL;
+	struct fh_pll_t *pfh_pll = NULL;
 
 	FH_MSG("%s for pll %d", __func__, fh_ctl->pll_id);
 
@@ -654,6 +661,8 @@ static int mt_fh_hal_dvfs(enum FH_PLL_ID pll_id, unsigned int dds_value)
 
 	/* 3. switch to hopping control */
 	fh_switch2fhctl(pll_id, 1);
+
+	/* to make sure the operation sequence on register access*/
 	mb();
 
 	/* FH_MSG("3. switch to hopping control"); */
@@ -704,6 +713,8 @@ static int mt_fh_hal_dvfs(enum FH_PLL_ID pll_id, unsigned int dds_value)
 
 	/* 6. switch to register control */
 	fh_switch2fhctl(pll_id, 0);
+
+	/* to make sure the operation sequence on register access*/
 	mb();
 
 	/* FH_MSG("6. switch to register control"); */
@@ -1123,6 +1134,7 @@ static void mt_fh_hal_popod_save(void)
 		/* switch to register control */
 		fh_switch2fhctl(pll_id, 0);
 
+		/* to make sure the operation sequence on register access*/
 		mb();
 	}
 }
@@ -1566,7 +1578,7 @@ static int mt_fh_hal_is_support_DFS_mode(void)
 	return true;
 }
 
-static int __fh_debug_proc_read(struct seq_file *m, void *v, fh_pll_t *pll)
+static int __fh_debug_proc_read(struct seq_file *m, void *v, struct fh_pll_t *pll)
 {
 	FH_MSG_DEBUG("EN: %s", __func__);
 
@@ -1648,7 +1660,7 @@ static void __ioctl(unsigned int ctlid, void *arg)
 	switch (ctlid) {
 	case FH_IO_PROC_READ:
 		{
-			FH_IO_PROC_READ_T *tmp = (FH_IO_PROC_READ_T *)(arg);
+			struct FH_IO_PROC_READ_T *tmp = (struct FH_IO_PROC_READ_T *)(arg);
 
 			__fh_debug_proc_read(tmp->m, tmp->v, tmp->pll);
 		}

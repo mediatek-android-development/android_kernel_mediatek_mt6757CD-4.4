@@ -23,7 +23,7 @@
 #include "cmdq_reg.h"
 #include "cmdq_prof.h"
 
-#ifdef CMDQ_SECURE_PATH_SUPPORT
+#if defined(CMDQ_SECURE_PATH_SUPPORT) || defined(CONFIG_MTK_CMDQ_TAB)
 #include "cmdq_sec_iwc_common.h"
 #endif
 
@@ -191,7 +191,7 @@ int32_t cmdq_append_addr_metadata(struct cmdqRecStruct *handle,
 
 		CMDQ_ERR("Metadata idx = %d reach the max allowed number = %d.\n",
 			 handle->secData.addrMetadataCount, maxMetaDataCount);
-		CMDQ_MSG("ADDR: type:%d, baseHandle:%x, offset:%d, size:%d, port:%d\n",
+		CMDQ_MSG("ADDR: type:%d, baseHandle:0x%llx, offset:%d, size:%d, port:%d\n",
 			 pMetadata->type, pMetadata->baseHandle, pMetadata->offset, pMetadata->size,
 			 pMetadata->port);
 		status = -EFAULT;
@@ -514,6 +514,21 @@ int32_t cmdq_task_is_secure(struct cmdqRecStruct *handle)
 	return handle->secData.is_secure;
 }
 
+#ifdef CONFIG_MTK_CMDQ_TAB
+int32_t cmdq_task_set_secure_mode(struct cmdqRecStruct *handle, enum CMDQ_DISP_MODE mode)
+{
+#ifdef CMDQ_SECURE_PATH_SUPPORT
+	if (handle == NULL)
+		return -EFAULT;
+
+	handle->secData.secMode = mode;
+	return 0;
+#else
+	return -EFAULT;
+#endif
+}
+#endif
+
 int32_t cmdq_task_secure_enable_dapc(struct cmdqRecStruct *handle, const uint64_t engineFlag)
 {
 #ifdef CMDQ_SECURE_PATH_SUPPORT
@@ -566,7 +581,7 @@ int32_t cmdq_op_write_reg(struct cmdqRecStruct *handle, uint32_t addr,
 }
 
 int32_t cmdq_op_write_reg_secure(struct cmdqRecStruct *handle, uint32_t addr,
-			   enum CMDQ_SEC_ADDR_METADATA_TYPE type, uint32_t baseHandle,
+			   enum CMDQ_SEC_ADDR_METADATA_TYPE type, uint64_t baseHandle,
 			   uint32_t offset, uint32_t size, uint32_t port)
 {
 #ifdef CMDQ_SECURE_PATH_SUPPORT
@@ -600,6 +615,41 @@ int32_t cmdq_op_write_reg_secure(struct cmdqRecStruct *handle, uint32_t addr,
 #endif
 }
 
+#ifdef CONFIG_MTK_CMDQ_TAB
+int32_t cmdq_op_write_reg_secure_mask(struct cmdqRecStruct *handle, uint32_t addr,
+				enum CMDQ_SEC_ADDR_METADATA_TYPE type, uint32_t value, uint32_t mask)
+{
+#ifdef CMDQ_SECURE_PATH_SUPPORT
+	int32_t status;
+	int32_t writeInstrIndex;
+	struct cmdqSecAddrMetadataStruct metadata;
+	/* const uint32_t mask = 0xFFFFFFFF; */
+
+	/* append command */
+	status = cmdqRecWrite(handle, addr, value, mask);
+	if (status != 0)
+		return status;
+
+
+	/* append to metadata list */
+	writeInstrIndex = (handle->blockSize) / CMDQ_INST_SIZE - 1;	/* start from 0 */
+
+	memset(&metadata, 0, sizeof(struct cmdqSecAddrMetadataStruct));
+	metadata.instrIndex = writeInstrIndex;
+	metadata.type = type;
+	metadata.baseHandle = value;
+	metadata.offset = mask;
+
+	status = cmdq_append_addr_metadata(handle, &metadata);
+
+	return 0;
+#else
+	CMDQ_ERR("%s failed since not support secure path\n", __func__);
+	return -EFAULT;
+#endif
+}
+#endif
+
 int32_t cmdq_op_poll(struct cmdqRecStruct *handle, uint32_t addr, uint32_t value, uint32_t mask)
 {
 	int32_t status;
@@ -615,14 +665,28 @@ int32_t cmdq_op_poll(struct cmdqRecStruct *handle, uint32_t addr, uint32_t value
 	return 0;
 }
 
+static s32 cmdq_get_event_op_id(enum CMDQ_EVENT_ENUM event)
+{
+	s32 event_id = 0;
+
+	if (event < 0 || CMDQ_SYNC_TOKEN_MAX <= event) {
+		CMDQ_ERR("Invalid input event:%d\n", (s32)event);
+		return -EINVAL;
+	}
+
+	event_id = cmdq_core_get_event_value(event);
+	if (event_id < 0) {
+		CMDQ_ERR("Invalid event:%d ID:%d\n", (s32)event, (s32)event_id);
+		return -EINVAL;
+	}
+
+	return event_id;
+}
+
 int32_t cmdq_op_wait(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM event)
 {
-	int32_t arg_a;
+	int32_t arg_a = cmdq_get_event_op_id(event);
 
-	if (event < 0 || CMDQ_SYNC_TOKEN_MAX <= event)
-		return -EINVAL;
-
-	arg_a = cmdq_core_get_event_value(event);
 	if (arg_a < 0)
 		return -EINVAL;
 
@@ -631,12 +695,8 @@ int32_t cmdq_op_wait(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM event)
 
 int32_t cmdq_op_wait_no_clear(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM event)
 {
-	int32_t arg_a;
+	int32_t arg_a = cmdq_get_event_op_id(event);
 
-	if (event < 0 || CMDQ_SYNC_TOKEN_MAX <= event)
-		return -EINVAL;
-
-	arg_a = cmdq_core_get_event_value(event);
 	if (arg_a < 0)
 		return -EINVAL;
 
@@ -645,12 +705,8 @@ int32_t cmdq_op_wait_no_clear(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM
 
 int32_t cmdq_op_clear_event(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM event)
 {
-	int32_t arg_a;
+	int32_t arg_a = cmdq_get_event_op_id(event);
 
-	if (event < 0 || CMDQ_SYNC_TOKEN_MAX <= event)
-		return -EINVAL;
-
-	arg_a = cmdq_core_get_event_value(event);
 	if (arg_a < 0)
 		return -EINVAL;
 
@@ -660,12 +716,8 @@ int32_t cmdq_op_clear_event(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM e
 
 int32_t cmdq_op_set_event(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM event)
 {
-	int32_t arg_a;
+	int32_t arg_a = cmdq_get_event_op_id(event);
 
-	if (event < 0 || CMDQ_SYNC_TOKEN_MAX <= event)
-		return -EINVAL;
-
-	arg_a = cmdq_core_get_event_value(event);
 	if (arg_a < 0)
 		return -EINVAL;
 
@@ -988,6 +1040,11 @@ int32_t cmdq_setup_sec_data_of_command_desc_by_rec_handle(struct cmdqCommandStru
 	pDesc->secData.addrMetadataCount = handle->secData.addrMetadataCount;
 	pDesc->secData.addrMetadatas = handle->secData.addrMetadatas;
 	pDesc->secData.addrMetadataMaxCount = handle->secData.addrMetadataMaxCount;
+#ifdef CMDQ_SECURE_PATH_SUPPORT
+#ifdef CONFIG_MTK_CMDQ_TAB
+	pDesc->secData.secMode = handle->secData.secMode;
+#endif
+#endif
 
 	/* init reserved field */
 	pDesc->secData.resetExecCnt = false;
@@ -1533,6 +1590,14 @@ int32_t cmdqRecIsSecure(struct cmdqRecStruct *handle)
 	return cmdq_task_is_secure(handle);
 }
 
+/* tablet use */
+#ifdef CONFIG_MTK_CMDQ_TAB
+int32_t cmdqRecSetSecureMode(struct cmdqRecStruct *handle, enum CMDQ_DISP_MODE mode)
+{
+	return cmdq_task_set_secure_mode(handle, mode);
+}
+#endif
+
 int32_t cmdqRecSecureEnableDAPC(struct cmdqRecStruct *handle, const uint64_t engineFlag)
 {
 	return cmdq_task_secure_enable_dapc(handle, engineFlag);
@@ -1581,10 +1646,18 @@ int32_t cmdqRecWrite(struct cmdqRecStruct *handle, uint32_t addr, uint32_t value
 
 int32_t cmdqRecWriteSecure(struct cmdqRecStruct *handle, uint32_t addr,
 			   enum CMDQ_SEC_ADDR_METADATA_TYPE type,
-			   uint32_t baseHandle, uint32_t offset, uint32_t size, uint32_t port)
+			   uint64_t baseHandle, uint32_t offset, uint32_t size, uint32_t port)
 {
 	return cmdq_op_write_reg_secure(handle, addr, type, baseHandle, offset, size, port);
 }
+
+#ifdef CONFIG_MTK_CMDQ_TAB
+int32_t cmdqRecWriteSecureMask(struct cmdqRecStruct *handle, uint32_t addr,
+				enum CMDQ_SEC_ADDR_METADATA_TYPE type, uint32_t value, uint32_t mask)
+{
+	return cmdq_op_write_reg_secure_mask(handle, addr, type, value, mask);
+}
+#endif
 
 int32_t cmdqRecPoll(struct cmdqRecStruct *handle, uint32_t addr, uint32_t value, uint32_t mask)
 {

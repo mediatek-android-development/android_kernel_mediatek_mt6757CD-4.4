@@ -381,7 +381,6 @@ static int xhci_stop_device(struct xhci_hcd *xhci, int slot_id, int suspend)
 
 	ret = 0;
 	virt_dev = xhci->devs[slot_id];
-
 	if (!virt_dev)
 		return -ENODEV;
 
@@ -773,6 +772,9 @@ static u32 xhci_get_port_status(struct usb_hcd *hcd,
 			clear_bit(wIndex, &bus_state->resuming_ports);
 
 			set_bit(wIndex, &bus_state->rexit_ports);
+
+			xhci_test_and_clear_bit(xhci, port_array, wIndex,
+						PORT_PLC);
 			xhci_set_link_state(xhci, port_array, wIndex,
 					XDEV_U0);
 
@@ -981,7 +983,7 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 			}
 			/* In spec software should not attempt to suspend
 			 * a port unless the port reports that it is in the
-			 * enabled (PED = ????PLS < ???? state.
+			 * enabled (PED = ‘1’,PLS < ‘3’) state.
 			 */
 			temp = readl(port_array[wIndex]);
 			if ((temp & PORT_PE) == 0 || (temp & PORT_RESET)
@@ -1162,7 +1164,7 @@ int xhci_hub_control(struct usb_hcd *hcd, u16 typeReq, u16 wValue,
 				xhci_set_link_state(xhci, port_array, wIndex,
 							XDEV_RESUME);
 				spin_unlock_irqrestore(&xhci->lock, flags);
-				msleep(20);
+				msleep(USB_RESUME_TIMEOUT);
 				spin_lock_irqsave(&xhci->lock, flags);
 				xhci_set_link_state(xhci, port_array, wIndex,
 							XDEV_U0);
@@ -1348,24 +1350,45 @@ int xhci_bus_suspend(struct usb_hcd *hcd)
 	hcd->state = HC_STATE_SUSPENDED;
 	bus_state->next_statechange = jiffies + msecs_to_jiffies(10);
 	spin_unlock_irqrestore(&xhci->lock, flags);
-#ifdef CONFIG_USB_XHCI_MTK
+
 #ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	if (hcd->self.root_hub->do_remote_wakeup == 1) {
 		xhci_info(xhci, "xhci_bus_suspend_unlock = %d %d\n",
-			 hcd->self.root_hub->do_remote_wakeup, max_ports);
+			hcd->self.root_hub->do_remote_wakeup, max_ports);
 		mtk_xhci_wakelock_unlock();
 	}
-#else
-	if (hcd->self.root_hub->do_remote_wakeup == 1) {
-		if ((hcd->state == HC_STATE_SUSPENDED) && (hcd->shared_hcd->state == HC_STATE_SUSPENDED)) {
-			xhci_info(xhci, "xhci_bus_suspend_deepidle = %d %d\n",
-				 hcd->self.root_hub->do_remote_wakeup, max_ports);
-			usb_wakeup_deepidle_enable(hcd);
-		}
-	}
 #endif
-#endif
+
 	return 0;
+}
+
+/*
+ * Workaround for missing Cold Attach Status (CAS) if device re-plugged in S3.
+ * warm reset a USB3 device stuck in polling or compliance mode after resume.
+ * See Intel 100/c230 series PCH specification update Doc #332692-006 Errata #8
+ */
+static bool xhci_port_missing_cas_quirk(int port_index,
+					     __le32 __iomem **port_array)
+{
+	u32 portsc;
+
+	portsc = readl(port_array[port_index]);
+
+	/* if any of these are set we are not stuck */
+	if (portsc & (PORT_CONNECT | PORT_CAS))
+		return false;
+
+	if (((portsc & PORT_PLS_MASK) != XDEV_POLLING) &&
+	    ((portsc & PORT_PLS_MASK) != XDEV_COMP_MODE))
+		return false;
+
+	/* clear wakeup/change bits, and do a warm port reset */
+	portsc &= ~(PORT_RWC_BITS | PORT_CEC | PORT_WAKE_BITS);
+	portsc |= PORT_WR;
+	writel(portsc, port_array[port_index]);
+	/* flush write */
+	readl(port_array[port_index]);
+	return true;
 }
 
 int xhci_bus_resume(struct usb_hcd *hcd)
@@ -1383,16 +1406,6 @@ int xhci_bus_resume(struct usb_hcd *hcd)
 
 	max_ports = xhci_get_ports(hcd, &port_array);
 	bus_state = &xhci->bus_state[hcd_index(hcd)];
-
-#ifdef CONFIG_USB_XHCI_MTK
-#ifndef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
-	if (hcd->self.root_hub->do_remote_wakeup == 1) {
-		xhci_info(xhci, "xhci_bus_resume_deepidle = %d %d\n",
-			 hcd->self.root_hub->do_remote_wakeup, max_ports);
-		usb_wakeup_deepidle_disable(hcd);
-	}
-#endif
-#endif
 
 	if (time_before(jiffies, bus_state->next_statechange))
 		msleep(5);
@@ -1415,6 +1428,14 @@ int xhci_bus_resume(struct usb_hcd *hcd)
 		u32 temp;
 
 		temp = readl(port_array[port_index]);
+
+		/* warm reset CAS limited ports stuck in polling/compliance */
+		if ((xhci->quirks & XHCI_MISSING_CAS) &&
+		    (hcd->speed >= HCD_USB3) &&
+		    xhci_port_missing_cas_quirk(port_index, port_array)) {
+			xhci_dbg(xhci, "reset stuck port %d\n", port_index);
+			continue;
+		}
 		if (DEV_SUPERSPEED_ANY(temp))
 			temp &= ~(PORT_RWC_BITS | PORT_CEC | PORT_WAKE_BITS);
 		else
@@ -1430,17 +1451,18 @@ int xhci_bus_resume(struct usb_hcd *hcd)
 		} else
 			writel(temp, port_array[port_index]);
 	}
+
 #ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	if (hcd->self.root_hub->do_remote_wakeup == 1) {
 		xhci_info(xhci, "xhci_bus_resume_lock = %d %d\n",
-			 hcd->self.root_hub->do_remote_wakeup, max_ports);
+			hcd->self.root_hub->do_remote_wakeup, max_ports);
 		mtk_xhci_wakelock_lock();
 	}
 #endif
 
 	if (need_usb2_u3_exit) {
 		spin_unlock_irqrestore(&xhci->lock, flags);
-		msleep(20);
+		msleep(USB_RESUME_TIMEOUT);
 		spin_lock_irqsave(&xhci->lock, flags);
 	}
 

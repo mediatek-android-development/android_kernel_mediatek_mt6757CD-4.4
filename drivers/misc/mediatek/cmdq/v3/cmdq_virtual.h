@@ -22,17 +22,11 @@ typedef uint32_t(*CmdqGetSubsysLSBArgA) (void);
 /* is a secure thread */
 typedef bool(*CmdqIsSecureThread) (const int32_t thread);
 
-/* is valid notify thread for secure path */
-typedef bool(*CmdqIsValidNotifyThread) (const int32_t thread);
-
 /* is display scenario */
 typedef bool(*CmdqIsDispScenario) (const enum CMDQ_SCENARIO_ENUM scenario);
 
 /* should enable prefetch */
 typedef bool(*CmdqShouldEnablePrefetch) (const enum CMDQ_SCENARIO_ENUM scenario);
-
-/* should profile */
-typedef bool(*CmdqShouldProfile) (const enum CMDQ_SCENARIO_ENUM scenario);
 
 /* display thread index from scenario */
 typedef int (*CmdqDispThread) (enum CMDQ_SCENARIO_ENUM scenario);
@@ -55,7 +49,8 @@ typedef void(*CmdqGetRegID) (uint64_t hwflag,
 			     enum CMDQ_DATA_REGISTER_ENUM *destRegId, enum CMDQ_EVENT_ENUM *regAccessToken);
 
 /*  module from event index */
-typedef const char *(*CmdqModuleFromEvent) (const int32_t event);
+typedef const char *(*CmdqModuleFromEvent) (const int32_t event,
+	struct CmdqCBkStruct *groupCallback, uint64_t engineFlag);
 
 /* parse module from register addr */
 typedef const char *(*CmdqParseModule) (uint32_t reg_addr);
@@ -77,12 +72,6 @@ typedef void (*CmdqEnableGCEClockLocked) (bool enable);
 
 /* parse error module by hwflag */
 typedef const char *(*CmdqParseErrorModule) (const struct TaskStruct *pTask);
-
-/* dump mmsys config */
-typedef void (*CmdqDumpMMSYSConfig) (void);
-
-/* dump clock gating */
-typedef void (*CmdqDumpClockGating) (void);
 
 /* dump SMI */
 typedef int (*CmdqDumpSMI) (const int showSmiDump);
@@ -111,10 +100,8 @@ typedef void (*CmdqInitModulePAStat) (void);
 struct cmdqCoreFuncStruct {
 	CmdqGetSubsysLSBArgA getSubsysLSBArgA;
 	CmdqIsSecureThread isSecureThread;
-	CmdqIsValidNotifyThread isValidNotifyThread;
 	CmdqIsDispScenario isDispScenario;
 	CmdqShouldEnablePrefetch shouldEnablePrefetch;
-	CmdqShouldProfile shouldProfile;
 	CmdqDispThread dispThread;
 	CmdqGetThreadID getThreadID;
 	CmdqPriority priority;
@@ -129,8 +116,6 @@ struct cmdqCoreFuncStruct {
 	CmdqEnableCommonClockLocked enableCommonClockLocked;
 	CmdqEnableGCEClockLocked enableGCEClockLocked;
 	CmdqParseErrorModule parseErrorModule;
-	CmdqDumpMMSYSConfig dumpMMSYSConfig;
-	CmdqDumpClockGating dumpClockGating;
 	CmdqDumpSMI dumpSMI;
 	CmdqDumpGPR dumpGPR;
 	CmdqFlagFromScenario flagFromScenario;

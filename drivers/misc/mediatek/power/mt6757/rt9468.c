@@ -17,6 +17,7 @@
 #include <linux/i2c.h>
 #include <linux/of_device.h>
 #include <linux/of_irq.h>
+#include <linux/of_gpio.h>
 #include <linux/slab.h>
 #include <linux/errno.h>
 #include <linux/delay.h>
@@ -38,7 +39,7 @@
 #define I2C_ACCESS_MAX_RETRY	5
 #define PRECISION_ENHANCE	5
 
-#define RT9468_DRV_VERSION "1.0.5_MTK"
+#define RT9468_DRV_VERSION "1.0.6_MTK"
 
 /* =============== */
 /* RT9468 Variable */
@@ -398,8 +399,12 @@ struct rt9468_info {
 	struct i2c_client *i2c;
 	struct mutex i2c_access_lock;
 	struct mutex adc_access_lock;
+	struct mutex aicr_access_lock;
+	struct mutex ichg_access_lock;
+	struct device *dev;
 	int i2c_log_level;
 	int irq;
+	u32 intr_gpio;
 	struct rt9468_desc *desc;
 	bool err_state;
 	const struct ts_point *ts_refp[3];
@@ -457,7 +462,8 @@ static int rt9468_register_rt_regmap(struct rt9468_info *info)
 	prop->aliases = info->desc->regmap_name;
 	prop->register_num = ARRAY_SIZE(rt9468_regmap_map);
 	prop->rm = rt9468_regmap_map;
-	prop->rt_regmap_mode = RT_SINGLE_BYTE | RT_CACHE_DISABLE | RT_IO_PASS_THROUGH;
+	prop->rt_regmap_mode = RT_SINGLE_BYTE | RT_CACHE_DISABLE |
+		RT_IO_PASS_THROUGH;
 	prop->io_log_en = 0;
 
 	info->regmap_prop = prop;
@@ -845,22 +851,25 @@ err_read_irq:
 static int rt9468_irq_register(struct rt9468_info *info)
 {
 	int ret = 0;
-	struct device_node *np;
 
-	/* Parse irq number from dts */
-	np = of_find_node_by_name(NULL, "chr_stat");
-	if (np)
-		info->irq = irq_of_parse_and_map(np, 0);
-	else {
-		battery_log(BAT_LOG_CRTI, "%s: cannot get node\n", __func__);
-		ret = -ENODEV;
-		goto err_nodev;
+	ret = gpio_request_one(info->intr_gpio, GPIOF_IN, "rt9468_irq_gpio");
+	if (ret < 0) {
+		battery_log(BAT_LOG_CRTI, "%s: gpio request fail\n", __func__);
+		return ret;
 	}
+
+	ret = gpio_to_irq(info->intr_gpio);
+	if (ret < 0) {
+		battery_log(BAT_LOG_CRTI, "%s: irq mapping fail\n", __func__);
+		goto err_to_irq;
+	}
+	info->irq = ret;
 	battery_log(BAT_LOG_CRTI, "%s: irq = %d\n", __func__, info->irq);
 
 	/* Request threaded IRQ */
-	ret = request_threaded_irq(info->irq, NULL, rt9468_irq_handler,
-		IRQF_TRIGGER_FALLING | IRQF_ONESHOT, "rt9468_irq", info);
+	ret = devm_request_threaded_irq(info->dev, info->irq, NULL,
+		rt9468_irq_handler, IRQF_TRIGGER_FALLING | IRQF_ONESHOT,
+		"rt9468_irq", info);
 	if (ret < 0) {
 		battery_log(BAT_LOG_CRTI, "%s: request thread irq failed\n",
 			__func__);
@@ -869,8 +878,9 @@ static int rt9468_irq_register(struct rt9468_info *info)
 
 	return 0;
 
-err_nodev:
+err_to_irq:
 err_request_irq:
+	gpio_free(info->intr_gpio);
 	return ret;
 }
 
@@ -928,10 +938,6 @@ static bool rt9468_is_hw_exist(struct rt9468_info *info)
 		battery_log(BAT_LOG_CRTI,
 			"%s: vendor id is incorrect (0x%02X)\n",
 			__func__, vendor_id);
-		return false;
-	}
-	if (chip_rev == RT9468_CHIP_REV_E1) {
-		battery_log(BAT_LOG_CRTI, "%s: shuttle version\n", __func__);
 		return false;
 	}
 	battery_log(BAT_LOG_CRTI, "%s: chip rev(E%d,0x%02X)\n",
@@ -1008,7 +1014,7 @@ static int rt9468_enable_hidden_mode(struct rt9468_info *info,
 	if (!enable) {
 		ret = rt9468_i2c_write_byte(info, 0x70, 0x00);
 		if (ret < 0)
-			goto _err;
+			goto err;
 		return ret;
 	}
 
@@ -1020,10 +1026,10 @@ static int rt9468_enable_hidden_mode(struct rt9468_info *info,
 		rt9468_val_en_hidden_mode
 	);
 	if (ret < 0)
-		goto _err;
+		goto err;
 	return ret;
 
-_err:
+err:
 	battery_log(BAT_LOG_CRTI, "%s: enable hidden mode = %d failed\n",
 		__func__, enable);
 	return ret;
@@ -1061,7 +1067,7 @@ static int rt9468_sw_workaround(struct rt9468_info *info)
 	/* Enter hidden mode */
 	ret = rt9468_enable_hidden_mode(info, true);
 	if (ret < 0)
-		goto _out;
+		goto out;
 
 	if (info->mchr_info.device_id <= RT9468_CHIP_REV_E2) {
 		/* Set precharge current to 850mA, only do this in normal boot */
@@ -1069,19 +1075,20 @@ static int rt9468_sw_workaround(struct rt9468_info *info)
 		if (boot_mode == NORMAL_BOOT) {
 			ret = rt9468_set_iprec(info, 850);
 			if (ret < 0)
-				goto _out;
+				goto out;
 
 			/* Increase Isys drop threshold to 2.5A */
 			ret = rt9468_i2c_write_byte(info, 0x26, 0x1C);
 			if (ret < 0)
-				goto _out;
+				goto out;
 		}
 	}
 
 	/* Disable TS auto sensing */
 	ret = rt9468_clr_bit(info, 0x2E, 0x01);
 
-_out:
+	mdelay(200);
+out:
 	/* Exit hidden mode */
 	ret = rt9468_enable_hidden_mode(info, false);
 	if (ret < 0)
@@ -1098,6 +1105,7 @@ static int _rt9468_get_adc(struct rt9468_info *info, enum rt9468_adc_sel adc_sel
 	int ret = 0, i = 0;
 	const int max_wait_retry = 5;
 	u8 adc_data[2] = {0, 0};
+	u32 aicr = 0, ichg = 0;
 
 	info->i2c_log_level = BAT_LOG_CRTI;
 
@@ -1112,7 +1120,26 @@ static int _rt9468_get_adc(struct rt9468_info *info, enum rt9468_adc_sel adc_sel
 	if (ret < 0) {
 		battery_log(BAT_LOG_CRTI, "%s: select ADC to %d failed\n",
 			__func__, adc_sel);
-		goto _out;
+		goto out;
+	}
+
+	/* Workaround for IBUS & IBAT */
+	if (adc_sel == RT9468_ADC_IBUS) {
+		mutex_lock(&info->aicr_access_lock);
+		ret = rt_charger_get_aicr(&info->mchr_info, &aicr);
+		if (ret < 0) {
+			battery_log(BAT_LOG_CRTI, "%s: get_aicr failed\n",
+				__func__);
+			goto out;
+		}
+	} else if (adc_sel == RT9468_ADC_IBAT) {
+		mutex_lock(&info->ichg_access_lock);
+		ret = rt_charger_get_ichg(&info->mchr_info, &ichg);
+		if (ret < 0) {
+			battery_log(BAT_LOG_CRTI, "%s: get ichg failed\n",
+				__func__);
+			goto out;
+		}
 	}
 
 	/* Start ADC conversation */
@@ -1121,7 +1148,7 @@ static int _rt9468_get_adc(struct rt9468_info *info, enum rt9468_adc_sel adc_sel
 		battery_log(BAT_LOG_CRTI,
 			"%s: start ADC conversation failed, sel = %d\n",
 			__func__, adc_sel);
-		goto _out;
+		goto out;
 	}
 
 	battery_log(BAT_LOG_CRTI, "%s: adc set start bit, sel = %d\n",
@@ -1144,7 +1171,7 @@ static int _rt9468_get_adc(struct rt9468_info *info, enum rt9468_adc_sel adc_sel
 			"%s: Wait ADC conversation failed, sel = %d\n",
 			__func__, adc_sel);
 		ret = -EINVAL;
-		goto _out;
+		goto out;
 	}
 
 	mdelay(1);
@@ -1154,7 +1181,7 @@ static int _rt9468_get_adc(struct rt9468_info *info, enum rt9468_adc_sel adc_sel
 	if (ret < 0) {
 		battery_log(BAT_LOG_CRTI,
 			"%s: read ADC data failed\n", __func__);
-		goto _out;
+		goto out;
 	}
 
 	battery_log(BAT_LOG_FULL,
@@ -1166,7 +1193,20 @@ static int _rt9468_get_adc(struct rt9468_info *info, enum rt9468_adc_sel adc_sel
 		+ rt9468_adc_offset[adc_sel];
 
 	ret = 0;
-_out:
+out:
+	/* Coefficient of IBUS & IBAT */
+	if (adc_sel == RT9468_ADC_IBUS) {
+		if (aicr < 40000) /* 400mA */
+			*adc_val = *adc_val * 67 / 100;
+		mutex_unlock(&info->aicr_access_lock);
+	} else if (adc_sel == RT9468_ADC_IBAT) {
+		if (ichg >= 10000 && ichg <= 45000) /* 100~450mA */
+			*adc_val = *adc_val * 57 / 100;
+		else if (ichg >= 50000 && ichg <= 85000) /* 500~850mA */
+			*adc_val = *adc_val * 63 / 100;
+		mutex_unlock(&info->ichg_access_lock);
+	}
+
 	info->i2c_log_level = BAT_LOG_FULL;
 	return ret;
 }
@@ -1517,6 +1557,7 @@ static int rt9468_get_battery_voreg(struct rt9468_info *info, u32 *voreg)
 
 static int rt9468_parse_dt(struct rt9468_info *info, struct device *dev)
 {
+	int ret = 0;
 	struct rt9468_desc *desc = NULL;
 	struct device_node *np = dev->of_node;
 
@@ -1540,6 +1581,19 @@ static int rt9468_parse_dt(struct rt9468_info *info, struct device *dev)
 		battery_log(BAT_LOG_CRTI, "%s: no charger name\n", __func__);
 		info->mchr_info.name = "primary_charger";
 	}
+
+#if (!defined(CONFIG_MTK_GPIO) || defined(CONFIG_MTK_GPIOLIB_STAND))
+	ret = of_get_named_gpio(np, "rt,intr_gpio", 0);
+	if (ret < 0)
+		return ret;
+	info->intr_gpio = ret;
+#else
+	ret = of_property_read_u32(np, "rt,intr_gpio_num", &info->intr_gpio);
+	if (ret < 0)
+		return ret;
+#endif
+	battery_log(BAT_LOG_CRTI, "%s: intr gpio = %d\n", __func__,
+		info->intr_gpio);
 
 	if (of_property_read_u32(np, "regmap_represent_slave_addr",
 		&desc->regmap_represent_slave_addr) < 0)
@@ -1900,6 +1954,9 @@ static int rt_charger_set_ichg(struct mtk_charger_info *mchr_info, void *data)
 	u8 reg_ichg = 0;
 	struct rt9468_info *info = (struct rt9468_info *)mchr_info;
 
+	/* This lock is for ADC IBAT */
+	mutex_lock(&info->ichg_access_lock);
+
 	/* MTK's current unit : 10uA */
 	/* Our current unit : mA */
 	ichg = *((u32 *)data);
@@ -1918,6 +1975,7 @@ static int rt_charger_set_ichg(struct mtk_charger_info *mchr_info, void *data)
 		RT9468_MASK_ICHG
 	);
 
+	mutex_unlock(&info->ichg_access_lock);
 	return ret;
 }
 
@@ -1927,6 +1985,9 @@ static int rt_charger_set_aicr(struct mtk_charger_info *mchr_info, void *data)
 	u32 aicr = 0;
 	u8 reg_aicr = 0;
 	struct rt9468_info *info = (struct rt9468_info *)mchr_info;
+
+	/* This lock is for ADC's IBUS */
+	mutex_lock(&info->aicr_access_lock);
 
 	/* MTK's current unit : 10uA */
 	/* Our current unit : mA */
@@ -1946,6 +2007,7 @@ static int rt_charger_set_aicr(struct mtk_charger_info *mchr_info, void *data)
 		RT9468_MASK_AICR
 	);
 
+	mutex_unlock(&info->aicr_access_lock);
 	return ret;
 }
 
@@ -2317,7 +2379,7 @@ static int rt_charger_run_aicl(struct mtk_charger_info *mchr_info, void *data)
 	battery_log(BAT_LOG_CRTI, "%s: mivr loop is active\n", __func__);
 	ret = rt9468_get_mivr(info, &mivr);
 	if (ret < 0)
-		goto _out;
+		goto out;
 
 	/* Check if there's a suitable IIN_VTH */
 	iin_vth = mivr + 200;
@@ -2325,16 +2387,16 @@ static int rt_charger_run_aicl(struct mtk_charger_info *mchr_info, void *data)
 		battery_log(BAT_LOG_CRTI, "%s: no suitable IIN_VTH, vth = %d\n",
 			__func__, iin_vth);
 		ret = -EINVAL;
-		goto _out;
+		goto out;
 	}
 
 	ret = rt9468_set_iin_vth(info, iin_vth);
 	if (ret < 0)
-		goto _out;
+		goto out;
 
 	ret = rt9468_set_bit(info, RT9468_REG_CHG_CTRL14, RT9468_MASK_IIN_MEAS);
 	if (ret < 0)
-		goto _out;
+		goto out;
 
 	for (i = 0; i < max_wait_time; i++) {
 		msleep(500);
@@ -2346,12 +2408,12 @@ static int rt_charger_run_aicl(struct mtk_charger_info *mchr_info, void *data)
 		battery_log(BAT_LOG_CRTI, "%s: wait AICL time out\n",
 			__func__);
 		ret = -EIO;
-		goto _out;
+		goto out;
 	}
 
 	ret = rt_charger_get_aicr(mchr_info, &aicr);
 	if (ret < 0)
-		goto _out;
+		goto out;
 
 	*((u32 *)data) = aicr / 100;
 	battery_log(BAT_LOG_CRTI, "%s: OK, aicr upper bound = %dmA\n",
@@ -2359,7 +2421,7 @@ static int rt_charger_run_aicl(struct mtk_charger_info *mchr_info, void *data)
 
 	return 0;
 
-_out:
+out:
 	*((u32 *)data) = 0;
 	return ret;
 }
@@ -2527,7 +2589,7 @@ static int rt_charger_set_pep20_efficiency_table(
 	struct mtk_charger_info *mchr_info, void *data)
 {
 	int ret = 0;
-	pep20_profile_t *profile = (pep20_profile_t *)data;
+	struct _pep20_profile *profile = (struct _pep20_profile *)data;
 
 	profile[0].vchr = 8000;
 	profile[1].vchr = 8000;
@@ -2746,8 +2808,11 @@ static int rt9468_probe(struct i2c_client *i2c,
 	}
 	info->i2c = i2c;
 	info->i2c_log_level = BAT_LOG_FULL;
+	info->dev = &i2c->dev;
 	mutex_init(&info->i2c_access_lock);
 	mutex_init(&info->adc_access_lock);
+	mutex_init(&info->ichg_access_lock);
+	mutex_init(&info->aicr_access_lock);
 
 	/* Is HW exist */
 	if (!rt9468_is_hw_exist(info)) {
@@ -2813,6 +2878,8 @@ err_parse_dt:
 err_irq_register:
 	mutex_destroy(&info->i2c_access_lock);
 	mutex_destroy(&info->adc_access_lock);
+	mutex_destroy(&info->ichg_access_lock);
+	mutex_destroy(&info->aicr_access_lock);
 	return ret;
 }
 
@@ -2830,6 +2897,8 @@ static int rt9468_remove(struct i2c_client *i2c)
 #endif
 		mutex_destroy(&info->i2c_access_lock);
 		mutex_destroy(&info->adc_access_lock);
+		mutex_destroy(&info->ichg_access_lock);
+		mutex_destroy(&info->aicr_access_lock);
 	}
 
 	return ret;
@@ -2922,6 +2991,10 @@ MODULE_VERSION(RT9468_DRV_VERSION);
 
 /*
  * Version Note
+ * 1.0.6
+ * (1) Modify IBAT/IBUS ADC's coefficient
+ * (2) Use gpio_request_one & gpio_to_irq instead of pinctrl
+ *
  * 1.0.5
  * (1) Read REGN before reading TS related ADC
  *

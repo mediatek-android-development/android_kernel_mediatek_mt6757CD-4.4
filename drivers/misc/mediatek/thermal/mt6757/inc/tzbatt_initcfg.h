@@ -18,16 +18,14 @@
 #define TZBATT_INITCFG_INTERVAL									(1)
 #define TZBATT_INITCFG_NUM_TRIPS								(3)
 
-/* [lidebiao start] Modify bcct init params */
-#define TZBATT_INITCFG_TRIP_0_TEMP								(55000)
+#define TZBATT_INITCFG_TRIP_0_TEMP								(49000)
 #define TZBATT_INITCFG_TRIP_0_COOLER							"mtk-cl-bcct02"
 
-#define TZBATT_INITCFG_TRIP_1_TEMP								(49000)
+#define TZBATT_INITCFG_TRIP_1_TEMP								(48000)
 #define TZBATT_INITCFG_TRIP_1_COOLER							"mtk-cl-bcct01"
 
-#define TZBATT_INITCFG_TRIP_2_TEMP								(48000)
+#define TZBATT_INITCFG_TRIP_2_TEMP								(46000)
 #define TZBATT_INITCFG_TRIP_2_COOLER							"mtk-cl-bcct00"
-/* [lidebiao end] */
 
 #define TZBATT_INITCFG_TRIP_3_TEMP								(45000)
 #define TZBATT_INITCFG_TRIP_3_COOLER							""

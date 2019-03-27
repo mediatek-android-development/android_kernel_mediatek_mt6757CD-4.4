@@ -13,6 +13,7 @@
  * GNU General Public License for more details.
  *
  */
+#define DEBUG 1
 
 #include "kpd.h"
 #include <linux/wakelock.h>
@@ -20,9 +21,14 @@
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
 #include <linux/clk.h>
+#include <linux/debugfs.h>
 
 #define KPD_NAME	"mtk-kpd"
 #define MTK_KP_WAKESOURCE	/* this is for auto set wake up source */
+
+static struct dentry *kpd_droot;
+static struct dentry *kpd_dklog;
+int kpd_klog_en;
 
 void __iomem *kp_base;
 static unsigned int kp_irqnr;
@@ -31,8 +37,6 @@ static bool kpd_suspend;
 static int kpd_show_hw_keycode = 1;
 static int kpd_show_register = 1;
 unsigned long call_status;
-/* [yanlin] Support snapshot when screenoff */
-static char snapshot_status = '0';
 struct wake_lock kpd_suspend_lock;	/* For suspend usage */
 
 /*for kpd_memory_setting() function*/
@@ -78,11 +82,14 @@ static const struct of_device_id kpd_of_match[] = {
 	{.compatible = "mediatek,mt6757-keypad"},
 	{.compatible = "mediatek,mt8173-keypad"},
 	{.compatible = "mediatek,mt6797-keypad"},
+	{.compatible = "mediatek,mt6799-keypad"},
 	{.compatible = "mediatek,mt8163-keypad"},
 	{.compatible = "mediatek,mt8127-keypad"},
 	{.compatible = "mediatek,mt2701-keypad"},
 	{.compatible = "mediatek,mt7623-keypad"},
 	{.compatible = "mediatek,elbrus-keypad"},
+	{.compatible = "mediatek,mt8167-keypad"},
+	{.compatible = "mediatek,kp"},
 	{},
 };
 
@@ -147,46 +154,9 @@ static ssize_t kpd_show_call_state(struct device_driver *ddri, char *buf)
 
 static DRIVER_ATTR(kpd_call_state, S_IWUSR | S_IRUGO, kpd_show_call_state, kpd_store_call_state);
 
-/* [yanlin start] Support snapshot when screenoff */
-static ssize_t kpd_store_snapshot_state(struct device_driver *ddri, const char *buf, size_t count)
-{
-	int ret;
-
-	ret = sscanf(buf, "%s", &snapshot_status);
-	if (ret != 1) {
-		kpd_print("kpd snapshot state: Invalid values\n");
-		return -EINVAL;
-	}
-
-	switch (snapshot_status) {
-	case '0':
-		kpd_print("kpd snapshot state: screenoff snapshot disable!\n");
-		break;
-	case '1':
-		kpd_print("kpd snapshot state: screenoff snapshot enable!\n");
-		break;
-	default:
-		kpd_print("kpd snapshot state: Invalid values\n");
-		break;
-	}
-	return count;
-}
-
-static ssize_t kpd_show_snapshot_state(struct device_driver *ddri, char *buf)
-{
-	ssize_t res;
-
-	res = snprintf(buf, PAGE_SIZE, "%c\n", snapshot_status);
-	return res;
-}
-
-static DRIVER_ATTR(kpd_snapshot_state, S_IWUSR | S_IRUGO, kpd_show_snapshot_state, kpd_store_snapshot_state);
-
 static struct driver_attribute *kpd_attr_list[] = {
 	&driver_attr_kpd_call_state,
-	&driver_attr_kpd_snapshot_state,
 };
-/* [yanlin end] */
 
 /*----------------------------------------------------------------------------*/
 static int kpd_create_attr(struct device_driver *driver)
@@ -797,6 +767,7 @@ static int kpd_open(struct input_dev *dev)
 void kpd_get_dts_info(struct device_node *node)
 {
 	int ret;
+
 	of_property_read_u32(node, "mediatek,kpd-key-debounce", &kpd_dts_data.kpd_key_debounce);
 	of_property_read_u32(node, "mediatek,kpd-sw-pwrkey", &kpd_dts_data.kpd_sw_pwrkey);
 	of_property_read_u32(node, "mediatek,kpd-hw-pwrkey", &kpd_dts_data.kpd_hw_pwrkey);
@@ -829,6 +800,7 @@ static int kpd_pdrv_probe(struct platform_device *pdev)
 	int i, r;
 	int err = 0;
 	struct clk *kpd_clk = NULL;
+
 	call_status = 0;
 
 	kpd_info("Keypad probe start!!!\n");
@@ -948,7 +920,7 @@ static int kpd_pdrv_probe(struct platform_device *pdev)
 	mt_eint_register();
 #endif
 
-#ifdef CONIFG_KPD_ACCESS_PMIC_REGMAP
+#ifdef CONFIG_KPD_ACCESS_PMIC_REGMAP
 	/*kpd_hal access pmic registers via regmap interface*/
 	err = kpd_init_pmic_regmap(pdev);
 	if (err)
@@ -986,8 +958,7 @@ static int kpd_pdrv_suspend(struct platform_device *pdev, pm_message_t state)
 {
 	kpd_suspend = true;
 #ifdef MTK_KP_WAKESOURCE
-	/* [yanlin] Support snapshot when screenoff */
-	if (call_status == 2 || snapshot_status == '1') {
+	if (call_status == 2) {
 		kpd_print("kpd_early_suspend wake up source enable!! (%d)\n", kpd_suspend);
 	} else {
 		kpd_wakeup_src_setting(0);
@@ -1081,6 +1052,19 @@ static int __init kpd_mod_init(void)
 	register_sb_handler(&kpd_sb_handler_desc);
 #endif
 #endif
+
+#ifdef CONFIG_MTK_ENG_BUILD
+	kpd_klog_en = 1;
+#else
+	kpd_klog_en = 0;
+#endif
+
+	kpd_droot = debugfs_create_dir("keypad", NULL);
+
+	if (IS_ERR_OR_NULL(kpd_droot))
+		return 0;
+
+	kpd_dklog = debugfs_create_u32("debug", 0600, kpd_droot, &kpd_klog_en);
 
 	return 0;
 }

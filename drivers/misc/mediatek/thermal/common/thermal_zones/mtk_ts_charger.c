@@ -36,7 +36,7 @@
 
 #define mtktscharger_dprintk(fmt, args...) \
 do { \
-	if (mtktscharger_debug_log)\
+	if (mtktscharger_debug_log) \
 		pr_debug("[Thermal/tzcharger]" fmt, ##args); \
 } while (0)
 
@@ -79,6 +79,16 @@ static int mtktscharger_debug_log;
  * In case mtk_ts_charger.c fails to read temperature.
  */
 static unsigned long prev_temp = 30000;
+
+/**
+ * If curr_temp >= polling_trip_temp1, use interval
+ * else if cur_temp >= polling_trip_temp2 && curr_temp < polling_trip_temp1, use interval*polling_factor1
+ * else, use interval*polling_factor2
+ */
+static int polling_trip_temp1 = 40000;
+static int polling_trip_temp2 = 20000;
+static int polling_factor1 = 5000;
+static int polling_factor2 = 10000;
 
 #if (CONFIG_MTK_GAUGE_VERSION == 30)
 static struct charger_consumer *pthermal_consumer;
@@ -181,7 +191,12 @@ static int mtktscharger_get_temp(struct thermal_zone_device *thermal, int *t)
 	if (*t >= 85000)
 		mtktscharger_dprintk_always("HT %d\n", *t);
 
-	/* TODO: Add change polling delay features for low power. */
+	if ((int)*t >= polling_trip_temp1)
+		thermal->polling_delay = interval * 1000;
+	else if ((int)*t < polling_trip_temp2)
+		thermal->polling_delay = interval * polling_factor2;
+	else
+		thermal->polling_delay = interval * polling_factor1;
 
 	return 0;
 }
@@ -336,11 +351,6 @@ static int mtktscharger_sysrst_get_cur_state(struct thermal_cooling_device *cdev
 	return 0;
 }
 
-/* [lidebiao start]*/
-static int charger_sysrst_happened = 0;
-extern int send_sysrst_signal(unsigned int type);
-/* [lidebiao end]*/
-
 static int mtktscharger_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 {
 	cl_dev_sysrst_state = state;
@@ -351,13 +361,7 @@ static int mtktscharger_sysrst_set_cur_state(struct thermal_cooling_device *cdev
 		pr_err("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
 
 		/* To trigger data abort to reset the system for thermal protection. */
-		/* [lidebiao start] modify sysrst methods */
-		if (0 == charger_sysrst_happened) {
-			send_sysrst_signal(1); //system shutdown
-			charger_sysrst_happened = 1;
-		}
-		//*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
-		/* [lidebiao end] */
+		*(unsigned int *)0x0 = 0xdead;
 	}
 
 	return 0;

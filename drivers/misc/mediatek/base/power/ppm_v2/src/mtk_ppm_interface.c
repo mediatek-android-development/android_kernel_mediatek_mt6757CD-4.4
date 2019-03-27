@@ -139,6 +139,10 @@ static ssize_t ppm_enabled_proc_write(struct file *file, const char __user *buff
 
 			/* send default limit to client */
 			ppm_main_clear_client_req(c_req);
+#ifdef PPM_SSPM_SUPPORT
+			/* update limit to SSPM first */
+			ppm_ipi_update_limit(*c_req);
+#endif
 			for_each_ppm_clients(i) {
 				if (ppm_main_info.client_info[i].limit_cb)
 					ppm_main_info.client_info[i].limit_cb(*c_req);
@@ -269,6 +273,7 @@ static int ppm_mode_proc_show(struct seq_file *m, void *v)
 		break;
 	default:
 		WARN_ON(1);
+		break;
 	}
 
 	seq_printf(m, "%s\n", mode);
@@ -375,6 +380,8 @@ static ssize_t ppm_root_cluster_proc_write(struct file *file, const char __user 
 		ppm_main_info.fixed_root_cluster = cluster;
 		ppm_unlock(&ppm_main_info.lock);
 
+		ppm_info("Set PPM root cluster to %d\n", cluster);
+
 		if (ppm_main_info.fixed_root_cluster != -1)
 			ppm_hica_fix_root_cluster_changed(ppm_main_info.fixed_root_cluster);
 #endif
@@ -382,6 +389,36 @@ static ssize_t ppm_root_cluster_proc_write(struct file *file, const char __user 
 		ppm_err("echo (cluster_id or -1 to cancel) > /proc/ppm/root_cluster\n");
 
 end:
+	free_page((unsigned long)buf);
+	return count;
+}
+
+static int ppm_min_freq_1LL_proc_show(struct seq_file *m, void *v)
+{
+	seq_printf(m, "%d\n", ppm_main_info.min_freq_1LL);
+	return 0;
+}
+
+static ssize_t ppm_min_freq_1LL_proc_write(struct file *file, const char __user *buffer,
+					size_t count, loff_t *pos)
+{
+	unsigned int freq;
+
+	char *buf = ppm_copy_from_user_for_proc(buffer, count);
+
+	if (!buf)
+		return -EINVAL;
+
+	if (!kstrtouint(buf, 10, &freq)) {
+		ppm_lock(&ppm_main_info.lock);
+		ppm_main_info.min_freq_1LL = freq;
+		ppm_info("Set PPM 1LL min freq to %dKHz\n", ppm_main_info.min_freq_1LL);
+		ppm_unlock(&ppm_main_info.lock);
+
+		mt_ppm_main();
+	} else
+		ppm_err("echo (freq_KHz or 0 to cancel) > /proc/ppm/min_freq_1LL\n");
+
 	free_page((unsigned long)buf);
 	return count;
 }
@@ -534,7 +571,7 @@ static int ppm_cobra_limit_to_budget_proc_show(struct seq_file *m, void *v)
 static ssize_t ppm_cobra_limit_to_budget_proc_write(struct file *file, const char __user *buffer,
 					size_t count, loff_t *pos)
 {
-	char *tok;
+	char *tok, *tmp;
 	unsigned int i = 0, data;
 
 	char *buf = ppm_copy_from_user_for_proc(buffer, count);
@@ -542,7 +579,8 @@ static ssize_t ppm_cobra_limit_to_budget_proc_write(struct file *file, const cha
 	if (!buf)
 		return -EINVAL;
 
-	while ((tok = strsep(&buf, " ")) != NULL) {
+	tmp = buf;
+	while ((tok = strsep(&tmp, " ")) != NULL) {
 		if (i == NR_PPM_CLUSTERS * 2) {
 			ppm_err("@%s: number of arguments > %d!\n", __func__, NR_PPM_CLUSTERS * 2);
 			goto out;
@@ -574,6 +612,7 @@ PROC_FOPS_RO(dump_policy_list);
 PROC_FOPS_RW(policy_status);
 PROC_FOPS_RW(mode);
 PROC_FOPS_RW(root_cluster);
+PROC_FOPS_RW(min_freq_1LL);
 PROC_FOPS_RW(smart_detect_boost);
 PROC_FOPS_RO(dump_dvfs_table);
 #ifdef PPM_VPROC_5A_LIMIT_CHECK
@@ -603,6 +642,7 @@ int ppm_procfs_init(void)
 		PROC_ENTRY(policy_status),
 		PROC_ENTRY(mode),
 		PROC_ENTRY(root_cluster),
+		PROC_ENTRY(min_freq_1LL),
 		PROC_ENTRY(smart_detect_boost),
 #ifdef PPM_VPROC_5A_LIMIT_CHECK
 		PROC_ENTRY(5A_limit_enable),

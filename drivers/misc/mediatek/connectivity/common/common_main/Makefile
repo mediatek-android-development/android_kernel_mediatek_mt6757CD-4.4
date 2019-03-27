@@ -1,6 +1,7 @@
 subdir-ccflags-y += \
 	-I$(src)/linux/include \
 	-I$(src)/linux/pri/include \
+	-I$(src)/platform/include \
 	-I$(src)/core/include \
 	-I$(src)/include \
 	-I$(src)/../common_detect \
@@ -10,6 +11,7 @@ subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eccci/$(MTK_PLATFORM)
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/eemcs/
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/conn_md/include
+subdir-ccflags-y += -I$(srctree)/drivers/mmc/core
 
 subdir-ccflags-y += -D WMT_PLAT_ALPS=1
 subdir-ccflags-y += -D WMT_UART_RX_MODE_WORK=0 # 1. work thread 0. tasklet
@@ -48,23 +50,11 @@ mtk_stp_wmt$(EXT_FLAG)-objs	+= linux/pri/stp_exp.o core/stp_core.o core/psm_core
 # WMT stub part (built-in kernel image)
 # obj-y			+= platform/alps/mtk_wcn_consys_stub_alps.o
 
-
-
-obj-$(CONFIG_MTK_COMBO_BT) 	+= mtk_stp_bt$(EXT_FLAG).o
-mtk_stp_bt$(EXT_FLAG)-objs	:= linux/pub/stp_chrdev_bt.o
-
-obj-$(CONFIG_MTK_COMBO_WIFI) += mtk_wmt_wifi$(EXT_FLAG).o
-mtk_wmt_wifi$(EXT_FLAG)-objs := linux/pub/wmt_chrdev_wifi.o
-
 endif
 
 ifeq ($(CONFIG_MTK_COMBO), y)
 obj-y += core/
 obj-y += linux/
-ifneq ($(filter "CONSYS_%",$(CONFIG_MTK_COMBO_CHIP)),)
-obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-else
 obj-y += platform/
-endif
 
 endif

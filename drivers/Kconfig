@@ -202,8 +202,4 @@ source "drivers/hwtracing/intel_th/Kconfig"
 
 source "drivers/fpga/Kconfig"
 
-# [liguanxiong start] for rongcard tee
-source "drivers/tee/Kconfig"
-# [liguanxiong end]
-
 endmenu

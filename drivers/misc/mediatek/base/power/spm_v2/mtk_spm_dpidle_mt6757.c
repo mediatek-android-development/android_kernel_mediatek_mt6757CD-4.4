@@ -164,6 +164,9 @@ static void spm_dpidle_pmic_before_wfi(void)
 								IDX_DI_SRCCLKEN_IN2_SLEEP,
 								value & ~(1 << MT6351_PMIC_RG_SRCLKEN_IN2_EN_SHIFT));
 
+	/* set PMIC WRAP table for deepidle power control */
+	mt_spm_pmic_wrap_set_phase(PMIC_WRAP_PHASE_DEEPIDLE);
+
 	pmic_config_interface_nolock(MT6351_PMIC_BUCK_VSRAM_MD_VOSEL_CTRL_ADDR,
 								1,
 								MT6351_PMIC_BUCK_VSRAM_MD_VOSEL_CTRL_MASK,
@@ -195,9 +198,6 @@ void spm_dpidle_pre_process(void)
 
 	spm_bypass_boost_gpio_set();
 	spm_dpidle_pmic_before_wfi();
-
-	/* set PMIC WRAP table for deepidle power control */
-	mt_spm_pmic_wrap_set_phase(PMIC_WRAP_PHASE_DEEPIDLE);
 
 	/* Do more low power setting when MD1/C2K/CONN off */
 	if (is_md_c2k_conn_power_off()) {
@@ -250,7 +250,7 @@ static int __init get_base_from_node(
 	return 0;
 }
 
-void spm_deepidle_chip_init(void)
+void __init spm_deepidle_chip_init(void)
 {
 	get_base_from_node("mediatek,apmixed", &apmixedsys_base_in_dpidle, 0);
 }

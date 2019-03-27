@@ -55,12 +55,12 @@ extern unsigned int gWmtDetectDbgLvl;
 #define WMT_DETECT_LOUD_FUNC(fmt, arg...) \
 do { \
 	if (gWmtDetectDbgLvl >= WMT_DETECT_LOG_LOUD) \
-		pr_debug(DFT_TAG"[L]%s:"  fmt, __func__, ##arg); \
+		pr_warn(DFT_TAG"[L]%s:"  fmt, __func__, ##arg); \
 } while (0)
 #define WMT_DETECT_DBG_FUNC(fmt, arg...) \
 do { \
 	if (gWmtDetectDbgLvl >= WMT_DETECT_LOG_DBG) \
-		pr_debug(DFT_TAG"[D]%s:"  fmt, __func__, ##arg); \
+		pr_warn(DFT_TAG"[D]%s:"  fmt, __func__, ##arg); \
 } while (0)
 #define WMT_DETECT_INFO_FUNC(fmt, arg...) \
 do { \
@@ -101,9 +101,7 @@ extern int wmt_detect_ext_chip_detect(void);
 extern int wmt_detect_ext_chip_pwr_on(void);
 extern int wmt_detect_ext_chip_pwr_off(void);
 
-#ifdef MTK_WCN_SOC_CHIP_SUPPORT
 extern unsigned int wmt_plat_get_soc_chipid(void);
-#endif
 
 #ifdef MTK_WCN_COMBO_CHIP_SUPPORT
 /* mtk_uart_pdn_enable -- request uart port enter/exit deep idle mode, this API is defined in uart driver

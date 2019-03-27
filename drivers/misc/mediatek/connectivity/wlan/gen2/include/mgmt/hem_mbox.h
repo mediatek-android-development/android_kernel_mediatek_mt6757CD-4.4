@@ -128,10 +128,10 @@ typedef enum _ENUM_MSG_ID_T {
 	MID_MNY_CNM_SCAN_CONTINUE,
 	MID_WNM_AIS_BSS_TRANSITION,
 	MID_OID_WMM_TSPEC_OPERATE,
+	MID_RLM_RM_SCHEDULE,
 #if CFG_SUPPORT_NCHO
 	MID_MNY_AIS_NCHO_ACTION_FRAME,
 #endif
-	MID_RLM_RM_SCHEDULE,
 	MID_TOTAL_NUM
 } ENUM_MSG_ID_T, *P_ENUM_MSG_ID_T;
 
@@ -221,6 +221,7 @@ struct MSG_SAA_FT_CONTINUE {
 	P_STA_RECORD_T prStaRec;
 	BOOLEAN fgFTRicRequest; /* if fgFTRicRequest is TRUE, then will do FT Resource Request Protocol */
 };
+
 /* specific message data types */
 typedef MSG_SAA_FSM_START_T MSG_JOIN_REQ_T, *P_MSG_JOIN_REQ_T;
 typedef MSG_SAA_FSM_COMP_T MSG_JOIN_COMP_T, *P_MSG_JOIN_COMP_T;

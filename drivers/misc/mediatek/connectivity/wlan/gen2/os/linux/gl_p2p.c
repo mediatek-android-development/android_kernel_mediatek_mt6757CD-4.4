@@ -116,6 +116,22 @@ static const struct wiphy_vendor_command mtk_p2p_vendor_ops[] = {
 		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
 		.doit = mtk_cfg80211_vendor_set_country_code
 	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = WIFI_SUBCMD_GET_ROAMING_CAPABILITIES
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = mtk_cfg80211_vendor_get_roaming_capabilities
+	},
+	{
+		{
+			.vendor_id = GOOGLE_OUI,
+			.subcmd = WIFI_SUBCMD_CONFIG_ROAMING
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV | WIPHY_VENDOR_CMD_NEED_NETDEV,
+		.doit = mtk_cfg80211_vendor_config_roaming
+	},
 };
 
 /* There isn't a lot of sense in it, but you can transmit anything you like */
@@ -309,12 +325,12 @@ static const struct wiphy_wowlan_support p2p_wowlan_support = {
 /* for IE Searching */
 extern BOOLEAN
 wextSrchDesiredWPAIE(IN PUINT_8 pucIEStart,
-		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PUINT_8 *ppucDesiredIE);
+		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PPUINT_8 ppucDesiredIE);
 
 #if CFG_SUPPORT_WPS
 extern BOOLEAN
 wextSrchDesiredWPSIE(IN PUINT_8 pucIEStart,
-		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PUINT_8 *ppucDesiredIE);
+		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PPUINT_8 ppucDesiredIE);
 #endif
 
 /* Net Device Hooks */
@@ -597,8 +613,8 @@ BOOLEAN p2pNetRegister(P_GLUE_INFO_T prGlueInfo, BOOLEAN fgIsRtnlLockAcquired)
 	/* register for net device */
 	if (register_netdev(prGlueInfo->prP2PInfo->prDevHandler) < 0) {
 		DBGLOG(P2P, WARN, "unable to register netdevice for p2p\n");
-
-		free_netdev(prGlueInfo->prP2PInfo->prDevHandler);
+		/* free dev in glUnregisterP2P() */
+		/* free_netdev(prGlueInfo->prP2PInfo->prDevHandler); */
 
 		ret = FALSE;
 	} else {
@@ -673,11 +689,11 @@ BOOLEAN glP2pCreateWirelessDevice(P_GLUE_INFO_T prGlueInfo)
 	prWiphy->bands[IEEE80211_BAND_5GHZ] = &mtk_band_5ghz;
 
 	prWiphy->mgmt_stypes = mtk_cfg80211_default_mgmt_stypes;
-	prWiphy->max_remain_on_channel_duration = 5000;
+	prWiphy->max_remain_on_channel_duration = 500;
 	prWiphy->cipher_suites = mtk_cipher_suites;
 	prWiphy->n_cipher_suites = ARRAY_SIZE(mtk_cipher_suites);
 	prWiphy->flags = WIPHY_FLAG_HAS_REMAIN_ON_CHANNEL | WIPHY_FLAG_HAVE_AP_SME;
-#if CFG_SUPPORT_TDLS
+#if (CFG_SUPPORT_TDLS == 1)
 	TDLSEX_WIPHY_FLAGS_INIT(prWiphy->flags);
 #endif /* CFG_SUPPORT_TDLS */
 	prWiphy->regulatory_flags = REGULATORY_CUSTOM_REG;
@@ -702,8 +718,8 @@ BOOLEAN glP2pCreateWirelessDevice(P_GLUE_INFO_T prGlueInfo)
 	prWdev->wiphy = prWiphy;
 #if CFG_SUPPORT_PERSIST_NETDEV
 	/* 3. allocate netdev */
-	prNetDev = alloc_netdev_mq(sizeof(P_GLUE_INFO_T), P2P_MODE_INF_NAME, NET_NAME_PREDICTABLE,
-								ether_setup, CFG_MAX_TXQ_NUM);
+	prNetDev = alloc_netdev_mq(sizeof(P_GLUE_INFO_T), P2P_INF_NAME, NET_NAME_PREDICTABLE,
+				   ether_setup, CFG_MAX_TXQ_NUM);
 	if (!prNetDev) {
 		DBGLOG(P2P, ERROR, "unable to allocate netdevice for p2p\n");
 		goto unregister_wiphy;
@@ -736,7 +752,7 @@ BOOLEAN glP2pCreateWirelessDevice(P_GLUE_INFO_T prGlueInfo)
 	netif_carrier_off(prNetDev);
 	netif_tx_stop_all_queues(prNetDev);
 
-	/* register for net device */
+	/* 5. register for net device */
 	if (register_netdev(prNetDev) < 0) {
 		DBGLOG(P2P, ERROR, "unable to register netdevice for p2p\n");
 		free_netdev(prNetDev);
@@ -807,7 +823,7 @@ BOOLEAN glRegisterP2P(P_GLUE_INFO_T prGlueInfo, const char *prDevName, BOOLEAN f
 		return FALSE;
 	}
 #endif
-	/*0. allocate p2pinfo */
+	/* 0. allocate p2pinfo */
 	if (!p2PAllocInfo(prGlueInfo)) {
 		DBGLOG(P2P, ERROR, "Allocate memory for p2p FAILED\n");
 		ASSERT(0);
@@ -827,27 +843,27 @@ BOOLEAN glRegisterP2P(P_GLUE_INFO_T prGlueInfo, const char *prDevName, BOOLEAN f
 	if (!prGlueInfo->prAdapter->fgEnable5GBand)
 		gprP2pWdev->wiphy->bands[IEEE80211_BAND_5GHZ] = NULL;
 
-	/* 2 set priv as pointer to glue structure */
+	/* 2. set priv as pointer to glue structure */
 	*(P_GLUE_INFO_T *) wiphy_priv(gprP2pWdev->wiphy) = prGlueInfo;
 
 	if (fgIsApMode) {
 		gprP2pWdev->iftype = NL80211_IFTYPE_AP;
 #if CFG_SUPPORT_PERSIST_NETDEV
-		if (kalStrnCmp(gprP2pWdev->netdev->name, AP_MODE_INF_NAME, 2)) {
+		if (kalStrnCmp(gprP2pWdev->netdev->name, AP_INF_NAME, 2)) {
 			rtnl_lock();
-			dev_change_name(gprP2pWdev->netdev->name, AP_MODE_INF_NAME);
+			dev_change_name(gprP2pWdev->netdev->name, AP_INF_NAME);
 			rtnl_unlock();
 		}
 #endif
 	} else {
+		gprP2pWdev->iftype = NL80211_IFTYPE_P2P_CLIENT;
 #if CFG_SUPPORT_PERSIST_NETDEV
-		if (kalStrnCmp(gprP2pWdev->netdev->name, P2P_MODE_INF_NAME, 3)) {
+		if (kalStrnCmp(gprP2pWdev->netdev->name, P2P_INF_NAME, 3)) {
 			rtnl_lock();
-			dev_change_name(gprP2pWdev->netdev->name, P2P_MODE_INF_NAME);
+			dev_change_name(gprP2pWdev->netdev->name, P2P_INF_NAME);
 			rtnl_unlock();
 		}
 #endif
-		gprP2pWdev->iftype = NL80211_IFTYPE_P2P_CLIENT;
 	}
 #endif /* CFG_ENABLE_WIFI_DIRECT_CFG_80211 */
 
@@ -855,8 +871,8 @@ BOOLEAN glRegisterP2P(P_GLUE_INFO_T prGlueInfo, const char *prDevName, BOOLEAN f
 		prP2PInfo->prDevHandler = gprP2pWdev->netdev;
 #else /* CFG_SUPPORT_PERSIST_NETDEV */
 	/* 3. allocate netdev */
-	prDevHandler =
-	    alloc_netdev_mq(sizeof(P_GLUE_INFO_T), prDevName, NET_NAME_PREDICTABLE, ether_setup, CFG_MAX_TXQ_NUM);
+	prDevHandler = alloc_netdev_mq(sizeof(P_GLUE_INFO_T), prDevName, NET_NAME_PREDICTABLE,
+				       ether_setup, CFG_MAX_TXQ_NUM);
 	if (!prDevHandler) {
 		DBGLOG(P2P, ERROR, "unable to allocate netdevice for p2p\n");
 		return FALSE;
@@ -941,7 +957,8 @@ BOOLEAN glUnregisterP2P(P_GLUE_INFO_T prGlueInfo)
 #if CFG_SUPPORT_PERSIST_NETDEV
 	dev_close(prGlueInfo->prP2PInfo->prDevHandler);
 #else
-	free_netdev(prGlueInfo->prP2PInfo->prDevHandler);
+	if (prGlueInfo->prP2PInfo->prDevHandler != NULL)
+		free_netdev(prGlueInfo->prP2PInfo->prDevHandler);
 	prGlueInfo->prP2PInfo->prDevHandler = NULL;
 #endif
 	/* Free p2p memory */
@@ -1257,7 +1274,7 @@ void mtk_p2p_wext_set_Multicastlist(P_GLUE_INFO_T prGlueInfo)
 		UINT_32 i = 0;
 
 		netdev_for_each_mc_addr(ha, prDev) {
-			if (i < MAX_NUM_GROUP_ADDR) {
+			if ((i < MAX_NUM_GROUP_ADDR) && (ha != NULL)) {
 				COPY_MAC_ADDR(&(prGlueInfo->prP2PInfo->aucMCAddrList[i]), ha->addr);
 				i++;
 			}
@@ -2190,6 +2207,7 @@ mtk_p2p_wext_set_key(IN struct net_device *prDev,
 
 					/* BSSID */
 					memcpy(prKey->arBSSID, prIWEncExt->addr.sa_data, 6);
+					ASSERT(prIWEncExt->key_len < 32);
 					memcpy(prKey->aucKeyMaterial, prIWEncExt->key, prIWEncExt->key_len);
 
 					prKey->u4KeyLength = prIWEncExt->key_len;
@@ -3547,16 +3565,18 @@ mtk_p2p_wext_get_struct(IN struct net_device *prDev,
 
 		case P2P_CMD_ID_GET_OP_CH:
 			{
+				UINT_32 u4QueryInfoLen = 0;
+
 				prP2PReq->inBufferLength = 4;
 
 				status = wlanoidQueryP2pOpChannel(prGlueInfo->prAdapter,
 								  prP2PReq->aucBuffer,
-								  prP2PReq->inBufferLength, &prP2PReq->outBufferLength);
-
+								  prP2PReq->inBufferLength, &u4QueryInfoLen);
+				prP2PReq->outBufferLength = u4QueryInfoLen;
 				if (status == 0) {	/* WLAN_STATUS_SUCCESS */
 					if (copy_to_user(wrqu->data.pointer,
 							 &(prGlueInfo->prP2PInfo->aucOidBuf[0]),
-							 prP2PReq->outBufferLength + OFFSET_OF(IW_P2P_TRANSPORT_STRUCT,
+							 u4QueryInfoLen + OFFSET_OF(IW_P2P_TRANSPORT_STRUCT,
 											       aucBuffer))) {
 						DBGLOG(P2P, ERROR, "%s() copy_to_user() fail\n", __func__);
 						return -EIO;
@@ -3601,6 +3621,7 @@ mtk_p2p_wext_get_struct(IN struct net_device *prDev,
 		}
 		break;
 #endif
+#if 0
 	case PRIV_CMD_P2P_VERSION:
 		if (u4CmdLen > sizeof(IW_P2P_TRANSPORT_STRUCT)) {
 			status = -EINVAL;
@@ -3644,7 +3665,9 @@ mtk_p2p_wext_get_struct(IN struct net_device *prDev,
 		}
 
 		break;
+#endif
 	default:
+		DBGLOG(P2P, ERROR, "Unknown sub cmd: %d\n", (INT_16) u4SubCmd);
 		return -EOPNOTSUPP;
 	}
 

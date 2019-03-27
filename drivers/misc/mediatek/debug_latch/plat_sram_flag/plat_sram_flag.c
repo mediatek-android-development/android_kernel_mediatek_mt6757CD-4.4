@@ -103,18 +103,6 @@ int set_sram_flag_dfd_valid(void)
 }
 EXPORT_SYMBOL(set_sram_flag_dfd_valid);
 
-
-/* return negative integer if fails */
-int set_sram_flag_dfd_invalid(void)
-{
-	if (check_sram_base() < 0)
-		return -1;
-
-	writel(readl(sram_base + (PLAT_FLAG1*4)) & ~(1 << OFFSET_DFD_VALID), sram_base + (PLAT_FLAG1*4));
-	return 0;
-}
-EXPORT_SYMBOL(set_sram_flag_dfd_invalid);
-
 static struct platform_driver plat_sram_flag_drv = {
 	.driver = {
 		.name = "plat_sram_flag",

@@ -25,9 +25,6 @@
 #include <linux/uidgid.h>
 #include <mtk_cooler_setting.h>
 #include <linux/debugfs.h>
-/* [lidebiao start] Add for config batt temp protect */
-#include <mt-plat/mtk_battery.h>
-/* [lidebiao end] */
 
 /* extern unsigned long ccci_get_md_boot_count(int md_id); */
 
@@ -36,8 +33,7 @@
 /* #define MAX_LEN	256 */
 static unsigned int tmd_pid;
 static unsigned int tmd_input_pid;
-static struct task_struct tmd_task;
-static struct task_struct *ptmd_task = &tmd_task;
+static struct task_struct *ptmd_task;
 #endif
 
 #if FEATURE_MUTT_V2
@@ -45,8 +41,7 @@ static struct task_struct *ptmd_task = &tmd_task;
 #define MAX_LEN	128
 static unsigned int tm_pid;
 static unsigned int tm_input_pid;
-static struct task_struct g_task;
-static struct task_struct *pg_task = &g_task;
+static struct task_struct *pg_task;
 
 /* mdoff cooler */
 static struct thermal_cooling_device *cl_dev_mdoff;
@@ -171,22 +166,21 @@ static int clmutt_send_tmd_signal(int level)
 
 	if (ret == 0 && tmd_input_pid != tmd_pid) {
 		tmd_pid = tmd_input_pid;
+
+		if (ptmd_task != NULL)
+			put_task_struct(ptmd_task);
 		ptmd_task = get_pid_task(find_vpid(tmd_pid), PIDTYPE_PID);
 	}
 
-	 /* [lidebiao start] Add for config batt temp protect */
-	if (get_Batt_Temp_Protect_Mode() == 1) {
-		if (ret == 0 && ptmd_task) {
-			siginfo_t info;
+	if (ret == 0 && ptmd_task) {
+		siginfo_t info;
 
-			info.si_signo = SIGIO;
-			info.si_errno = 0;
-			info.si_code = level;
-			info.si_addr = NULL;
-			ret = send_sig_info(SIGIO, &info, ptmd_task);
-		}
+		info.si_signo = SIGIO;
+		info.si_errno = 0;
+		info.si_code = level;
+		info.si_addr = NULL;
+		ret = send_sig_info(SIGIO, &info, ptmd_task);
 	}
-	/* [lidebiao end] */
 
 	if (ret != 0)
 		mtk_cooler_mutt_dprintk_always(" %s ret=%d\n", __func__, ret);
@@ -273,6 +267,9 @@ static int clmutt_send_tm_signal(int level)
 
 	if (ret == 0 && tm_input_pid != tm_pid) {
 		tm_pid = tm_input_pid;
+
+		if (pg_task != NULL)
+			put_task_struct(pg_task);
 		pg_task = get_pid_task(find_vpid(tm_pid), PIDTYPE_PID);
 	}
 

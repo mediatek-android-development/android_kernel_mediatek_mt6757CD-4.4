@@ -123,37 +123,38 @@ static bool usb_enable_clock(bool enable)
 	unsigned long flags;
 
 	spin_lock_irqsave(&musb_reg_clock_lock, flags);
-		if (enable && clk_count == 0) {
-			usb_hal_dpidle_request(USB_DPIDLE_FORBIDDEN);
+	if (enable && clk_count == 0) {
+		usb_hal_dpidle_request(USB_DPIDLE_FORBIDDEN);
 #ifdef CONFIG_MTK_CLKMGR
-			writel(readl((void __iomem *)AP_PLL_CON0) | (0x00000010),
-			(void __iomem *)AP_PLL_CON0);
-			enable_clock(MT_CG_PERI_USB0, "USB30");
+		writel(readl((void __iomem *)AP_PLL_CON0) | (0x00000010),
+		(void __iomem *)AP_PLL_CON0);
+		enable_clock(MT_CG_PERI_USB0, "USB30");
 #else
-			writel(readl(ap_pll_con0) | (0x00000010),
-			(void __iomem *)ap_pll_con0);
-			clk_enable(musb_clk);
+		writel(readl(ap_pll_con0) | (0x00000010),
+		(void __iomem *)ap_pll_con0);
+		if (clk_enable(musb_clk) != 0)
+			os_printk(K_INFO, "enable ssusb_clk fail\n");
 #endif
-		} else if (!enable && clk_count == 1) {
+	} else if (!enable && clk_count == 1) {
 #ifdef CONFIG_MTK_CLKMGR
-			disable_clock(MT_CG_PERI_USB0, "USB30");
-			writel(readl((void __iomem *)AP_PLL_CON0) & ~(0x00000010),
-			(void __iomem *)AP_PLL_CON0);
+		disable_clock(MT_CG_PERI_USB0, "USB30");
+		writel(readl((void __iomem *)AP_PLL_CON0) & ~(0x00000010),
+		(void __iomem *)AP_PLL_CON0);
 #else
-			clk_disable(musb_clk);
-			writel(readl((void __iomem *)ap_pll_con0) & ~(0x00000010),
-			(void __iomem *)ap_pll_con0);
+		clk_disable(musb_clk);
+		writel(readl((void __iomem *)ap_pll_con0) & ~(0x00000010),
+		(void __iomem *)ap_pll_con0);
 
 #endif
-			usb_hal_dpidle_request(USB_DPIDLE_ALLOWED);
-		}
+		usb_hal_dpidle_request(USB_DPIDLE_ALLOWED);
+	}
 
-		if (enable)
-			clk_count++;
-		else
-			clk_count = (clk_count == 0) ? 0 : (clk_count-1);
+	if (enable)
+		clk_count++;
+	else
+		clk_count = (clk_count == 0) ? 0 : (clk_count-1);
 
-			spin_unlock_irqrestore(&musb_reg_clock_lock, flags);
+	spin_unlock_irqrestore(&musb_reg_clock_lock, flags);
 
 #ifdef USB_CLK_DEBUG
 	if (get_clk_io) {
@@ -502,15 +503,15 @@ void usb_phy_sib_enable_switch(bool enable)
 	U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_USB30_PHYA_REG0, RG_SSUSB_VUSB10_ON_OFST,
 			  RG_SSUSB_VUSB10_ON, 1);
 	/* SSUSB_IP_SW_RST = 0 */
-	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_sif_base + 0x700), 0x00031000);
+	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_ippc_base + 0x0), 0x00031000);
 	/* SSUSB_IP_HOST_PDN = 0 */
-	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_sif_base + 0x704), 0x00000000);
+	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_ippc_base + 0x4), 0x00000000);
 	/* SSUSB_IP_DEV_PDN = 0 */
-	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_sif_base + 0x708), 0x00000000);
+	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_ippc_base + 0x8), 0x00000000);
 	/* SSUSB_IP_PCIE_PDN = 0 */
-	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_sif_base + 0x70C), 0x00000000);
+	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_ippc_base + 0xC), 0x00000000);
 	/* SSUSB_U3_PORT_DIS/SSUSB_U3_PORT_PDN = 0*/
-	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_sif_base + 0x730), 0x0000000C);
+	U3PhyWriteReg32((phys_addr_t) (uintptr_t) (u3_ippc_base + 0x30), 0x0000000C);
 
 	/*
 	 * USBMAC mode is 0x62910002 (bit 1)
@@ -554,6 +555,49 @@ bool usb_phy_sib_enable_switch_status(void)
 	return ret;
 }
 #endif
+
+#define VAL_MAX_WIDTH_2	0x3
+#define VAL_MAX_WIDTH_3	0x7
+void usb_phy_tuning(void)
+{
+	static bool inited;
+	static s32 u2_vrt_ref, u2_term_ref, u2_enhance;
+	static struct device_node *of_node;
+
+	if (!inited) {
+		u2_vrt_ref = u2_term_ref = u2_enhance = -1;
+		of_node = of_find_compatible_node(NULL, NULL, "mediatek,phy_tuning");
+		if (of_node) {
+			/* value won't be updated if property not being found */
+			of_property_read_u32(of_node, "u2_vrt_ref", (u32 *) &u2_vrt_ref);
+			of_property_read_u32(of_node, "u2_term_ref", (u32 *) &u2_term_ref);
+			of_property_read_u32(of_node, "u2_enhance", (u32 *) &u2_enhance);
+		}
+		inited = true;
+	} else if (!of_node)
+		return;
+
+	if (u2_vrt_ref != -1) {
+		if (u2_vrt_ref <= VAL_MAX_WIDTH_3) {
+			U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_USBPHYACR1, RG_USB20_VRT_VREF_SEL_OFST,
+					  RG_USB20_VRT_VREF_SEL, u2_vrt_ref);
+		}
+	}
+	if (u2_term_ref != -1) {
+		if (u2_term_ref <= VAL_MAX_WIDTH_3) {
+			U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_USBPHYACR1, RG_USB20_TERM_VREF_SEL_OFST,
+					  RG_USB20_TERM_VREF_SEL, u2_term_ref);
+		}
+	}
+	if (u2_enhance != -1) {
+		if (u2_enhance <= VAL_MAX_WIDTH_2) {
+			U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_USBPHYACR6, RG_USB20_PHY_REV_6_OFST,
+				RG_USB20_PHY_REV_6, u2_enhance);
+		}
+	}
+}
+
+
 
 
 /*This "power on/initial" sequence refer to "6593_USB_PORT0_PWR Sequence 20130729.xls"*/
@@ -1189,7 +1233,7 @@ void usb_phy_recover(unsigned int clk_on)
 	U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_U2PHYDTM1, RG_VBUSVALID_OFST, RG_VBUSVALID, 1);
 	U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_U2PHYDTM1, RG_AVALID_OFST, RG_AVALID, 1);
 	U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_U2PHYDTM1, RG_SESSEND_OFST, RG_SESSEND, 0);
-	U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_U3PHYA_DA_REG36,
+	U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_U3PHYA_DA_REG32,
 			RG_SSUSB_LFPS_DEGLITCH_U3_OFST, RG_SSUSB_LFPS_DEGLITCH_U3, 1);
 
 #ifdef CONFIG_MTK_UART_USB_SWITCH
@@ -1235,6 +1279,8 @@ void usb_phy_recover(unsigned int clk_on)
 
 	U3PhyWriteField32((phys_addr_t) (uintptr_t) U3D_USBPHYACR6, RG_USB20_PHY_REV_6_OFST,
 		RG_USB20_PHY_REV_6, usb20_phy_rev6);
+
+	usb_phy_tuning();
 
 	/* USB PLL Force settings */
 	usb20_pll_settings(false, false);
@@ -1371,7 +1417,7 @@ static int mt_usb_dts_probe(struct platform_device *pdev)
 	if (verion >= CHIP_SW_VER_02)
 		usb20_phy_rev6 = 1;
 	else
-		usb20_phy_rev6 = 1;
+		usb20_phy_rev6 = 0;
 
 	return retval;
 }
@@ -1434,6 +1480,7 @@ static irqreturn_t musb_ipsleep_eint_iddig_isr(int irqnum, void *data)
 static int mtk_usb_ipsleep_eint_irq_en(struct platform_device *pdev)
 {
 	int retval = 0;
+
 	retval = request_irq(usb_ipsleep_irqnum, musb_ipsleep_eint_iddig_isr, IRQF_TRIGGER_LOW, "usbcd_eint",
 					pdev);
 	if (retval != 0) {
@@ -1449,6 +1496,7 @@ static int mt_usb_ipsleep_probe(struct platform_device *pdev)
 	int retval = 0;
 	struct device *dev = &pdev->dev;
 	struct device_node *node = dev->of_node;
+
 	usb_ipsleep_irqnum = irq_of_parse_and_map(node, 0);
 	if (usb_ipsleep_irqnum < 0)
 		return -ENODEV;

@@ -52,11 +52,8 @@
 #define CHARGING_H
 
 #ifndef CONFIG_ARCH_MT8173
-#if (CONFIG_MTK_GAUGE_VERSION != 30)
 #include <mach/mtk_charging.h>
 #endif
-#endif
-#include <linux/types.h>
 
 /* ============================================================ */
 /* define */
@@ -79,7 +76,7 @@ do { \
 	if (Enable_BATDRV_LOG >= (int)num) \
 		switch (num) {\
 		case BAT_LOG_CRTI:\
-			pr_err(fmt, ##args); \
+			pr_notice(fmt, ##args); \
 			break; \
 			/*fall-through*/\
 		default: \
@@ -152,7 +149,7 @@ typedef enum {
 	CHARGING_CMD_SET_DC_VBATOV,
 	CHARGING_CMD_GET_IS_DC_ENABLE,
 	CHARGING_CMD_SET_PEP20_EFFICIENCY_TABLE,
-	CHARGING_CMD_ENABLE_CHR_TYPE_DET,
+	CHARGING_CMD_SW_RESET,
 	CHARGING_CMD_ENABLE_DISCHARGE,
 	CHARGING_CMD_GET_TBUS,
 	CHARGING_CMD_GET_TBAT,
@@ -654,8 +651,5 @@ extern int mtk_chr_enable_direct_charge(unsigned char charging_enable);
 extern int mtk_chr_enable_power_path(unsigned char en);
 extern int mtk_chr_enable_charge(unsigned char charging_enable);
 extern int mtk_chr_reset_aicr_upper_bound(void);
-extern int mtk_chr_enable_chr_type_det(unsigned char en);
-extern int mtk_chr_pd_enable_power_path(unsigned char enable);
-extern int mtk_chr_enable_discharge(bool enable);
 
 #endif /* #ifndef _CHARGING_H */

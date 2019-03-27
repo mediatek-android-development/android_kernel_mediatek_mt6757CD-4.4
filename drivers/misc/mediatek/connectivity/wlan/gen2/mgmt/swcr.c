@@ -360,9 +360,6 @@ VOID swCtrlCmdCategory0(P_ADAPTER_T prAdapter, UINT_8 ucCate, UINT_8 ucAction, U
 	if (ucRead == SWCR_WRITE) {
 		switch (ucIndex) {
 		case SWCTRL_DEBUG:
-#if DBG
-			aucDebugModule[ucOpt0] = (UINT_8) g_au4SwCr[1];
-#endif
 			break;
 		case SWCTRL_WIFI_VAR:
 			break;
@@ -408,11 +405,8 @@ VOID swCtrlCmdCategory0(P_ADAPTER_T prAdapter, UINT_8 ucCate, UINT_8 ucAction, U
 						g_u4mDNSRXFilter &= ~(1 << ucOpt1);
 				}
 
-				if (fgUpdate == TRUE) {
+				if (fgUpdate == TRUE)
 					rStatus = wlanoidSetPacketFilter(prAdapter, u4rxfilter, FALSE, NULL, 0);
-				}
-/* DBGLOG(SW4, INFO,("SWCTRL_RX_MDNS_FILTER: g_u4mDNSRXFilter %x ucOpt0 %x ucOpt1 %x fgUpdate %x u4rxfilter %x, */
-/* rStatus %x\n", g_u4mDNSRXFilter, ucOpt0, ucOpt1, fgUpdate, u4rxfilter, rStatus)); */
 			}
 			break;
 		default:
@@ -421,9 +415,6 @@ VOID swCtrlCmdCategory0(P_ADAPTER_T prAdapter, UINT_8 ucCate, UINT_8 ucAction, U
 	} else {
 		switch (ucIndex) {
 		case SWCTRL_DEBUG:
-#if DBG
-			g_au4SwCr[1] = aucDebugModule[ucOpt0];
-#endif
 			break;
 		case SWCTRL_MAGIC:
 			g_au4SwCr[1] = _SWCTRL_MAGIC;

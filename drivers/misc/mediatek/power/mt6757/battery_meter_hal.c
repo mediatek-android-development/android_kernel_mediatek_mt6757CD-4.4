@@ -21,16 +21,11 @@
 #include <mach/mtk_pmic.h>
 #include <mt-plat/battery_meter.h>
 
-#ifdef CONFIG_MTK_AUXADC_INTF
-#include <mt-plat/mtk_auxadc_intf.h>
-#endif
 
 /* define */
 #define STATUS_OK    0
 #define STATUS_UNSUPPORTED    -1
-#ifndef CONFIG_MTK_AUXADC_INTF
 #define VOLTAGE_FULL_RANGE    1800
-#endif
 #define ADC_PRECISE           32768	/* 12 bits */
 
 #define UNIT_FGCURRENT     (158122)	/* 158.122 uA */
@@ -40,7 +35,6 @@ signed int chip_diff_trim_value_4_0;
 signed int chip_diff_trim_value;	/* unit = 0.1 */
 signed int g_hw_ocv_tune_value;
 kal_bool g_fg_is_charging;
-signed int g_meta_input_cali_current;
 
 /* function prototype */
 
@@ -190,39 +184,28 @@ int get_hw_ocv(void)
 #else
 	signed int adc_result_reg = 0;
 	signed int adc_result = 0;
-	signed int adc_start_sel = 0;
 	signed int r_val_temp = 3;	/*MT6325 use 2, old chip use 4    */
 
 #if defined(SWCHR_POWER_PATH)
 	#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-	adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_WAKEUP_SWCHR);
-	adc_start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
-	#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_PWRON_PCHR);
-	adc_start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
+	  adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_WAKEUP_SWCHR);
 	#else
 	adc_result_reg = pmic_get_register_value(MT6351_PMIC_AUXADC_ADC_OUT_WAKEUP_SWCHR);
-	pmic_get_register_value(MT6351_PMIC_STRUP_AUXADC_START_SEL);
 	#endif
-
+      /*mt6325_upmu_get_rg_adc_out_wakeup_swchr(); */
 	adc_result = (adc_result_reg * r_val_temp * VOLTAGE_FULL_RANGE) / ADC_PRECISE;
 	bm_err("[oam] get_hw_ocv (swchr) : adc_result_reg=%d, adc_result=%d, start_sel=%d\n",
-		 adc_result_reg, adc_result, adc_start_sel);
+		 adc_result_reg, adc_result, pmic_get_register_value(PMIC_STRUP_AUXADC_START_SEL));
 #else
 	#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-	adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_WAKEUP_PCHR);
-	adc_start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
-	#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_PWRON_PCHR);
-	adc_start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
+	  adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_WAKEUP_PCHR);
 	#else
-	adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_WAKEUP_PCHR);
-	adc_start_sel = pmic_get_register_value(MT6351_PMIC_STRUP_AUXADC_START_SEL);
+	adc_result_reg = pmic_get_register_value(MT6351_PMIC_AUXADC_ADC_OUT_WAKEUP_PCHR);
 	#endif
-
+	/*mt6325_upmu_get_rg_adc_out_wakeup_pchr(); */
 	adc_result = (adc_result_reg * r_val_temp * VOLTAGE_FULL_RANGE) / ADC_PRECISE;
 	bm_err("[oam] get_hw_ocv (pchr) : adc_result_reg=%d, adc_result=%d, start_sel=%d\n",
-		 adc_result_reg, adc_result, adc_start_sel);
+		 adc_result_reg, adc_result, pmic_get_register_value(PMIC_STRUP_AUXADC_START_SEL));
 #endif
 
 	adc_result += g_hw_ocv_tune_value;
@@ -240,40 +223,30 @@ int get_hw_ocv(void)
 static void dump_nter(void)
 {
 	#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-	bm_print(BM_LOG_CRTI, "[dump_nter] PMIC_FG_NTER_32_17 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_NTER_32_17));
-	bm_print(BM_LOG_CRTI, "[dump_nter] PMIC_FG_NTER_16_01 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_NTER_16_01));
-	#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	bm_print(BM_LOG_CRTI, "[dump_nter] PMIC_FG_NTER_29_16 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_NTER_29_16));
-	bm_print(BM_LOG_CRTI, "[dump_nter] PMIC_FG_NTER_15_00 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_NTER_15_00));
+	  bm_print(BM_LOG_CRTI, "[dump_nter] upmu_get_fg_nter_29_16 = 0x%x\r\n",
+		   pmic_get_register_value(PMIC_FG_NTER_32_17));
+	  bm_print(BM_LOG_CRTI, "[dump_nter] upmu_get_fg_nter_15_00 = 0x%x\r\n",
+		   pmic_get_register_value(PMIC_FG_CAR_18_03));
 	#else
-	bm_print(BM_LOG_CRTI, "[dump_nter] MT6351_PMIC_FG_NTER_32_17 = 0x%x\r\n",
-		pmic_get_register_value(MT6351_PMIC_FG_NTER_32_17));
-	bm_print(BM_LOG_CRTI, "[dump_nter] MT6351_PMIC_FG_NTER_16_01 = 0x%x\r\n",
-		pmic_get_register_value(MT6351_PMIC_FG_NTER_16_01));
+	  bm_print(BM_LOG_CRTI, "[dump_nter] MT6351_upmu_get_fg_nter_29_16 = 0x%x\r\n",
+		 pmic_get_register_value(MT6351_PMIC_FG_NTER_32_17));
+	bm_print(BM_LOG_CRTI, "[dump_nter] MT6351_upmu_get_fg_nter_15_00 = 0x%x\r\n",
+		 pmic_get_register_value(MT6351_PMIC_FG_CAR_18_03));
 	#endif
 }
 
 static void dump_car(void)
 {
 	#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-	bm_print(BM_LOG_CRTI, "[dump_car] PMIC_FG_CAR_34_19 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_CAR_34_19));
-	bm_print(BM_LOG_CRTI, "[dump_car] PMIC_FG_CAR_18_03 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_CAR_18_03));
-	#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	bm_print(BM_LOG_CRTI, "[dump_car] PMIC_FG_CAR_31_16 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_CAR_31_16));
-	bm_print(BM_LOG_CRTI, "[dump_car] PMIC_FG_CAR_15_00 = 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_CAR_15_00));
+	  bm_print(BM_LOG_CRTI, "[dump_car] upmu_get_fg_car_31_16 = 0x%x\r\n",
+		   pmic_get_register_value(PMIC_FG_CAR_34_19));
+	  bm_print(BM_LOG_CRTI, "[dump_car] upmu_get_fg_car_15_00 = 0x%x\r\n",
+		   pmic_get_register_value(PMIC_FG_CAR_18_03));
 	#else
-	bm_print(BM_LOG_CRTI, "[dump_car] MT6351_PMIC_FG_CAR_34_19 = 0x%x\r\n",
-		pmic_get_register_value(MT6351_PMIC_FG_CAR_34_19));
-	bm_print(BM_LOG_CRTI, "[dump_car] MT6351_PMIC_FG_CAR_18_03 = 0x%x\r\n",
-		pmic_get_register_value(MT6351_PMIC_FG_CAR_18_03));
+	bm_print(BM_LOG_CRTI, "[dump_car] upmu_get_fg_car_31_16 = 0x%x\r\n",
+		 pmic_get_register_value(MT6351_PMIC_FG_CAR_34_19));
+	bm_print(BM_LOG_CRTI, "[dump_car] upmu_get_fg_car_15_00 = 0x%x\r\n",
+		 pmic_get_register_value(MT6351_PMIC_FG_CAR_18_03));
 	#endif
 }
 
@@ -281,7 +254,7 @@ static unsigned int fg_get_data_ready_status(void)
 {
 	unsigned int ret = 0;
 	unsigned int temp_val = 0;
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6353) || defined(CONFIG_MTK_PMIC_CHIP_MT6355)
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
 	ret = pmic_read_interface(PMIC_FG_LATCHDATA_ST, &temp_val, 0xFFFF, 0x0);
 
 	bm_print(BM_LOG_FULL, "[fg_get_data_ready_status] Reg[0x%x]=0x%x\r\n", PMIC_FG_LATCHDATA_ST,
@@ -312,8 +285,6 @@ static signed int fgauge_initialization(void *data)
 	/* */
 #else
 #if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	unsigned int ret = 0;
 #else
 	unsigned int ret = 0;
 #endif
@@ -333,11 +304,7 @@ static signed int fgauge_initialization(void *data)
 	  /*   mt6325_upmu_set_rg_fgadc_ana_ck_pdn(0);*/
 	  pmic_set_register_value(PMIC_CLK_FGADC_DIG_CK_PDN, 0);
 	  /*    mt6325_upmu_set_rg_fgadc_dig_ck_pdn(0);*/
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	pmic_set_register_value(PMIC_RG_FGADC_ANA_CK_PDN, 0);
-	/*   mt6325_upmu_set_rg_fgadc_ana_ck_pdn(0);*/
-	pmic_set_register_value(PMIC_RG_FGADC_DIG_CK_PDN, 0);
-	/*    mt6325_upmu_set_rg_fgadc_dig_ck_pdn(0);*/
+
 #else
 	pmic_set_register_value(MT6351_PMIC_RG_FGADC_ANA_CK_PDN, 0);
 	/*   mt6325_upmu_set_rg_fgadc_ana_ck_pdn(0);*/
@@ -349,8 +316,6 @@ static signed int fgauge_initialization(void *data)
 	pmic_set_register_value(PMIC_FG_CAL, 0x2);
 	pmic_set_register_value(PMIC_FG_AUTOCALRATE, 0x2);
 	pmic_set_register_value(PMIC_FG_ON, 0x0);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	/* nothing if used MT6355 */
 #else
 	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0028, 0x00FF, 0x0);
 #endif
@@ -359,8 +324,6 @@ static signed int fgauge_initialization(void *data)
 	pmic_set_register_value(PMIC_FG_CAL, 0x2);
 	pmic_set_register_value(PMIC_FG_AUTOCALRATE, 0x2);
 	pmic_set_register_value(PMIC_FG_ON, 0x1);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	/* nothing if used MT6355 */
 #else
 	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0029, 0x00FF, 0x0);
 #endif
@@ -371,10 +334,6 @@ static signed int fgauge_initialization(void *data)
 	pmic_set_register_value(PMIC_FG_TIME_RST, 0x1);
 	pmic_set_register_value(PMIC_FG_OFFSET_RST, 0x1);
 	pmic_set_register_value(PMIC_FG_SW_CR, 0x1);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x1F04, 0xFFFF, 0x0);
-	mdelay(1);
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0000, 0x1F04, 0x0);
 #else
 	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x7100, 0xFF00, 0x0);
 #endif
@@ -385,22 +344,11 @@ static signed int fgauge_initialization(void *data)
 	pmic_set_register_value(PMIC_FG_OSR, 0x8);
 	bm_print(BM_LOG_CRTI, "[fgauge_initialization] Reg[0x%x]=0x%x\n", PMIC_FG_OSR_ADDR,
 		 upmu_get_reg_value(PMIC_FG_OSR_ADDR));
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON3, 0x0008, 0xFFFF, 0x0);
-	bm_print(BM_LOG_CRTI,
-	"[fgauge_initialization] OSR1[0x%x]=0x%x OSR2[0x%x]=0x%x\n",
-		PMIC_FG_OSR1_ADDR, upmu_get_reg_value(PMIC_FG_OSR1_ADDR),
-		PMIC_FG_OSR2_ADDR, upmu_get_reg_value(PMIC_FG_OSR2_ADDR));
 #else
-	pmic_set_register_value(PMIC_FG_OSR, 0x8);
+	pmic_set_register_value(MT6351_PMIC_FG_OSR, 0x8);
 	bm_print(BM_LOG_CRTI, "[fgauge_initialization] Reg[0x%x]=0x%x\n", MT6351_PMIC_FG_OSR_ADDR,
 		 upmu_get_reg_value(MT6351_PMIC_FG_OSR_ADDR));
 #endif
-
-	/* mt6335 mt6355 for GM20 */
-	#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	pmic_set_register_value(PMIC_RG_FGADC_RST_SRC_SEL, 0);
-	#endif
 
 	/*make sure init finish */
 	m = 0;
@@ -412,17 +360,6 @@ static signed int fgauge_initialization(void *data)
 				break;
 			}
 		}
-
-		/* init zcv interrupt */
-#if defined(FG_BAT_ZCV_INT)
-		/*pmic_set_register_value(MT6351_PMIC_FG_ZCV_DET_TIME, 0);*/
-		/*pmic_set_register_value(MT6351_PMIC_FG_ZCV_CAR_TH_18_03, 0xffff);*/
-		/*pmic_set_register_value(MT6351_PMIC_FG_ZCV_CAR_TH_33_19, 0xff);*/
-
-		pmic_set_register_value(PMIC_FG_ZCV_DET_EN, 1);
-		pmic_set_register_value(PMIC_RG_INT_EN_FG_ZCV, 1);
-#endif
-
 
 	bm_print(BM_LOG_CRTI, "******** [fgauge_initialization] Done!\n");
 #endif
@@ -441,9 +378,6 @@ static signed int fgauge_read_current(void *data)
 	long long Temp_Value = 0;
 	signed int Current_Compensate_Value = 0;
 #if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-	/* nothing */
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	unsigned int ret = 0;
 #else
 	unsigned int ret = 0;
 #endif
@@ -466,10 +400,8 @@ static signed int fgauge_read_current(void *data)
 	pmic_set_register_value(PMIC_FG_TIME_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_CHARGE_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_SW_RSTCLR, 0x0);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0001, 0x000F, 0x0);
 #else
-	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0200, 0xFF00, 0x0);
+	 ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0200, 0xFF00, 0x0);
 #endif
 	/* (2)     Keep i2c read when status = 1 (0x06) */
 	m = 0;
@@ -485,8 +417,9 @@ static signed int fgauge_read_current(void *data)
 	 * (3)    Read FG_CURRENT_OUT[15:08]
 	 * (4)    Read FG_CURRENT_OUT[07:00]
 	 */
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6353) || defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	uvalue16 = pmic_get_register_value(PMIC_FG_CURRENT_OUT);	/*mt6325_upmu_get_fg_current_out(); */
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
+	  uvalue16 = pmic_get_register_value(PMIC_FG_CURRENT_OUT);	/*mt6325_upmu_get_fg_current_out(); */
+
 #else
 	uvalue16 = pmic_get_register_value(MT6351_PMIC_FG_CURRENT_OUT);	/*mt6325_upmu_get_fg_current_out(); */
 #endif
@@ -498,8 +431,6 @@ static signed int fgauge_read_current(void *data)
 #if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
 	 pmic_set_register_value(PMIC_FG_SW_CLEAR, 0x1);
 	 pmic_set_register_value(PMIC_FG_SW_READ_PRE, 0x0);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0008, 0x000F, 0x0);
 #else
 	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0800, 0xFF00, 0x0);
 #endif
@@ -526,8 +457,6 @@ static signed int fgauge_read_current(void *data)
 	pmic_set_register_value(PMIC_FG_TIME_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_CHARGE_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_SW_RSTCLR, 0x0);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0000, 0x000F, 0x0);
 #else
 	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0000, 0xFF00, 0x0);
 #endif
@@ -598,6 +527,8 @@ static signed int fgauge_read_current(void *data)
 		return STATUS_OK;
 	}
 
+
+
 signed int fgauge_read_IM_current(void *data)
 {
 #if defined(CONFIG_POWER_EXT)
@@ -608,8 +539,8 @@ signed int fgauge_read_IM_current(void *data)
 		/*int m = 0;*/
 		long long Temp_Value = 0;
 		signed int Current_Compensate_Value = 0;
-
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6353) || defined(CONFIG_MTK_PMIC_CHIP_MT6355)
+		/*unsigned int ret = 0;*/
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
 		uvalue16 = pmic_get_register_value(PMIC_FG_R_CURR);
 #else
 		uvalue16 = pmic_get_register_value(MT6351_PMIC_FG_R_CURR);
@@ -709,8 +640,6 @@ signed int fgauge_set_columb_interrupt_internal(void *data, int reset)
 	signed short m;
 	unsigned int car = *(unsigned int *) (data);
 #if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	unsigned int ret = 0;
 #else
 	unsigned int ret = 0;
 #endif
@@ -733,19 +662,7 @@ signed int fgauge_set_columb_interrupt_internal(void *data, int reset)
 			pmic_get_register_value(PMIC_FG_CAR_34_19),
 			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT_L),
 			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT_H));
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-		pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT0_H, 0);
-		pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT0_L, 0);
-		bm_print(BM_LOG_CRTI,
-			"[fgauge_set_columb_interrupt] low:[0xcae]=0x%x 0x%x  high:[0xcb0]=0x%x 0x%x now:0x%x 0x%x %d %d \r\n",
-			pmic_get_register_value(PMIC_FG_BAT0_LTH_15_14),
-			pmic_get_register_value(PMIC_FG_BAT0_LTH_31_16),
-			pmic_get_register_value(PMIC_FG_BAT0_HTH_15_14),
-			pmic_get_register_value(PMIC_FG_BAT0_HTH_31_16),
-			pmic_get_register_value(PMIC_FG_CAR_15_00),
-			pmic_get_register_value(PMIC_FG_CAR_31_16),
-			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT0_L),
-			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT0_H));
+
 #else
 		pmic_set_register_value(MT6351_PMIC_RG_INT_EN_FG_BAT_H, 0);
 		pmic_set_register_value(MT6351_PMIC_RG_INT_EN_FG_BAT_L, 0);
@@ -777,19 +694,7 @@ signed int fgauge_set_columb_interrupt_internal(void *data, int reset)
 			pmic_get_register_value(PMIC_FG_CAR_34_19),
 			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT_L),
 			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT_H));
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-		pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT0_H, 1);
-		pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT0_L, 1);
-		bm_print(BM_LOG_CRTI,
-			"[fgauge_set_columb_interrupt] low:[0xcae]=0x%x 0x%x  high:[0xcb0]=0x%x 0x%x now:0x%x 0x%x %d %d \r\n",
-			pmic_get_register_value(PMIC_FG_BAT0_LTH_15_14),
-			pmic_get_register_value(PMIC_FG_BAT0_LTH_31_16),
-			pmic_get_register_value(PMIC_FG_BAT0_HTH_15_14),
-			pmic_get_register_value(PMIC_FG_BAT0_HTH_31_16),
-			pmic_get_register_value(PMIC_FG_CAR_15_00),
-			pmic_get_register_value(PMIC_FG_CAR_31_16),
-			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT0_L),
-			pmic_get_register_value(PMIC_RG_INT_EN_FG_BAT0_H));
+
 #else
 		pmic_set_register_value(MT6351_PMIC_RG_INT_EN_FG_BAT_H, 1);
 		pmic_set_register_value(MT6351_PMIC_RG_INT_EN_FG_BAT_L, 1);
@@ -834,11 +739,6 @@ signed int fgauge_set_columb_interrupt_internal(void *data, int reset)
 		pmic_set_register_value(PMIC_FG_SW_READ_PRE, 0x1);
 		pmic_set_register_value(PMIC_FG_SW_CR, 0x1);
 	}
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	if (reset == 0)
-		ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0001, 0x1F0F, 0x0);
-	else
-		ret = pmic_config_interface(MT6355_FGADC_CON1, 0x1F05, 0xFF0F, 0x0);
 #else
 	if (reset == 0)
 		ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0200, 0xFF00, 0x0);
@@ -870,23 +770,6 @@ signed int fgauge_set_columb_interrupt_internal(void *data, int reset)
 		 uvalue32_CAR, uvalue32_CAR_MSB, (pmic_get_register_value(PMIC_FG_CAR_18_03)),
 		 (pmic_get_register_value(PMIC_FG_CAR_34_19)));
 
-	/*restore use_chip_trim_value() */
-	car = car * 0x4d14;
-
-	#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	value32_CAR = (pmic_get_register_value(PMIC_FG_CAR_15_00));
-	value32_CAR |= ((pmic_get_register_value(PMIC_FG_CAR_31_16)) & 0xffff) << 16;
-
-	uvalue32_CAR_MSB = (pmic_get_register_value(PMIC_FG_CAR_31_16) & 0x8000) >> 15;
-
-	bm_print(BM_LOG_CRTI,
-		"[fgauge_set_columb_interrupt] FG_CAR = 0x%x   uvalue32_CAR_MSB:0x%x 0x%x 0x%x\r\n",
-		uvalue32_CAR, uvalue32_CAR_MSB, (pmic_get_register_value(PMIC_FG_CAR_15_00)),
-		(pmic_get_register_value(PMIC_FG_CAR_31_16)));
-
-	/*restore use_chip_trim_value() */
-	car = car * 0x4d14;
-
 	#else
 	value32_CAR = (pmic_get_register_value(MT6351_PMIC_FG_CAR_18_03));
 	value32_CAR |= ((pmic_get_register_value(MT6351_PMIC_FG_CAR_34_19)) & 0xffff) << 16;
@@ -897,10 +780,10 @@ signed int fgauge_set_columb_interrupt_internal(void *data, int reset)
 		"[fgauge_set_columb_interrupt] FG_CAR = 0x%x   uvalue32_CAR_MSB:0x%x 0x%x 0x%x\r\n",
 		uvalue32_CAR, uvalue32_CAR_MSB, (pmic_get_register_value(MT6351_PMIC_FG_CAR_18_03)),
 		(pmic_get_register_value(MT6351_PMIC_FG_CAR_34_19)));
+	#endif
 
 	/*restore use_chip_trim_value() */
 	car = car * 0x4d14;
-	#endif
 
 	upperbound = value32_CAR;
 	lowbound = value32_CAR;
@@ -925,38 +808,20 @@ signed int fgauge_set_columb_interrupt_internal(void *data, int reset)
 	pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT_H, 1);
 	pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT_L, 1);
 
+
 	bm_print(BM_LOG_CRTI,
 		 "[fgauge_set_columb_interrupt] low:[0xcae]=0x%x 0x%x   high:[0xcb0]=0x%x 0x%x\r\n",
 		 pmic_get_register_value(PMIC_FG_BLTR_15_00), pmic_get_register_value(PMIC_FG_BLTR_31_16),
 		 pmic_get_register_value(PMIC_FG_BFTR_15_00), pmic_get_register_value(PMIC_FG_BFTR_31_16));
 
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	pmic_set_register_value(PMIC_FG_BAT0_LTH_15_14, lowbound & 0xffff);
-	pmic_set_register_value(PMIC_FG_BAT0_LTH_31_16, (lowbound & 0xffff0000) >> 16);
-	pmic_set_register_value(PMIC_FG_BAT0_HTH_15_14, upperbound & 0xffff);
-	pmic_set_register_value(PMIC_FG_BAT0_HTH_31_16, (upperbound & 0xffff0000) >> 16);
-	mdelay(1);
-	pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT0_H, 1);
-	pmic_set_register_value(PMIC_RG_INT_EN_FG_BAT0_L, 1);
-
-	bm_print(BM_LOG_CRTI,
-		 "[fgauge_set_columb_interrupt] low:[0xcae]=0x%x 0x%x   high:[0xcb0]=0x%x 0x%x\r\n",
-		pmic_get_register_value(PMIC_FG_BAT0_LTH_15_14),
-		pmic_get_register_value(PMIC_FG_BAT0_LTH_31_16),
-		pmic_get_register_value(PMIC_FG_BAT0_HTH_15_14),
-		pmic_get_register_value(PMIC_FG_BAT0_HTH_31_16));
-
 #else
-	pmic_enable_interrupt(FG_BAT_INT_L_NO, 0, "batteryMeter");
-	pmic_enable_interrupt(FG_BAT_INT_H_NO, 0, "batteryMeter");
 	pmic_set_register_value(MT6351_PMIC_FG_BLTR_15_00, lowbound & 0xffff);
 	pmic_set_register_value(MT6351_PMIC_FG_BLTR_31_16, (lowbound & 0xffff0000) >> 16);
 	pmic_set_register_value(MT6351_PMIC_FG_BFTR_15_00, upperbound & 0xffff);
 	pmic_set_register_value(MT6351_PMIC_FG_BFTR_31_16, (upperbound & 0xffff0000) >> 16);
 	mdelay(1);
-	pmic_enable_interrupt(FG_BAT_INT_L_NO, 1, "batteryMeter");
-	pmic_enable_interrupt(FG_BAT_INT_H_NO, 1, "batteryMeter");
-
+	pmic_set_register_value(MT6351_PMIC_RG_INT_EN_FG_BAT_H, 1);
+	pmic_set_register_value(MT6351_PMIC_RG_INT_EN_FG_BAT_L, 1);
 
 
 	bm_print(BM_LOG_CRTI,
@@ -989,9 +854,6 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 	int m = 0;
 	long long Temp_Value = 0;
 #if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	unsigned int ret = 0;
-	unsigned int car_15_00, car_31_16;
 #else
 	unsigned int ret = 0;
 #endif
@@ -1005,7 +867,7 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
  * Read HW Raw Data
  * (1)    Set READ command
  */
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6353) || defined(CONFIG_MTK_PMIC_CHIP_MT6355)
+#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
 	if (reset == 0) {
 		pmic_set_register_value(PMIC_FG_SW_CR, 0x0);
 		pmic_set_register_value(PMIC_FG_SW_READ_PRE, 0x1);
@@ -1022,11 +884,6 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 		pmic_set_register_value(PMIC_FG_SW_READ_PRE, 0x1);
 		pmic_set_register_value(PMIC_FG_SW_CR, 0x1);
 	}
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	if (reset == 0)
-		ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0001, 0x1F05, 0x0);
-	else
-		ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0705, 0x1F05, 0x0);
 #else
 	if (reset == 0)
 		ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0200, 0xFF00, 0x0);
@@ -1053,13 +910,6 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 	uvalue32_CAR |= ((pmic_get_register_value(PMIC_FG_CAR_34_19)) & 0x0FFF) << 5;
 
 	uvalue32_CAR_MSB = (pmic_get_register_value(PMIC_FG_CAR_34_19) & 0x8000) >> 15;
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	car_15_00 = pmic_get_register_value(PMIC_FG_CAR_15_00);
-	car_31_16 = pmic_get_register_value(PMIC_FG_CAR_31_16);
-	uvalue32_CAR = car_15_00 >> 14;
-	uvalue32_CAR |= car_31_16 << 2;
-
-	uvalue32_CAR_MSB = (pmic_get_register_value(PMIC_FG_CAR_31_16) & 0x8000) >> 15;
 #else
 	uvalue32_CAR = (pmic_get_register_value(MT6351_PMIC_FG_CAR_18_03)) >> 11;
 	uvalue32_CAR |= ((pmic_get_register_value(MT6351_PMIC_FG_CAR_34_19)) & 0x0FFF) << 5;
@@ -1067,8 +917,8 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 	uvalue32_CAR_MSB = (pmic_get_register_value(MT6351_PMIC_FG_CAR_34_19) & 0x8000) >> 15;
 #endif
 
-	bm_print(BM_LOG_FULL,
-		"[fgauge_read_columb_internal] FG_CAR = 0x%x\r\n", uvalue32_CAR);
+	bm_print(BM_LOG_FULL, "[fgauge_read_columb_internal] FG_CAR = 0x%x\r\n",
+		 uvalue32_CAR);
 	bm_print(BM_LOG_FULL,
 		 "[fgauge_read_columb_internal] uvalue32_CAR_MSB = 0x%x\r\n",
 		 uvalue32_CAR_MSB);
@@ -1085,8 +935,6 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 	pmic_set_register_value(PMIC_FG_TIME_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_CHARGE_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_SW_RSTCLR, 0x0);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0008, 0x000F, 0x0);
 #else
 	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0800, 0xFF00, 0x0);
 #endif
@@ -1113,8 +961,6 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 	pmic_set_register_value(PMIC_FG_TIME_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_CHARGE_RST, 0x0);
 	pmic_set_register_value(PMIC_FG_SW_RSTCLR, 0x0);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0000, 0x000F, 0x0);
 #else
 	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0000, 0xFF00, 0x0);
 #endif
@@ -1128,7 +974,6 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 		Temp_Value = 0;
 	} else if (uvalue32_CAR_MSB == 0x1) {
 		/* dis-charging */
-		/*Temp_Value = (long long) (dvalue_CAR - 0x3ffff);*/	/* mt6355 use 0x3ffff */
 		Temp_Value = (long long) (dvalue_CAR - 0x1ffff);	/* keep negative value */
 		Temp_Value = Temp_Value - (Temp_Value * 2);
 	} else {
@@ -1161,9 +1006,6 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 		dvalue_CAR = (signed int) (Temp_Value - (Temp_Value * 2));	/* keep negative value */
 	else
 		dvalue_CAR = (signed int) Temp_Value;
-	bm_print(BM_LOG_FULL,
-		"uvalue32_CAR %d uvalue32_CAR_MSB %d Temp_Value %lld dvalue_CAR %d\n",
-			uvalue32_CAR, uvalue32_CAR_MSB, Temp_Value, dvalue_CAR);
 #endif
 
 	bm_print(BM_LOG_FULL, "[fgauge_read_columb_internal] dvalue_CAR = %d\r\n",
@@ -1171,7 +1013,9 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 
 	/*#if (OSR_SELECT_7 == 1) */
 
-	/*Auto adjust value*/
+
+
+/*Auto adjust value*/
 	if (batt_meter_cust_data.r_fg_value != 20) {
 		bm_print(BM_LOG_FULL,
 			 "[fgauge_read_columb_internal] Auto adjust value deu to the Rfg is %d\n Ori CAR=%d, ",
@@ -1187,8 +1031,7 @@ static signed int fgauge_read_columb_internal(void *data, int reset, int precise
 
 	dvalue_CAR = use_chip_trim_value(dvalue_CAR);
 
-	bm_print(BM_LOG_FULL,
-		"[fgauge_read_columb_internal] final dvalue_CAR = %d\r\n",
+	bm_print(BM_LOG_FULL, "[fgauge_read_columb_internal] final dvalue_CAR = %d\r\n",
 		 dvalue_CAR);
 
 	dump_nter();
@@ -1217,125 +1060,6 @@ static signed int fgauge_read_columb_accurate(void *data)
 #endif
 }
 
-static signed int fgauge_set_meta_cali_current(void *data)
-{
-	g_meta_input_cali_current = *(signed int *)(data);
-
-	return STATUS_OK;
-}
-
-#if defined(CONFIG_POWER_EXT)
- /**/
-#else
-static signed int fgauge_get_AUXADC_current_rawdata(unsigned short *uvalue16)
-{
-	int m;
-	int ret;
-	/* (1)    Set READ command */
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0001, 0x000F, 0x0);
-#else
-	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0200, 0xFF00, 0x0);
-#endif
-
-
-	/*(2)     Keep i2c read when status = 1 (0x06) */
-	m = 0;
-	while (fg_get_data_ready_status() == 0) {
-		m++;
-		if (m > 1000) {
-			bm_debug(
-			"[fgauge_get_AUXADC_current_rawdata] fg_get_data_ready_status timeout 1 !\r\n");
-			break;
-		}
-	}
-
-	/* (3)    Read FG_CURRENT_OUT[15:08] */
-	/* (4)    Read FG_CURRENT_OUT[07:00] */
-	*uvalue16 = pmic_get_register_value(PMIC_FG_CURRENT_OUT);
-
-	/* (5)    (Read other data) */
-	/* (6)    Clear status to 0 */
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0008, 0x000F, 0x0);
-#else
-	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0800, 0xFF00, 0x0);
-#endif
-
-	/* (7)    Keep i2c read when status = 0 (0x08) */
-	m = 0;
-	while (fg_get_data_ready_status() != 0) {
-		m++;
-		if (m > 1000) {
-			bm_debug(
-			 "[fgauge_get_AUXADC_current_rawdata] fg_get_data_ready_status timeout 2 !\r\n");
-			break;
-		}
-	}
-
-	/*(8)    Recover original settings */
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0000, 0x000F, 0x0);
-#else
-	ret = pmic_config_interface(MT6351_FGADC_CON0, 0x0000, 0xFF00, 0x0);
-#endif
-
-	return ret;
-}
-
-#endif
-
-static signed int fgauge_meta_cali_car_tune_value(void *data)
-{
-#if defined(CONFIG_POWER_EXT)
-	return STATUS_OK;
-#else
-	int cali_car_tune;
-	long long sum_all = 0;
-	long long temp_sum = 0;
-	int	avg_cnt = 0;
-	int i;
-	unsigned short uvalue16;
-	signed int dvalue = 0;
-	long long Temp_Value = 0;
-	long long current_from_ADC = 0;
-
-	if (g_meta_input_cali_current != 0) {
-		for (i = 0; i < CALI_CAR_TUNE_AVG_NUM; i++) {
-			if (!fgauge_get_AUXADC_current_rawdata(&uvalue16)) {
-				sum_all += uvalue16;
-				avg_cnt++;
-			}
-			mdelay(30);
-		}
-		/*calculate the real world data    */
-		/*current_from_ADC = sum_all / avg_cnt;*/
-		temp_sum = sum_all;
-		do_div(temp_sum, avg_cnt);
-		current_from_ADC = temp_sum;
-
-		Temp_Value = current_from_ADC * UNIT_FGCURRENT;
-		do_div(Temp_Value, 1000000);
-		dvalue = (unsigned int) Temp_Value;
-
-		/* Auto adjust value */
-		if (batt_meter_cust_data.r_fg_value != 20)
-			dvalue = (dvalue * 20) / batt_meter_cust_data.r_fg_value;
-
-		cali_car_tune = g_meta_input_cali_current * 1000 / dvalue;	/* 1000 base, so multiple by 1000*/
-		*(signed int *) (data) = cali_car_tune;
-
-		pr_err(
-			"[fgauge_meta_cali_car_tune_value][%d] meta:%d, adc:%lld, UNI_FGCUR:%d, r_fg_value:%d\n",
-			cali_car_tune, g_meta_input_cali_current, current_from_ADC,
-			UNIT_FGCURRENT, batt_meter_cust_data.r_fg_value);
-
-		return STATUS_OK;
-	}
-
-	return STATUS_UNSUPPORTED;
-#endif
-}
 
 static signed int fgauge_hw_reset(void *data)
 {
@@ -1345,8 +1069,6 @@ static signed int fgauge_hw_reset(void *data)
 	volatile unsigned int val_car = 1;
 	unsigned int val_car_temp = 1;
 #if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	unsigned int ret = 0;
 #else
 	unsigned int ret = 0;
 #endif
@@ -1359,8 +1081,6 @@ static signed int fgauge_hw_reset(void *data)
 		pmic_set_register_value(PMIC_FG_TIME_RST, 0x1);
 		pmic_set_register_value(PMIC_FG_OFFSET_RST, 0x1);
 		pmic_set_register_value(PMIC_FG_SW_CR, 0x1);
-#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-		ret = pmic_config_interface(MT6355_FGADC_CON1, 0x0600, 0x1F00, 0x0);
 #else
 		ret = pmic_config_interface(MT6351_FGADC_CON0, 0x7100, 0xFF00, 0x0);
 #endif
@@ -1382,15 +1102,7 @@ static signed int read_adc_v_bat_sense(void *data)
 #else
 #if defined(SWCHR_POWER_PATH)
 	*(signed int *) (data) =
-#ifndef CONFIG_MTK_AUXADC_INTF
-	#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	PMIC_IMM_GetOneChannelValue(PMIC_AUX_BATSNS_AP, *(signed int *) (data), 1);
-	#else
-	PMIC_IMM_GetOneChannelValue(PMIC_AUX_ISENSE_AP, *(signed int *) (data), 1);
-	#endif
-#else
-	pmic_get_auxadc_value(AUXADC_LIST_BATADC);
-#endif
+		PMIC_IMM_GetOneChannelValue(PMIC_AUX_ISENSE_AP, *(signed int *) (data), 1);
 #else
 	*(signed int *) (data) =
 		PMIC_IMM_GetOneChannelValue(PMIC_AUX_BATSNS_AP, *(signed int *) (data), 1);
@@ -1409,11 +1121,7 @@ static signed int read_adc_v_i_sense(void *data)
 #else
 #if defined(SWCHR_POWER_PATH)
 	*(signed int *) (data) =
-#ifndef CONFIG_MTK_AUXADC_INTF
 	PMIC_IMM_GetOneChannelValue(PMIC_AUX_BATSNS_AP, *(signed int *) (data), 1);
-#else
-	0; /* MT6355 doesn't have ISENSE AUXADC */
-#endif
 #else
 	*(signed int *) (data) =
 	PMIC_IMM_GetOneChannelValue(PMIC_AUX_ISENSE_AP, *(signed int *) (data), 1);
@@ -1434,11 +1142,7 @@ static signed int read_adc_v_bat_temp(void *data)
 	bm_print(BM_LOG_FULL,
 	 "[read_adc_v_bat_temp] return PMIC_IMM_GetOneChannelValue(4,times,1);\n");
 	*(signed int *) (data) =
-#ifndef CONFIG_MTK_AUXADC_INTF
 	PMIC_IMM_GetOneChannelValue(PMIC_AUX_BATON_AP, *(signed int *) (data), 1);
-#else
-	pmic_get_auxadc_value(AUXADC_LIST_BATTEMP);
-#endif
 #endif
 #endif
 
@@ -1452,11 +1156,7 @@ static signed int read_adc_v_charger(void *data)
 #else
 	signed int val;
 
-#ifndef CONFIG_MTK_AUXADC_INTF
 	val = PMIC_IMM_GetOneChannelValue(PMIC_AUX_VCDT_AP, *(signed int *) (data), 1);
-#else
-	val = pmic_get_auxadc_value(AUXADC_LIST_VCDT);
-#endif
 	val =
 		(((batt_meter_cust_data.r_charger_1 +
 		batt_meter_cust_data.r_charger_2) * 100 * val) /
@@ -1483,98 +1183,6 @@ static signed int read_hw_ocv(void *data)
 	return STATUS_OK;
 }
 
-static signed int read_is_hw_ocv_ready(void *data)
-{
-#if defined(CONFIG_POWER_EXT)
-	*(signed int *) (data) = 0;
-#else
-#if defined(SWCHR_POWER_PATH)
-	#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-	*(signed int *) (data) = pmic_get_register_value(PMIC_AUXADC_ADC_RDY_PWRON_PCHR);
-	pmic_set_register_value(PMIC_AUXADC_ADC_RDY_PWRON_CLR, 1);
-	mdelay(1);
-	pmic_set_register_value(PMIC_AUXADC_ADC_RDY_PWRON_CLR, 0);
-	#else
-	*(signed int *) (data) = pmic_get_register_value(PMIC_AUXADC_ADC_RDY_WAKEUP_SWCHR);
-	pmic_set_register_value(PMIC_AUXADC_ADC_RDY_WAKEUP_CLR, 1);
-	mdelay(1);
-	pmic_set_register_value(PMIC_AUXADC_ADC_RDY_WAKEUP_CLR, 0);
-	#endif
-	bm_print(BM_LOG_CRTI, "[read_is_hw_ocv_ready] is_hw_ocv_ready(SWCHR) %d\n", *(signed int *) (data));
-#else
-	*(signed int *) (data) = pmic_get_register_value(PMIC_AUXADC_ADC_RDY_WAKEUP_PCHR);
-	bm_print(BM_LOG_CRTI, "[read_is_hw_ocv_ready] is_hw_ocv_ready(PCHR) %d\n", *(signed int *) (data));
-	pmic_set_register_value(PMIC_AUXADC_ADC_RDY_WAKEUP_CLR, 1);
-	mdelay(1);
-	pmic_set_register_value(PMIC_AUXADC_ADC_RDY_WAKEUP_CLR, 0);
-#endif
-#endif
-
-	return STATUS_OK;
-}
-
-int get_zcv_int_hw_ocv(void)
-{
-#if defined(CONFIG_POWER_EXT)
-	return 4001;
-	bm_print(BM_LOG_CRTI, "[get_hw_ocv] TBD\n");
-#else
-	signed int adc_result_reg = 0;
-	signed int adc_result = 0;
-	signed int r_val_temp = 3;	/*MT6325 use 2, old chip use 4    */
-	signed int start_sel;
-
-#if defined(SWCHR_POWER_PATH)
-	#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-		adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_FGADC1);
-		start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
-	#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-		adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_FGADC_PCHR);
-		start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
-	#else
-		adc_result_reg = pmic_get_register_value(MT6351_PMIC_AUXADC_ADC_OUT_FGADC1);
-		start_sel = pmic_get_register_value(MT6351_PMIC_STRUP_AUXADC_START_SEL);
-	#endif
-	adc_result = (adc_result_reg * r_val_temp * VOLTAGE_FULL_RANGE) / ADC_PRECISE;
-	bm_err("[oam] get_zcv_int_hw_ocv (swchr) : adc_result_reg=%d, adc_result=%d, start_sel=%d\n",
-		 adc_result_reg, adc_result, start_sel);
-#else
-	#if defined(CONFIG_MTK_PMIC_CHIP_MT6353)
-		adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_FGADC2);
-		start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
-	#elif defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-		adc_result_reg = pmic_get_register_value(PMIC_AUXADC_ADC_OUT_FGADC_PCHR);
-		start_sel = pmic_get_register_value(PMIC_RG_STRUP_AUXADC_START_SEL);
-	#else
-		adc_result_reg = pmic_get_register_value(MT6351_PMIC_AUXADC_ADC_OUT_FGADC2);
-		start_sel = pmic_get_register_value(MT6351_PMIC_STRUP_AUXADC_START_SEL);
-	#endif
-	adc_result = (adc_result_reg * r_val_temp * VOLTAGE_FULL_RANGE) / ADC_PRECISE;
-	bm_err("[oam] get_zcv_int_hw_ocv (pchr) : adc_result_reg=%d, adc_result=%d, start_sel=%d\n",
-		 adc_result_reg, adc_result, start_sel);
-#endif
-
-	adc_result += g_hw_ocv_tune_value;
-	return adc_result;
-#endif
-}
-
-static signed int read_zcv_int_hw_ocv(void *data)
-{
-#if defined(CONFIG_POWER_EXT)
-	*(signed int *) (data) = 3999;
-#else
-#if 0
-	*(signed int *) (data) = PMIC_IMM_GetOneChannelValue(AUX_BATSNS_AP, 5, 1);
-	bm_print(BM_LOG_CRTI, "[read_hw_ocv] By SW AUXADC for bring up\n");
-#else
-	*(signed int *) (data) = get_zcv_int_hw_ocv();
-#endif
-#endif
-
-	return STATUS_OK;
-}
-
 static signed int dump_register_fgadc(void *data)
 {
 	return STATUS_OK;
@@ -1590,7 +1198,7 @@ static signed int read_battery_plug_out_status(void *data)
 
 static signed int(*bm_func[BATTERY_METER_CMD_NUMBER]) (void *data);
 
-signed int bm_ctrl_cmd(BATTERY_METER_CTRL_CMD cmd, void *data)
+signed int bm_ctrl_cmd(enum BATTERY_METER_CTRL_CMD cmd, void *data)
 {
 	signed int status = STATUS_UNSUPPORTED;
 	static signed int init = -1;
@@ -1611,10 +1219,6 @@ signed int bm_ctrl_cmd(BATTERY_METER_CTRL_CMD cmd, void *data)
 		bm_func[BATTERY_METER_CMD_SET_COLUMB_INTERRUPT] = fgauge_set_columb_interrupt;
 		bm_func[BATTERY_METER_CMD_GET_BATTERY_PLUG_STATUS] = read_battery_plug_out_status;
 		bm_func[BATTERY_METER_CMD_GET_HW_FG_CAR_ACT] = fgauge_read_columb_accurate;
-		bm_func[BATTERY_METER_CMD_GET_IS_HW_OCV_READY] = read_is_hw_ocv_ready;
-		bm_func[BATTERY_METER_CMD_SET_META_CALI_CURRENT] = fgauge_set_meta_cali_current;
-		bm_func[BATTERY_METER_CMD_META_CALI_CAR_TUNE_VALUE] = fgauge_meta_cali_car_tune_value;
-		bm_func[BATTERY_METER_CMD_GET_ZCV_INT_HW_OCV] = read_zcv_int_hw_ocv;
 	}
 
 	if (cmd < BATTERY_METER_CMD_NUMBER) {

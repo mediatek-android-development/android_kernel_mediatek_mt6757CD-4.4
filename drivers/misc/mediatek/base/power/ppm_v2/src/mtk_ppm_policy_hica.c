@@ -77,6 +77,7 @@ int cur_hica_variant = 1;
 int hica_overutil = 80;
 #endif
 
+
 /* other members will init by ppm_main */
 static struct ppm_policy_data hica_policy = {
 	.name			= __stringify(PPM_POLICY_HICA),
@@ -90,9 +91,13 @@ static struct ppm_policy_data hica_policy = {
 };
 
 struct ppm_hica_algo_data ppm_hica_algo_data = {
+#ifdef PPM_HICA_2P0
+	.cur_state = PPM_POWER_STATE_ALL,
+	.new_state = PPM_POWER_STATE_ALL,
+#else
 	.cur_state = PPM_POWER_STATE_4LL_L,
 	.new_state = PPM_POWER_STATE_4LL_L,
-
+#endif
 	.ppm_cur_loads = 0,
 	.ppm_cur_tlp = 0,
 	.ppm_cur_nr_heavy_task = 0,
@@ -164,6 +169,16 @@ void mt_ppm_hica_update_algo_data(unsigned int cur_loads,
 				goto end;
 			} else {
 				ppm_hica_algo_data.new_state = cur_state;
+#ifdef PPM_HICA_2P0
+				ppm_dbg(HICA, "[%s(%d)]hold in %s state, capacity_hold_cnt = %d, bigtsk_hold_cnt = %d, freq_hold_cnt = %d\n",
+					(i == 0) ? "PERF" : "PWR",
+					j,
+					ppm_get_power_state_name(cur_state),
+					data->transition_data[j].capacity_hold_cnt,
+					data->transition_data[j].bigtsk_hold_cnt,
+					data->transition_data[j].freq_hold_cnt
+					);
+#else
 #if PPM_HICA_VARIANT_SUPPORT
 				ppm_dbg(HICA, "[%s(%d)]hold in %s state, loading_cnt = %d, freq_cnt = %d, overutil_l_hold_cnt = %d, .overutil_h_hold_cnt = %d\n",
 					(i == 0) ? "PERF" : "PWR",
@@ -182,6 +197,7 @@ void mt_ppm_hica_update_algo_data(unsigned int cur_loads,
 					data->transition_data[j].loading_hold_cnt,
 					data->transition_data[j].freq_hold_cnt
 					);
+#endif
 #endif
 			}
 		}
@@ -401,11 +417,17 @@ static void ppm_hica_reset_data_for_state(enum ppm_power_state state)
 			data = state_info[state].transfer_by_perf;
 
 		for (j = 0; j < data->size; j++) {
+#ifdef PPM_HICA_2P0
+			data->transition_data[j].capacity_hold_cnt = 0;
+			data->transition_data[j].bigtsk_hold_cnt = 0;
+			data->transition_data[j].freq_hold_cnt = 0;
+#else
 			data->transition_data[j].freq_hold_cnt = 0;
 			data->transition_data[j].loading_hold_cnt = 0;
 #if PPM_HICA_VARIANT_SUPPORT
 			data->transition_data[j].overutil_l_hold_cnt = 0;
 			data->transition_data[j].overutil_h_hold_cnt = 0;
+#endif
 #endif
 		}
 	}
@@ -487,7 +509,11 @@ static ssize_t ppm_hica_power_state_proc_write(struct file *file, const char __u
 
 	if (!kstrtoint(buf, 10, &state)) {
 #ifdef PPM_DISABLE_CLUSTER_MIGRATION
+#ifdef PPM_HICA_2P0
+		if (state == PPM_POWER_STATE_L_ONLY)
+#else
 		if (state == PPM_POWER_STATE_L_ONLY || state == PPM_POWER_STATE_4L_LL)
+#endif
 			ppm_warn("Invalid state(%d) since cluster migration is disabled!\n", state);
 		else
 			fix_power_state = (state == -1) ? PPM_POWER_STATE_NONE : state;
@@ -558,7 +584,20 @@ static ssize_t ppm_hica_overutil_proc_write(struct file *file, const char __user
 	return count;
 }
 #endif
+
 PROC_FOPS_RW(hica_power_state);
+#ifdef PPM_HICA_2P0
+PROC_FOPS_RW_HICA_SETTINGS(mode_mask, p->mode_mask);
+PROC_FOPS_RW_HICA_SETTINGS(capacity_hold_time, p->capacity_hold_time);
+PROC_FOPS_RO_HICA_SETTINGS(capacity_hold_cnt, p->capacity_hold_cnt);
+PROC_FOPS_RW_HICA_SETTINGS(capacity_bond, p->capacity_bond);
+PROC_FOPS_RW_HICA_SETTINGS(bigtsk_hold_time, p->bigtsk_hold_time);
+PROC_FOPS_RO_HICA_SETTINGS(bigtsk_hold_cnt, p->bigtsk_hold_cnt);
+PROC_FOPS_RW_HICA_SETTINGS(bigtsk_l_bond, p->bigtsk_l_bond);
+PROC_FOPS_RW_HICA_SETTINGS(bigtsk_h_bond, p->bigtsk_h_bond);
+PROC_FOPS_RW_HICA_SETTINGS(freq_hold_time, p->freq_hold_time);
+PROC_FOPS_RO_HICA_SETTINGS(freq_hold_cnt, p->freq_hold_cnt);
+#else /* 1p0, 1p5, 1p75 */
 PROC_FOPS_RW_HICA_SETTINGS(mode_mask, p->mode_mask);
 PROC_FOPS_RW_HICA_SETTINGS(loading_delta, p->loading_delta);
 PROC_FOPS_RW_HICA_SETTINGS(loading_hold_time, p->loading_hold_time);
@@ -574,6 +613,7 @@ PROC_FOPS_RW_HICA_SETTINGS(overutil_l_hold_time, p->overutil_l_hold_time);
 PROC_FOPS_RO_HICA_SETTINGS(overutil_l_hold_cnt, p->overutil_l_hold_cnt);
 PROC_FOPS_RW_HICA_SETTINGS(overutil_h_hold_time, p->overutil_h_hold_time);
 PROC_FOPS_RO_HICA_SETTINGS(overutil_h_hold_cnt, p->overutil_h_hold_cnt);
+#endif
 #endif
 
 #define OUTPUT_BUF_SIZE	32
@@ -592,6 +632,24 @@ static int __init ppm_hica_policy_init(void)
 		const struct file_operations *fops;
 	};
 
+#ifdef PPM_HICA_2P0
+	const struct pentry entries[] = {
+		PROC_ENTRY(hica_power_state),
+	};
+
+	const struct pentry trans_rule_entries[] = {
+		PROC_ENTRY(mode_mask),
+		PROC_ENTRY(capacity_hold_time),
+		PROC_ENTRY(capacity_hold_cnt),
+		PROC_ENTRY(capacity_bond),
+		PROC_ENTRY(bigtsk_hold_time),
+		PROC_ENTRY(bigtsk_hold_cnt),
+		PROC_ENTRY(bigtsk_l_bond),
+		PROC_ENTRY(bigtsk_h_bond),
+		PROC_ENTRY(freq_hold_time),
+		PROC_ENTRY(freq_hold_cnt),
+	};
+#else
 	const struct pentry entries[] = {
 		PROC_ENTRY(hica_power_state),
 #if PPM_HICA_VARIANT_SUPPORT
@@ -616,6 +674,7 @@ static int __init ppm_hica_policy_init(void)
 		PROC_ENTRY(overutil_h_hold_cnt),
 #endif
 	};
+#endif
 
 	FUNC_ENTER(FUNC_LV_HICA);
 

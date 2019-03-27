@@ -17,36 +17,13 @@
 #else
 #include <mt-plat/mtk_io.h>
 #include <mt-plat/sync_write.h>
-#include <mach/mtk_secure_api.h>
+#include <mt-plat/mtk_secure_api.h>
 #endif
 
 #include "mtk_dcm_autogen.h"
 
-#ifndef __KERNEL__
-
-/*
-*unsigned int reg_read(UINT32P reg_addr)
-*{
-*	return *((UINT32P)(reg_addr));
-*}
-*void reg_write(UINT32P reg_addr, unsigned int wdata)
-*{
-*	*((UINT32P)(reg_addr)) = wdata;
-*}
-*/
-
-#define IOMEM(a) (a)
-#define __raw_readl(a)  (*(volatile unsigned long*)(a))
-/* #define dsb() do { __asm__ __volatile__ ("dsb\n\t"); } while(0) */
-#define mt_reg_sync_writel(val, addr)  ({ *(unsigned long *)(addr) = val; dsb(); })
-
 #define reg_read(addr)	__raw_readl(IOMEM(addr))
 #define reg_write(addr, val)	mt_reg_sync_writel((val), ((void *)addr))
-
-#else
-#define reg_read(addr)	__raw_readl(IOMEM(addr))
-#define reg_write(addr, val)	mt_reg_sync_writel((val), ((void *)addr))
-#endif
 
 #if defined(__KERNEL__) /* for KERNEL */
 #if defined(CONFIG_ARM_PSCI) || defined(CONFIG_MTK_PSCI)

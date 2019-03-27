@@ -19,6 +19,13 @@ ccflags-y  += -I$(srctree)/drivers/misc/mediatek/base/power/include/
 ccflags-y  += -I$(srctree)/drivers/misc/mediatek/video/include
 ccflags-y  += -I$(srctree)/drivers/misc/mediatek/gpu/ged/include
 ccflags-y  += -I$(srctree)/drivers/misc/mediatek/thermal/common/inc/
+ccflags-y  += -I$(srctree)/drivers/power/mediatek/
+ccflags-y  += -I$(srctree)/drivers/misc/mediatek/base/power/eem_v1/inc/
+ccflags-y  += -I$(srctree)/drivers/misc/mediatek/dfrc/
+ifeq ($(CONFIG_MTK_TINYSYS_SSPM_SUPPORT),y)
+ccflags-y  += -I$(srctree)/drivers/misc/mediatek/sspm/
+ccflags-y  += -I$(srctree)/drivers/misc/mediatek/sspm/$(MTK_PLATFORM)
+endif
 
 ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6735"))
 ifeq ($(CONFIG_ARCH_MT6735),y)
@@ -60,7 +67,7 @@ ifeq ($(CONFIG_MTK_THERMAL_PA_VIA_ATCMD),y)
     #obj-$(CONFIG_THERMAL) += mtk_cooler_mdtxpwr.o
     #obj-$(CONFIG_THERMAL) += mtk_cooler_mdulthro.o
     #obj-$(CONFIG_THERMAL) += mtk_cooler_mutt.o
-	obj-$(CONFIG_THERMAL)  += mtk_cooler_3Gmutt.o
+	#obj-$(CONFIG_THERMAL)  += mtk_cooler_3Gmutt.o
 endif
 obj-$(CONFIG_THERMAL) += mtk_cooler_bcct.o
 obj-$(CONFIG_THERMAL) += mtk_cooler_atm.o
@@ -120,13 +127,15 @@ ifeq ($(CONFIG_MTK_THERMAL_PA_VIA_ATCMD),y)
     #obj-$(CONFIG_THERMAL) += mtk_cooler_mdulthro.o
     obj-$(CONFIG_THERMAL) += mtk_cooler_mutt.o
 endif
-    obj-$(CONFIG_THERMAL) += mtk_cooler_fps.o
-
+obj-$(CONFIG_THERMAL) += mtk_cooler_fps.o
 ifeq ($(CONFIG_MTK_PUMP_EXPRESS_PLUS_30_SUPPORT),y)
 	obj-$(CONFIG_THERMAL) += mtk_cooler_bcct_v1.o
 else
 	ifeq ($(CONFIG_MTK_GAUGE_VERSION),30)
 		obj-$(CONFIG_THERMAL) += mtk_cooler_bcct_v1.o
+		ifeq ($(CONFIG_MTK_DUAL_CHARGER_SUPPORT),y)
+			obj-$(CONFIG_THERMAL) += mtk_cooler_bcct_2nd.o
+		endif
 	else
 		obj-$(CONFIG_THERMAL) += mtk_cooler_bcct.o
 	endif
@@ -137,3 +146,27 @@ obj-$(CONFIG_THERMAL) += mtk_cooler_dtm.o
 obj-$(CONFIG_THERMAL) += mtk_cooler_sysrst.o
 endif
 
+
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6799" "mt6759" "mt6763" "mt6758" "mt6739"))
+ifeq ($(CONFIG_MTK_THERMAL_PA_VIA_ATCMD),y)
+    obj-$(CONFIG_THERMAL) += mtk_cooler_mutt.o
+endif
+obj-$(CONFIG_THERMAL) += mtk_cooler_fps.o
+ifeq ($(CONFIG_MTK_PUMP_EXPRESS_PLUS_30_SUPPORT),y)
+	obj-$(CONFIG_THERMAL) += mtk_cooler_bcct_v1.o
+else
+	ifeq ($(CONFIG_MTK_GAUGE_VERSION),30)
+		obj-$(CONFIG_THERMAL) += mtk_cooler_bcct_v1.o
+		ifeq ($(CONFIG_MTK_DUAL_CHARGER_SUPPORT),y)
+			obj-$(CONFIG_THERMAL) += mtk_cooler_bcct_2nd.o
+		endif
+	else
+		obj-$(CONFIG_THERMAL) += mtk_cooler_bcct.o
+	endif
+endif
+obj-$(CONFIG_THERMAL) += mtk_cooler_atm.o
+obj-$(CONFIG_THERMAL) += mtk_cooler_dtm.o
+obj-$(CONFIG_THERMAL) += mtk_cooler_sysrst.o
+obj-$(CONFIG_THERMAL) += mtk_cooler_NR.o
+obj-$(CONFIG_THERMAL) += mtk_cooler_VR_FPS.o
+endif

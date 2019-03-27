@@ -70,6 +70,11 @@ the GNU General Public License for more details at http://www.gnu.org/licenses/g
 #endif
 
 #include "extd_platform.h"
+
+#ifdef CONFIG_MACH_MT6799
+#include "mt6336.h"
+#endif
+
 #ifdef CONFIG_IO_DRIVING
 #include "mt-plat/sync_write.h"
 #include <linux/of.h>
@@ -153,6 +158,11 @@ int	debug_msgs	= 1;	// print all msgs, default should be '0'
 //int	debug_msgs	= 3;	// print all msgs, default should be '0'
 
 static bool reset_on_exit = 0; // request to reset hw before unloading driver
+
+#ifdef CONFIG_MACH_MT6799
+/* declaration mt6336 controller */
+struct mt6336_ctrl *mt6336_ctrl;
+#endif
 
 module_param(debug_msgs, int, S_IRUGO);
 module_param(reset_on_exit, bool, S_IRUGO);
@@ -528,7 +538,7 @@ void mhl_tx_vbus_control(enum vbus_power_state power_state)
 #ifdef ENABLE_MHL_VBUS_POWER_OUT
 	///struct mhl_dev_context *dev_context;
 	///dev_context = i2c_get_clientdata(device_addresses[0].client);	// TODO: FD, TBC, it seems the 'client' is always 'NULL', is it right here
-	printk("%s: mhl_tx_vbus_control3 %d-%d received!\n", __func__, VBUS_state, power_state);
+	pr_info("%s: mhl_tx_vbus_control3 %d-%d received!\n", __func__, VBUS_state, power_state);
     if(VBUS_state == power_state)
         return;
         
@@ -544,24 +554,24 @@ void mhl_tx_vbus_control(enum vbus_power_state power_state)
 	case VBUS_ON:
 		//set_pin(dev_context,TX2MHLRX_PWR_M,0);
 		//set_pin(dev_context,LED_SRC_VBUS_ON,GPIO_LED_ON);
-		printk(	"%s:  power chg %d received!\n",
+		pr_info("%s:  power chg %d received!\n",
 				__func__, battery_meter_get_charger_voltage());
 		if(battery_meter_get_charger_voltage() > 4000)
 		    VBUS_state = VBUS_OFF;
 		else
     		mtk_enable_pmic_otg_mode();
-		printk(	"%s:  power chg %d received!\n",
+		pr_info("%s:  power chg %d received!\n",
 				__func__, battery_meter_get_charger_voltage());
 		msleep(100);
 		break;
 
 	default:
-		printk(	"%s: Invalid power state %d received!\n",
+		pr_info("%s: Invalid power state %d received!\n",
 				__func__, power_state);
 		break;
 	}        
 #else
-	printk(	"%s: do not support power out %d received!\n",
+	pr_info("%s: do not support power out %d received!\n",
 				__func__, power_state);
 #endif	
 }
@@ -680,7 +690,7 @@ void print_formatted_debug_msg(int level,
 	len = vscnprintf(msg_offset, remaining_msg_len, fmt, ap);
 	va_end(ap);
 
-	printk(msg);
+	pr_info("%s\n", msg);
 
 	kfree(msg);
 }
@@ -1067,13 +1077,29 @@ void dpi_gpio_ctrl(int enable)
 	if (!iocfg_1_base)
 		pr_debug("[IOCFG_1] base failed\n");
 	else {
-		if(enable) {
+		if (enable) {
 			HDMI_REG_SET_FIELD(0xFF000000, (iocfg_1_base + 0xA0), 0x11000000);
 			HDMI_REG_SET_FIELD(0xFF, (iocfg_1_base + 0xB0), 0x11);
 		} else {
 			HDMI_REG_SET_FIELD(0xFF000000, (iocfg_1_base + 0xA0), 0x0);
 			HDMI_REG_SET_FIELD(0xFF, (iocfg_1_base + 0xB0), 0x0);
 		}
+	}
+#endif
+
+#ifdef CONFIG_MACH_MT6799
+	node = of_find_compatible_node(NULL, NULL, "mediatek,iocfg_rb");
+	if (!node)
+		pr_debug("[iocfg_rb] find node failed\n");
+
+	iocfg_1_base = of_iomap(node, 0);
+	if (!iocfg_1_base)
+		pr_debug("[iocfg_rb] base failed\n");
+	else {
+		if (enable)
+			HDMI_REG_SET_FIELD(0xF00, (iocfg_1_base + 0xB0), 0x400);
+		else
+			HDMI_REG_SET_FIELD(0xF00, (iocfg_1_base + 0xB0), 0x0);
 	}
 #endif
 #endif
@@ -1117,11 +1143,12 @@ void mhl_power_ctrl(int enable)
 
 void reset_mhl_board(int hwResetPeriod, int hwResetDelay)
 {
+#ifndef CONFIG_MACH_MT6799
     struct pinctrl_state *rst_low_state = NULL;
     struct pinctrl_state *rst_high_state = NULL;
     int err_cnt = 0;
     int ret = 0;
-    
+
     MHL_DBG("reset_mhl_board+  %ld !!\n", sizeof(rst_gpio_name)); 
     if (IS_ERR(mhl_pinctrl)) {
         ret = PTR_ERR(mhl_pinctrl);
@@ -1152,7 +1179,22 @@ void reset_mhl_board(int hwResetPeriod, int hwResetDelay)
     mdelay(hwResetPeriod);
     pinctrl_select_state(mhl_pinctrl, rst_high_state);   
     mdelay(hwResetDelay);
-
+#else
+	/* Enable mt6336 controller before use mt6336 */
+	mt6336_ctrl_enable(mt6336_ctrl);
+	/* Config MT6336 GPIO3(MT6336 HW GPIO3 == MT6336  SW GPIO7) */
+	/* out high */
+	mt6336_set_flag_register_value(MT6336_GPIO_DOUT0_SET, 0x80);
+	mdelay(hwResetPeriod);
+	/* out low*/
+	mt6336_set_flag_register_value(MT6336_GPIO_DOUT0_CLR, 0x80);
+	mdelay(hwResetPeriod);
+	/* out high */
+	mt6336_set_flag_register_value(MT6336_GPIO_DOUT0_SET, 0x80);
+	mdelay(hwResetDelay);
+	/* Disable mt6336 controller when unuse mt6336 */
+	mt6336_ctrl_disable(mt6336_ctrl);
+#endif
 }
 
 void cust_power_init(void)
@@ -1192,14 +1234,33 @@ void mhl_platform_init(void)
 		goto plat_init_exit;
 	}
 
+#ifndef CONFIG_MACH_MT6799
 	pin_state = pinctrl_lookup_state(mhl_pinctrl, rst_gpio_name[1]);
 	if (IS_ERR(pin_state)) {
 		ret = PTR_ERR(pin_state);
-		MHL_DBG("Cannot find MHL RST pinctrl low!!\n");
+		MHL_DBG("Cannot find MHL RST pinctrl high!!\n");
 	}
 	else
 		pinctrl_select_state(mhl_pinctrl, pin_state);
 	MHL_DBG("mhl_platform_init reset gpio init done!!\n");
+#else
+	/* Get mt6336 controller when the first time of use mt6336 */
+	mt6336_ctrl = mt6336_ctrl_get("mt6336_mhl");
+
+	/* Enable mt6336 controller before use mt6336 */
+	mt6336_ctrl_enable(mt6336_ctrl);
+
+	/* Config MT6336 GPIO3(MT6336 HW GPIO3 == MT6336  SW GPIO7) */
+	/* set to GPIO mode */
+	mt6336_set_flag_register_value(MT6336_GPIO7_MODE, 0x0);
+	/* set to OUTPUT mode */
+	mt6336_set_flag_register_value(MT6336_GPIO_DIR0_SET, 0x80);
+	/* output high */
+	mt6336_set_flag_register_value(MT6336_GPIO_DOUT0_SET, 0x80);
+
+	/* Disable mt6336 controller when unuse mt6336 */
+	mt6336_ctrl_disable(mt6336_ctrl);
+#endif
 
 	pin_state = pinctrl_lookup_state(mhl_pinctrl, eint_gpio_name[0]);
 	if (IS_ERR(pin_state)) {

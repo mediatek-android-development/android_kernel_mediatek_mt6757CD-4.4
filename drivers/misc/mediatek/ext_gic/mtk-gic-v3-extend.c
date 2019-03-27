@@ -31,7 +31,7 @@
 #include <linux/irqchip/arm-gic-v3.h>
 #include <linux/irqchip/mtk-gic-extend.h>
 #include <linux/io.h>
-#include <mach/mtk_secure_api.h>
+#include <mt-plat/mtk_secure_api.h>
 
 #define IOMEM(x)        ((void __force __iomem *)(x))
 /* for cirq use */
@@ -54,24 +54,12 @@ static inline u64 readq(const void __iomem *addr)
 }
 #endif
 
-static inline unsigned int gic_irq(struct irq_data *d)
+#ifdef CONFIG_FAST_CIRQ_CLONE_FLUSH
+void __iomem *get_dist_base(void)
 {
-	return d->hwirq;
+	return GIC_DIST_BASE;
 }
-
-static inline unsigned int virq_to_hwirq(unsigned int virq)
-{
-	struct irq_desc *desc;
-	unsigned int hwirq;
-
-	desc = irq_to_desc(virq);
-
-	WARN_ON(!desc);
-
-	hwirq = gic_irq(&desc->irq_data);
-
-	return hwirq;
-}
+#endif
 
 static int gic_populate_rdist(void __iomem **rdist_base)
 {
@@ -177,15 +165,10 @@ u32 mt_irq_get_pol(u32 irq)
 int mt_irq_mask_all(struct mtk_irq_mask *mask)
 {
 	void __iomem *dist_base;
-	void __iomem *redist_base;
 
 	dist_base = GIC_DIST_BASE;
-	gic_populate_rdist(&redist_base);
-	redist_base += SZ_64K;
 
 	if (mask) {
-		/* for SGI & PPI */
-		mask->mask0 = readl((redist_base + GIC_DIST_ENABLE_SET));
 		/* for SPI */
 		mask->mask1 = readl((dist_base + GIC_DIST_ENABLE_SET + 0x4));
 		mask->mask2 = readl((dist_base + GIC_DIST_ENABLE_SET + 0x8));
@@ -200,8 +183,6 @@ int mt_irq_mask_all(struct mtk_irq_mask *mask)
 		mask->mask11 = readl((dist_base + GIC_DIST_ENABLE_SET + 0x2c));
 		mask->mask12 = readl((dist_base + GIC_DIST_ENABLE_SET + 0x30));
 
-		/* for SGI & PPI */
-		writel(0xFFFFFFFF, (redist_base + GIC_DIST_ENABLE_CLEAR));
 		/* for SPI */
 		writel(0xFFFFFFFF, (dist_base + GIC_DIST_ENABLE_CLEAR + 0x4));
 		writel(0xFFFFFFFF, (dist_base + GIC_DIST_ENABLE_CLEAR + 0x8));
@@ -235,11 +216,8 @@ int mt_irq_mask_all(struct mtk_irq_mask *mask)
 int mt_irq_mask_restore(struct mtk_irq_mask *mask)
 {
 	void __iomem *dist_base;
-	void __iomem *redist_base;
 
 	dist_base = GIC_DIST_BASE;
-	gic_populate_rdist(&redist_base);
-	redist_base += SZ_64K;
 
 	if (!mask)
 		return -1;
@@ -248,7 +226,6 @@ int mt_irq_mask_restore(struct mtk_irq_mask *mask)
 	if (mask->footer != IRQ_MASK_FOOTER)
 		return -1;
 
-	writel(mask->mask0, (redist_base + GIC_DIST_ENABLE_SET));
 	writel(mask->mask1, (dist_base + GIC_DIST_ENABLE_SET + 0x4));
 	writel(mask->mask2, (dist_base + GIC_DIST_ENABLE_SET + 0x8));
 	writel(mask->mask3, (dist_base + GIC_DIST_ENABLE_SET + 0xc));
@@ -319,6 +296,25 @@ u32 mt_irq_get_pending_vec(u32 start_irq)
 
 	return pending_vec;
 }
+
+#ifdef CONFIG_FAST_CIRQ_CLONE_FLUSH
+u32 mt_irq_get_en_hw(unsigned int hwirq)
+{
+	void __iomem *base;
+	u32 bit = 1 << (hwirq % 32);
+
+	if (hwirq >= 32) {
+		base = GIC_DIST_BASE + GIC_DIST_ENABLE_SET;
+	} else {
+		gic_populate_rdist(&base);
+		base += SZ_64K;
+		base = base + GIC_DIST_ENABLE_SET;
+	}
+
+	return (readl_relaxed(base + (hwirq/32)*4) & bit) ?
+		1 : 0;
+}
+#endif
 
 void mt_irq_set_pending_hw(unsigned int hwirq)
 {
@@ -465,6 +461,28 @@ char *mt_irq_dump_status_buf(int irq, char *buf)
 	ptr += sprintf(ptr, "[mt gic dump] tartget cpu mask = 0x%x\n", result);
 
 	return ptr;
+}
+
+int mt_irq_dump_cpu(int irq)
+{
+	int rc;
+	unsigned int result;
+
+	irq = virq_to_hwirq(irq);
+
+#if defined(CONFIG_ARM_PSCI) || defined(CONFIG_MTK_PSCI)
+	rc = mt_secure_call(MTK_SIP_KERNEL_GIC_DUMP, irq, 0, 0);
+#else
+	rc = -1;
+#endif
+
+	if (rc < 0)
+		return rc;
+
+	/* get target cpu mask */
+	result = (rc >> 14) & 0xffff;
+
+	return (int)(find_first_bit((unsigned long *)&result, 16));
 }
 
 void mt_irq_dump_status(int irq)

@@ -63,7 +63,7 @@
 #define STP_PSM_IDLE_TIME_SLEEP           30	/* temporary for stress testing */
 #define STP_PSM_IDLE_TIME_SLEEP_1000           1000	/* for high speed transmission e.g. BT OPP*/
 #define STP_PSM_SDIO_IDLE_TIME_SLEEP           100	/* temporary for SDIO stress testing */
-#define STP_PSM_WAIT_EVENT_TIMEOUT        6000
+#define STP_PSM_WAIT_EVENT_TIMEOUT        18500
 
 #if 0
 #define STP_PSM_WMT_EVENT_SLEEP_EN                    (0x1UL << 0)
@@ -87,7 +87,7 @@
 #define STP_PSM_WMT_EVENT_DISABLE_MONITOR_TX_HIGH_DENSITY   (7)
 #define STP_PSM_WMT_EVENT_DISABLE_MONITOR_RX_HIGH_DENSITY   (8)
 
-#define STP_PSM_DBG_SIZE (16)
+#define STP_PSM_DBG_SIZE (48)
 
 /* OP command ring buffer : must be power of 2 */
 #define STP_OP_BUF_SIZE (16)
@@ -190,6 +190,8 @@ typedef struct {
 	UINT32 sec;
 	UINT32 usec;
 	UINT32 pid;
+	UINT64 l_sec;
+	ULONG l_nsec;
 } STP_PSM_ENTRY_T;
 
 typedef struct stp_psm_record {

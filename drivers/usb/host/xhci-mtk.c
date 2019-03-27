@@ -32,7 +32,15 @@
 #include "xhci.h"
 #include "xhci-mtk.h"
 
+#ifdef CONFIG_MTK_UAC_POWER_SAVING
+#ifdef CONFIG_PHY_MTK_SSUSB
+#include <mtk-ssusb-hal.h>
+#else
 #include "mtk-phy.h"
+#endif
+#endif
+
+#include <linux/phy/mediatek/mtk_usb_phy.h>
 
 /* ip_pw_ctrl0 register */
 #define CTRL0_IP_SW_RST	BIT(0)
@@ -126,7 +134,8 @@ static int xhci_mtk_host_enable(struct xhci_hcd_mtk *mtk)
 	 */
 	check_val = STS1_SYSPLL_STABLE | STS1_REF_RST |
 			STS1_SYS125_RST | STS1_XHCI_RST;
-		ret = readl_poll_timeout(&ippc->ip_pw_sts1, value,
+
+	ret = readl_poll_timeout(&ippc->ip_pw_sts1, value,
 				(check_val == (value & check_val)), 100, 20000);
 	if (ret) {
 		dev_err(mtk->dev, "clocks are not stable (0x%x)\n", value);
@@ -156,21 +165,52 @@ static int xhci_mtk_host_disable(struct xhci_hcd_mtk *mtk)
 		writel(value, &ippc->u2_ctrl_p[i]);
 	}
 
-		/* power down host ip */
-		value = readl(&ippc->ip_pw_ctr1);
-		value |= CTRL1_IP_HOST_PDN;
-		writel(value, &ippc->ip_pw_ctr1);
+	/* power down host ip */
+	value = readl(&ippc->ip_pw_ctr1);
+	value |= CTRL1_IP_HOST_PDN;
+	writel(value, &ippc->ip_pw_ctr1);
 
-		/* wait for host ip to sleep */
-		ret = readl_poll_timeout(&ippc->ip_pw_sts1, value,
-					(value & STS1_IP_SLEEP_STS), 100, 100000);
-		if (ret) {
-			dev_err(mtk->dev, "ip sleep failed!!!\n");
-			return ret;
-		}
+	/* wait for host ip to sleep */
+	ret = readl_poll_timeout(&ippc->ip_pw_sts1, value,
+				(value & STS1_IP_SLEEP_STS), 100, 100000);
+	if (ret) {
+		dev_err(mtk->dev, "ip sleep failed!!!\n");
+		return ret;
+	}
+
 	return 0;
 }
 
+
+static int xhci_mtk_host_power_down(struct xhci_hcd_mtk *mtk)
+{
+	struct mu3c_ippc_regs __iomem *ippc = mtk->ippc_regs;
+	u32 value;
+	int i;
+	struct device_node *of_node = mtk->dev->of_node;
+
+	if (ippc == NULL)
+		return 0;
+
+	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
+		/* power down all u3 ports */
+		for (i = 0; i < mtk->num_u3_ports; i++) {
+			value = readl(&ippc->u3_ctrl_p[i]);
+			value |= (CTRL_U3_PORT_PDN | CTRL_U3_PORT_DIS);
+			writel(value, &ippc->u3_ctrl_p[i]);
+		}
+
+		/* power down all u2 ports */
+		for (i = 0; i < mtk->num_u2_ports; i++) {
+			value = readl(&ippc->u2_ctrl_p[i]);
+			value |= (CTRL_U2_PORT_PDN | CTRL_U2_PORT_DIS);
+			writel(value, &ippc->u2_ctrl_p[i]);
+		}
+	} else {
+		;	/* TODO LIST */
+	}
+	return 0;
+}
 
 static int xhci_mtk_ssusb_config(struct xhci_hcd_mtk *mtk)
 {
@@ -203,6 +243,7 @@ static int xhci_mtk_ssusb_config(struct xhci_hcd_mtk *mtk)
 	return xhci_mtk_host_enable(mtk);
 }
 
+#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 static void xhci_mtk_ssusb_ip_sleep(struct xhci_hcd_mtk *mtk)
 {
 	struct device_node *of_node = mtk->dev->of_node;
@@ -211,7 +252,7 @@ static void xhci_mtk_ssusb_ip_sleep(struct xhci_hcd_mtk *mtk)
 
 	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
 		/* Set below sequence to avoid power leakage */
-		xhci_mtk_host_disable(mtk);
+		xhci_mtk_host_power_down(mtk);
 		udelay(50);
 		/* reset whole ip */
 		value = readl(&ippc->ip_pw_ctr0);
@@ -219,6 +260,7 @@ static void xhci_mtk_ssusb_ip_sleep(struct xhci_hcd_mtk *mtk)
 		writel(value, &ippc->ip_pw_ctr0);
 	}
 }
+#endif
 
 static int xhci_mtk_clks_enable(struct xhci_hcd_mtk *mtk)
 {
@@ -362,47 +404,12 @@ static void usb_wakeup_line_state_dis(struct xhci_hcd_mtk *mtk)
 	}
 }
 
-static atomic_t power_status = ATOMIC_INIT(USB_DPIDLE_FORBIDDEN);
-
-static int xhci_mtk_set_power_mode(int mode)
-{
-	/* TODO */
-	if (atomic_read(&power_status) != mode) {
-		usb_hal_dpidle_request(mode);
-		atomic_set(&power_status, mode);
-	}
-	return 0;
-}
-
-void usb_wakeup_deepidle_enable(struct usb_hcd *hcd)
-{
-	struct xhci_hcd_mtk *mtk = hcd_to_mtk(hcd);
-	int ret;
-
-	ret = xhci_mtk_host_disable(mtk);
-	if (ret)
-		xhci_mtk_host_enable(mtk);
-	else {
-		xhci_mtk_set_power_mode(USB_DPIDLE_SRAM);
-		enable_ipsleep_wakeup();
-	}
-}
-
-void usb_wakeup_deepidle_disable(struct usb_hcd *hcd)
-{
-	struct xhci_hcd_mtk *mtk = hcd_to_mtk(hcd);
-
-	disable_ipsleep_wakeup();
-	xhci_mtk_set_power_mode(USB_DPIDLE_FORBIDDEN);
-	xhci_mtk_host_enable(mtk);
-}
-
 static void usb_wakeup_enable(struct xhci_hcd_mtk *mtk)
 {
 	struct device_node *of_node = mtk->dev->of_node;
 
 	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
-		enable_ipsleep_wakeup();
+		enable_ipsleep_wakeup();	/* TODO THIS */
 	} else {
 		if (mtk->wakeup_src == SSUSB_WK_IP_SLEEP)
 			usb_wakeup_ip_sleep_en(mtk);
@@ -416,7 +423,7 @@ static void usb_wakeup_disable(struct xhci_hcd_mtk *mtk)
 	struct device_node *of_node = mtk->dev->of_node;
 
 	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
-		disable_ipsleep_wakeup();
+		;	/* TODO THIS */
 	} else {
 		if (mtk->wakeup_src == SSUSB_WK_IP_SLEEP)
 			usb_wakeup_ip_sleep_dis(mtk);
@@ -484,16 +491,11 @@ static int xhci_mtk_phy_init(struct xhci_hcd_mtk *mtk)
 {
 	int i;
 	int ret;
-	struct device_node *of_node = mtk->dev->of_node;
 
-	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
-		;	/* TODO THIS */
-	} else {
-		for (i = 0; i < mtk->num_phys; i++) {
-			ret = phy_init(mtk->phys[i]);
-			if (ret)
-				goto exit_phy;
-		}
+	for (i = 0; i < mtk->num_phys; i++) {
+		ret = phy_init(mtk->phys[i]);
+		if (ret)
+			goto exit_phy;
 	}
 	return 0;
 
@@ -526,7 +528,12 @@ static int xhci_mtk_phy_power_on(struct xhci_hcd_mtk *mtk)
 	struct device_node *of_node = mtk->dev->of_node;
 
 	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
-		;	/* TODO THIS */
+		for (i = 0; i < mtk->num_phys; i++) {
+			ret = phy_power_on(mtk->phys[i]);
+			if (ret)
+				goto power_off_phy;
+			usb_mtkphy_host_mode(mtk->phys[i], true);
+		}
 	} else {
 		for (i = 0; i < mtk->num_phys; i++) {
 			ret = phy_power_on(mtk->phys[i]);
@@ -549,7 +556,10 @@ static void xhci_mtk_phy_power_off(struct xhci_hcd_mtk *mtk)
 	struct device_node *of_node = mtk->dev->of_node;
 
 	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
-		;	/* TODO THIS */
+		for (i = 0; i < mtk->num_phys; i++) {
+			usb_mtkphy_host_mode(mtk->phys[i], false);
+			phy_power_off(mtk->phys[i]);
+		}
 	} else {
 		for (i = 0; i < mtk->num_phys; i++)
 			phy_power_off(mtk->phys[i]);
@@ -647,6 +657,7 @@ static int xhci_mtk_setup(struct usb_hcd *hcd)
 {
 	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
 	struct xhci_hcd_mtk *mtk = hcd_to_mtk(hcd);
+	struct device_node *of_node = mtk->dev->of_node;
 	int ret;
 
 	if (usb_hcd_is_primary_hcd(hcd)) {
@@ -668,6 +679,13 @@ static int xhci_mtk_setup(struct usb_hcd *hcd)
 		ret = xhci_mtk_sch_init(mtk);
 		if (ret)
 			return ret;
+	}
+
+	/* allow runtime pm */
+	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
+#ifndef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
+		pm_runtime_put_noidle(mtk->dev);
+#endif
 	}
 
 	return ret;
@@ -736,11 +754,12 @@ static int xhci_mtk_probe(struct platform_device *pdev)
 		mtk->num_phys = 0;
 	}
 	pm_runtime_enable(dev);
-	pm_runtime_get_sync(dev);
 #ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
-		device_disable_async_suspend(dev);
+	pm_runtime_get_sync(dev);
+	device_disable_async_suspend(dev);
 #else
-		device_enable_async_suspend(dev);
+	pm_runtime_get_noresume(dev);
+	device_enable_async_suspend(dev);
 #endif
 	ret = xhci_mtk_ldos_enable(mtk);
 	if (ret)
@@ -863,10 +882,15 @@ disable_clk:
 
 disable_ldos:
 	xhci_mtk_ldos_disable(mtk);
+#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	xhci_mtk_ssusb_ip_sleep(mtk);
-
+#endif
 disable_pm:
+#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	pm_runtime_put_sync(dev);
+#else
+	pm_runtime_put_noidle(dev);
+#endif
 	pm_runtime_disable(dev);
 	return ret;
 }
@@ -877,24 +901,36 @@ static int xhci_mtk_remove(struct platform_device *dev)
 	struct usb_hcd	*hcd = mtk->hcd;
 	struct xhci_hcd	*xhci = hcd_to_xhci(hcd);
 
+#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	xhci_mtk_host_enable(mtk);
+#endif
 	usb_remove_hcd(xhci->shared_hcd);
-	xhci_mtk_phy_power_off(mtk);
-	xhci_mtk_phy_exit(mtk);
 	device_init_wakeup(&dev->dev, false);
 
 	usb_remove_hcd(hcd);
 	usb_put_hcd(xhci->shared_hcd);
 	usb_put_hcd(hcd);
 	xhci_mtk_sch_exit(mtk);
+#ifndef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
+	xhci_mtk_host_power_down(mtk);
+#endif
 	xhci_mtk_clks_disable(mtk);
 	xhci_mtk_ldos_disable(mtk);
+#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	pm_runtime_put_sync(&dev->dev);
+#else
+	pm_runtime_put_noidle(&dev->dev);
+#endif
 	pm_runtime_disable(&dev->dev);
+#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	xhci_mtk_ssusb_ip_sleep(mtk);
+#endif
+	xhci_mtk_phy_power_off(mtk);
+	xhci_mtk_phy_exit(mtk);
 
 	return 0;
 }
+
 /* USB Audio Power Saving */
 #ifdef CONFIG_MTK_UAC_POWER_SAVING
 #define MIN_SLEEP_MS 10
@@ -906,22 +942,26 @@ static struct xhci_mtk_sram_block xhci_sram[XHCI_SRAM_BLOCK_NUM] = {
 	/* add 56 bytes for alignment */
 	[XHCI_DCBAA] = {0, NULL, 8 * MAX_HC_SLOTS + 8 + 56, STATE_UNINIT},
 	/* add 48 bytes for alignment */
-	[XHCI_ERST] = {0, NULL, 16 * ERST_NUM_SEGS + 48, STATE_UNINIT},
-	[XHCI_AUDIO_INTR] = {0, NULL, TRB_AUDIO_INTR_SIZE, STATE_UNINIT},
-	[XHCI_AUDIO_FEEDBACK_TX] = {0, NULL, TRB_AUDIO_FEEDBACK_SIZE, STATE_UNINIT},
-	[XHCI_AUDIO_FEEDBACK_RX] = {0, NULL, TRB_AUDIO_FEEDBACK_SIZE, STATE_UNINIT},
-	[XHCI_AUDIO_INTR_DATA] = {0, NULL, FEEDBACK_DATA_SIZE, STATE_UNINIT},
-	[XHCI_AUDIO_FEEDBACK_TX_DATA] = {0, NULL, FEEDBACK_DATA_SIZE, STATE_UNINIT},
-	[XHCI_AUDIO_FEEDBACK_RX_DATA] = {0, NULL, FEEDBACK_DATA_SIZE, STATE_UNINIT},
+	[XHCI_ERST] = {0, NULL, 16 * ERST_NUM_SEGS + 48, STATE_UNINIT}
 };
 
 static struct xhci_mtk_sram_block usb_audio_sram[USB_AUDIO_DATA_BLOCK_NUM] = {
 	[USB_AUDIO_DATA_OUT_EP] = {0, NULL, 0, STATE_UNINIT},
 	[USB_AUDIO_DATA_IN_EP] = {0, NULL, 0, STATE_UNINIT},
-	[USB_AUDIO_DATA_SYNC_EP_TX] = {0, NULL, 0, STATE_UNINIT},
-	[USB_AUDIO_DATA_SYNC_EP_RX] = {0, NULL, 0, STATE_UNINIT},
-	[USB_AUDIO_HID_INTERRUPT] = {0, NULL, 0, STATE_UNINIT},
+	[USB_AUDIO_DATA_SYNC_EP] = {0, NULL, 0, STATE_UNINIT}
 };
+
+static atomic_t power_status = ATOMIC_INIT(USB_DPIDLE_FORBIDDEN);
+
+static int xhci_mtk_set_power_mode(int mode)
+{
+	/* TODO */
+	if (atomic_read(&power_status) != mode) {
+		usb_hal_dpidle_request(mode);
+		atomic_set(&power_status, mode);
+	}
+	return 0;
+}
 
 static void xhci_mtk_wakeup_timer_func(unsigned long data)
 {
@@ -1070,41 +1110,15 @@ void *mtk_usb_alloc_sram(int id, size_t size, dma_addr_t *dma)
 	if (xhci_sram[0].state != STATE_USE)
 		return NULL;
 
-	switch (id) {
-	case USB_AUDIO_DATA_OUT_EP:
-	case USB_AUDIO_DATA_IN_EP:
-		mtk_audio_request_sram(dma, (unsigned char **)&sram_virt_addr,
-			size, &usb_audio_sram[id]);
-	break;
-	case USB_AUDIO_DATA_SYNC_EP_TX:
-		if (size <= FEEDBACK_DATA_SIZE)
-			xhci_mtk_allocate_sram(XHCI_AUDIO_FEEDBACK_TX_DATA, dma,
-				(unsigned char **)&sram_virt_addr);
-	break;
-	case USB_AUDIO_DATA_SYNC_EP_RX:
-		if (size <= FEEDBACK_DATA_SIZE)
-			xhci_mtk_allocate_sram(XHCI_AUDIO_FEEDBACK_RX_DATA, dma,
-				(unsigned char **)&sram_virt_addr);
-	break;
-	case USB_AUDIO_HID_INTERRUPT:
-		if (size <= FEEDBACK_DATA_SIZE)
-			xhci_mtk_allocate_sram(XHCI_AUDIO_INTR_DATA, dma,
-				(unsigned char **)&sram_virt_addr);
-	break;
-	default:
-		return NULL;
-	}
-
+	mtk_audio_request_sram(dma, (unsigned char **)&sram_virt_addr,
+					   size, &usb_audio_sram[id]);
 
 	if (sram_virt_addr) {
 		usb_audio_sram[id].mlength = size;
 		usb_audio_sram[id].msram_phys_addr = *dma;
 		usb_audio_sram[id].msram_virt_addr =  sram_virt_addr;
 		usb_audio_sram[id].state = STATE_USE;
-		pr_err("%s get [%d] p :%llx, v=%p, len=%d\n",
-			__func__, id, usb_audio_sram[id].msram_phys_addr,
-			usb_audio_sram[id].msram_virt_addr,
-			usb_audio_sram[id].mlength);
+		pr_debug("%s, id=%d\n", __func__, id);
 	} else {
 		usb_audio_sram[id].state = STATE_NOMEM;
 		pr_err("%s fail id=%d\n", __func__, id);
@@ -1115,25 +1129,8 @@ void *mtk_usb_alloc_sram(int id, size_t size, dma_addr_t *dma)
 
 void mtk_usb_free_sram(id)
 {
-	if (id >= USB_AUDIO_DATA_BLOCK_NUM)
-		return;
-
 	if (usb_audio_sram[id].state == STATE_USE) {
-		switch (id) {
-		case USB_AUDIO_DATA_OUT_EP:
-		case USB_AUDIO_DATA_IN_EP:
-			mtk_audio_free_sram(&usb_audio_sram[id]);
-		break;
-		case USB_AUDIO_DATA_SYNC_EP_TX:
-			xhci_mtk_free_sram(XHCI_AUDIO_FEEDBACK_TX_DATA);
-		break;
-		case USB_AUDIO_DATA_SYNC_EP_RX:
-			xhci_mtk_free_sram(XHCI_AUDIO_FEEDBACK_RX_DATA);
-		break;
-		case USB_AUDIO_HID_INTERRUPT:
-			xhci_mtk_free_sram(XHCI_AUDIO_INTR_DATA);
-		break;
-		}
+		mtk_audio_free_sram(&usb_audio_sram[id]);
 		usb_audio_sram[id].mlength = 0;
 		usb_audio_sram[id].msram_phys_addr = 0;
 		usb_audio_sram[id].msram_virt_addr =  NULL;
@@ -1144,6 +1141,44 @@ void mtk_usb_free_sram(id)
 	usb_audio_sram[id].state = STATE_UNINIT;
 }
 #endif
+
+static int __maybe_unused xhci_mtk_runtime_suspend(struct device *dev)
+{
+	struct xhci_hcd_mtk *mtk = dev_get_drvdata(dev);
+	struct usb_hcd *hcd = mtk->hcd;
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct device_node *of_node = mtk->dev->of_node;
+
+	xhci_info(xhci, "%s:\n", __func__);
+
+	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
+		xhci_mtk_host_disable(mtk);
+#ifdef CONFIG_MTK_UAC_POWER_SAVING
+		xhci_mtk_set_power_mode(USB_DPIDLE_SRAM);
+#endif
+	}
+
+	return 0;
+}
+
+static int __maybe_unused xhci_mtk_runtime_resume(struct device *dev)
+{
+	struct xhci_hcd_mtk *mtk = dev_get_drvdata(dev);
+	struct usb_hcd *hcd = mtk->hcd;
+	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	struct device_node *of_node = mtk->dev->of_node;
+
+	xhci_info(xhci, "%s:\n", __func__);
+
+	if (of_device_is_compatible(of_node, "mediatek,mt67xx-xhci")) {
+#ifdef CONFIG_MTK_UAC_POWER_SAVING
+		xhci_mtk_set_power_mode(USB_DPIDLE_FORBIDDEN);
+#endif
+		xhci_mtk_host_enable(mtk);
+	}
+
+	return 0;
+}
 
 /*
  * if ip sleep fails, and all clocks are disabled, access register will hang
@@ -1161,8 +1196,8 @@ static int __maybe_unused xhci_mtk_suspend(struct device *dev)
 	int ret;
 #endif
 
-#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	xhci_info(xhci, "xhci_plat_suspend\n");
+#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	ret = xhci_mtk_host_disable(mtk);
 	if (ret) {
 		xhci_mtk_host_enable(mtk);
@@ -1174,11 +1209,12 @@ static int __maybe_unused xhci_mtk_suspend(struct device *dev)
 	del_timer_sync(&hcd->rh_timer);
 	clear_bit(HCD_FLAG_POLL_RH, &xhci->shared_hcd->flags);
 	del_timer_sync(&xhci->shared_hcd->rh_timer);
-
 #ifndef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	xhci_mtk_host_disable(mtk);
 #endif
-	xhci_mtk_phy_power_off(mtk);
+	if (!of_device_is_compatible(dev->of_node, "mediatek,mt67xx-xhci"))
+		xhci_mtk_phy_power_off(mtk);
+
 	xhci_mtk_clks_disable(mtk);
 	usb_wakeup_enable(mtk);
 	return 0;
@@ -1193,7 +1229,8 @@ static int __maybe_unused xhci_mtk_resume(struct device *dev)
 	xhci_info(xhci, "xhci_plat_resume\n");
 	usb_wakeup_disable(mtk);
 	xhci_mtk_clks_enable(mtk);
-	xhci_mtk_phy_power_on(mtk);
+	if (!of_device_is_compatible(dev->of_node, "mediatek,mt67xx-xhci"))
+		xhci_mtk_phy_power_on(mtk);
 	xhci_mtk_host_enable(mtk);
 
 	xhci_dbg(xhci, "%s: restart port polling\n", __func__);
@@ -1207,6 +1244,8 @@ static int __maybe_unused xhci_mtk_resume(struct device *dev)
 static const struct dev_pm_ops xhci_mtk_pm_ops = {
 #ifndef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 	SET_SYSTEM_SLEEP_PM_OPS(xhci_mtk_suspend, xhci_mtk_resume)
+	SET_RUNTIME_PM_OPS(xhci_mtk_runtime_suspend,
+			xhci_mtk_runtime_resume, NULL)
 #else
 	.resume_noirq = xhci_mtk_resume,
 	.suspend_noirq = xhci_mtk_suspend,

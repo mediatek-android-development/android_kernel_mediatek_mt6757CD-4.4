@@ -18,7 +18,7 @@
 /* TEST CHIP PHY define, edit this in different platform */
 #define U3_PHY_I2C_DEV			0x60
 #define U3_PHY_PAGE			0xff
-#define GPIO_BASE			(u3_sif_base + 0x700) /* 0xf0044700 */
+#define GPIO_BASE			(u3_ippc_base)
 #define SSUSB_I2C_OUT			(GPIO_BASE + 0xd0)
 #define SSUSB_I2C_IN			(GPIO_BASE + 0xd4)
 
@@ -310,12 +310,12 @@ PHY_INT32 I2cReadReg(PHY_UINT8 dev_id, PHY_UINT8 Addr, PHY_UINT8 *Data)
 #define PHY_I2C_BASE      (i2c_base)
 
 /* "volatile" type class should not be used, see volatile-considered-harmful.txt */
-#define REG_I2C_DATA_PORT    (*((volatile unsigned short int *) (PHY_I2C_BASE + 0x00)))
-#define REG_I2C_SLAVE_ADDR   (*((volatile unsigned short int *) (PHY_I2C_BASE + 0x04)))
-#define REG_I2C_TRANSFER_LEN (*((volatile unsigned short int *) (PHY_I2C_BASE + 0x14)))
-#define REG_I2C_START        (*((volatile unsigned short int *) (PHY_I2C_BASE + 0x24)))
-#define REG_I2C_SOFT_RESET   (*((volatile unsigned short int *) (PHY_I2C_BASE + 0x50)))
-#define REG_I2C_CONTROL		 (*((volatile unsigned short int *) (PHY_I2C_BASE + 0x10)))
+#define REG_I2C_DATA_PORT    (*((unsigned short int *) (PHY_I2C_BASE + 0x00)))
+#define REG_I2C_SLAVE_ADDR   (*((unsigned short int *) (PHY_I2C_BASE + 0x04)))
+#define REG_I2C_TRANSFER_LEN (*((unsigned short int *) (PHY_I2C_BASE + 0x14)))
+#define REG_I2C_START        (*((unsigned short int *) (PHY_I2C_BASE + 0x24)))
+#define REG_I2C_SOFT_RESET   (*((unsigned short int *) (PHY_I2C_BASE + 0x50)))
+#define REG_I2C_CONTROL		 (*((unsigned short int *) (PHY_I2C_BASE + 0x10)))
 
 #define IS_PRINT 0
 

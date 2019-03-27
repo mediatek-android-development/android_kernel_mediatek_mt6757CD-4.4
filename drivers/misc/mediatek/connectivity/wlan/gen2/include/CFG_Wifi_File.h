@@ -101,7 +101,6 @@ typedef struct _PWR_PARAM_T {
 	UINT_32 u4RefValue2;
 } PWR_PARAM_T, *P_PWR_PARAM_T;
 
-#if CFG_SUPPORT_TX_POWER_BACK_OFF || CFG_SUPPORT_FCC_POWER_BACK_OFF
 typedef struct _MITIGATED_PWR_BY_CH_BY_MODE {
 	UINT_8 channel;
 	INT_8 mitigatedCckDsss;
@@ -109,9 +108,7 @@ typedef struct _MITIGATED_PWR_BY_CH_BY_MODE {
 	INT_8 mitigatedHt20;
 	INT_8 mitigatedHt40;
 } MITIGATED_PWR_BY_CH_BY_MODE, *P_MITIGATED_PWR_BY_CH_BY_MODE;
-#endif
 
-#if CFG_SUPPORT_FCC_POWER_BACK_OFF
 typedef struct _FCC_TX_PWR_ADJUST_T {
 	UINT_8 fgFccTxPwrAdjust;
 	UINT_8 uOffsetCCK;
@@ -121,7 +118,6 @@ typedef struct _FCC_TX_PWR_ADJUST_T {
 	UINT_8 aucChannelHT20[2];
 	UINT_8 aucChannelHT40[2];
 } FCC_TX_PWR_ADJUST, *P_FCC_TX_PWR_ADJUST;
-#endif
 
 typedef struct _MT6620_CFG_PARAM_STRUCT {
 	/* 256 bytes of MP data */
@@ -138,22 +134,16 @@ typedef struct _MT6620_CFG_PARAM_STRUCT {
 	INT_8 cBandEdgeMaxPwrOFDM20;
 	INT_8 cBandEdgeMaxPwrOFDM40;
 
-#if CFG_SUPPORT_TX_POWER_BACK_OFF || CFG_SUPPORT_FCC_POWER_BACK_OFF
+	UINT_8 ucRegChannelListMap;
+	UINT_8 ucRegChannelListIndex;
+	UINT_8 aucRegSubbandInfo[36];
+	UINT_8 aucReserved2[256-248];
+	UINT_8 aucChannelBandEdge[2];
+	UINT_16 u2SizeOfNvram;
 	INT_8 bTxPowerLimitEnable2G;
 	INT_8 cTxBackOffMaxPower2G;
 	INT_8 bTxPowerLimitEnable5G;
 	INT_8 cTxBackOffMaxPower5G;
-#endif
-
-	UINT_8 ucRegChannelListMap;
-	UINT_8 ucRegChannelListIndex;
-	UINT_8 aucRegSubbandInfo[36];
-#if CFG_SUPPORT_TX_POWER_BACK_OFF || CFG_SUPPORT_FCC_POWER_BACK_OFF
-	UINT_8 ucDefaultTestMode;
-	UINT_8 aucReserved2[256-245];
-#else
-	UINT_8 aucReserved2[256 - 240];
-#endif
 
 	/* 256 bytes of function data */
 	UINT_16 u2Part2OwnVersion;
@@ -166,15 +156,12 @@ typedef struct _MT6620_CFG_PARAM_STRUCT {
 	UINT_8 uc5GRssiCompensation;
 	UINT_8 fgRssiCompensationValidbit;
 	UINT_8 ucRxAntennanumber;
-#if CFG_SUPPORT_FCC_POWER_BACK_OFF
+	/*support tx power back off [start]*/
 	MITIGATED_PWR_BY_CH_BY_MODE arRlmMitigatedPwrByChByMode[40];
 	UINT_8 fgRlmMitigatedPwrByChByMode;
 	FCC_TX_PWR_ADJUST rFccTxPwrAdjust;
-	UINT_8 aucReserved3[1];
-	UINT_8 aucTailReserved[256-12-204-8];
-#else
-	UINT_8 aucTailReserved[256 - 12];
-#endif
+	/*support tx power back off [end]*/
+	UINT_8 aucTailReserved[768 - 12 - 211];
 } MT6620_CFG_PARAM_STRUCT, *P_MT6620_CFG_PARAM_STRUCT, WIFI_CFG_PARAM_STRUCT, *P_WIFI_CFG_PARAM_STRUCT;
 
 /*******************************************************************************
@@ -194,6 +181,7 @@ typedef struct _MT6620_CFG_PARAM_STRUCT {
 #endif
 
 #define CFG_FILE_WIFI_REC_SIZE    sizeof(WIFI_CFG_PARAM_STRUCT)
+#define EXTEND_NVRAM_SIZE 1024
 
 /*******************************************************************************
 *                  F U N C T I O N   D E C L A R A T I O N S
@@ -214,7 +202,7 @@ static inline VOID nvramOffsetCheck(VOID)
 {
 	DATA_STRUCT_INSPECTING_ASSERT(OFFSET_OF(WIFI_CFG_PARAM_STRUCT, u2Part2OwnVersion) == 256);
 
-	DATA_STRUCT_INSPECTING_ASSERT(sizeof(WIFI_CFG_PARAM_STRUCT) == 512);
+	DATA_STRUCT_INSPECTING_ASSERT(sizeof(WIFI_CFG_PARAM_STRUCT) == EXTEND_NVRAM_SIZE);
 
 	DATA_STRUCT_INSPECTING_ASSERT((OFFSET_OF(WIFI_CFG_PARAM_STRUCT, aucEFUSE) & 0x0001) == 0);
 

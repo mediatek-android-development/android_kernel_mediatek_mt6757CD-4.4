@@ -15,15 +15,18 @@
 #define _MTK_BATTERY_PROPERTY_H
 
 /* customize */
-#define DIFFERENCE_FULLOCV_ITH	150	/* mA */
+#define DIFFERENCE_FULLOCV_ITH	200	/* mA */
 #define MTK_CHR_EXIST 1
 #define SHUTDOWN_1_TIME	60
 #define KEEP_100_PERCENT 2
 #define R_FG_VALUE	10				/* mOhm */
 #define EMBEDDED_SEL 0
 #define PMIC_SHUTDOWN_CURRENT 20	/* 0.01 mA */
-#define FG_METER_RESISTANCE	50
+#define FG_METER_RESISTANCE	75
 #define CAR_TUNE_VALUE	100 /*1.00 */
+#define NO_BAT_TEMP_COMPENSATE 0
+/* NO_BAT_TEMP_COMPENSATE 1 = don't need bat_temper compensate, */
+/* but fg_meter_resistance still use for SWOCV */
 
 #define SHUTDOWN_GAUGE0 1
 #define SHUTDOWN_GAUGE1_XMINS 1
@@ -52,7 +55,7 @@
 #define PSEUDO100_EN 1
 #define PSEUDO100_EN_DIS 1
 
-#define DIFF_SOC_SETTING 50	/* 0.01% */
+#define DIFF_SOC_SETTING 100	/* 0.01% */
 #define DIFF_BAT_TEMP_SETTING 1
 #define DIFF_BAT_TEMP_SETTING_C 10
 #define DISCHARGE_TRACKING_TIME 10
@@ -69,7 +72,7 @@
 #define VBAT2_DET_VOLTAGE3	35000
 
 /* PCB setting */
-/* #define CALIBRATE_CAR_TUNE_VALUE_BY_META_TOOL */
+#define CALIBRATE_CAR_TUNE_VALUE_BY_META_TOOL
 #define CALI_CAR_TUNE_AVG_NUM	60
 
 /* Aging Compensation 1*/
@@ -106,9 +109,9 @@
 #define EXT_HWOCV_SWOCV_LT_TEMP		5
 
 /* fgc & fgv threshold */
-#define DIFFERENCE_FGC_FGV_TH1 500
-#define DIFFERENCE_FGC_FGV_TH2 1500
-#define DIFFERENCE_FGC_FGV_TH3 500
+#define DIFFERENCE_FGC_FGV_TH1 300
+#define DIFFERENCE_FGC_FGV_TH2 500
+#define DIFFERENCE_FGC_FGV_TH3 300
 #define DIFFERENCE_FGC_FGV_TH_SOC1 7000
 #define DIFFERENCE_FGC_FGV_TH_SOC2 3000
 #define NAFG_TIME_SETTING 10
@@ -144,23 +147,20 @@
 #define UI_FAST_TRACKING_GAP 300
 #define KEEP_100_PERCENT_MINSOC 9000
 
-#define UNIT_FGCURRENT     (381470)		/* mt6335 381.470 uA */
-#define UNIT_FGCAR         (108506)		/* unit 2^11 LSB*/
+#define UNIT_FGCURRENT     (314331)		/* mt6356 314.331 uA */
+#define UNIT_FGCAR         (89409)		/* charge_lsb 157166 * 2^11 / 3600 */
 #define R_VAL_TEMP_2         (2)			/* MT6335 use 3, old chip use 4 */
 #define R_VAL_TEMP_3         (3)			/* MT6335 use 3, old chip use 4 */
 #define UNIT_TIME          (50)
-#define UNIT_FGCAR_ZCV     (190735)     /* unit 2^0 LSB */
-#define UNIT_FG_IAVG		(190735)
-#define CAR_TO_REG_FACTOR  (0x49BA)
+#define UNIT_FGCAR_ZCV     (157166)     /* unit 2^0 LSB */
+#define UNIT_FG_IAVG		(157166)
+#define CAR_TO_REG_FACTOR  (0x5979)		/* 3600 * 1000 * 1000 / 157166 */
 
 #define SHUTDOWN_CONDITION_LOW_BAT_VOLT
-
 #define BATTERY_TMP_TO_DISABLE_GM30 -50
 #define BATTERY_TMP_TO_DISABLE_NAFG -35
 #define DEFAULT_BATTERY_TMP_WHEN_DISABLE_NAFG 25
-#define BATTERY_TMP_TO_ENABLE_NAFG -50
-
-
+#define BATTERY_TMP_TO_ENABLE_NAFG -20
 /* #define GM30_DISABLE_NAFG */
 
 /* extern function */

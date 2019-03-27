@@ -40,6 +40,7 @@
 #ifdef CONFIG_COMPAT
 #include <linux/compat.h>
 #endif
+#include <linux/ctype.h>
 #if WMT_CREATE_NODE_DYNAMIC
 #include <linux/device.h>
 #endif
@@ -121,9 +122,14 @@ static UINT8 gLpbkBuf[WMT_LPBK_BUF_LEN] = { 0 };
 static UINT32 gLpbkBufLog;	/* George LPBK debug */
 static INT32 gWmtInitDone;
 static wait_queue_head_t gWmtInitWq;
-static INT32 DisablePoweronConnsys;
+#ifdef CONFIG_MTK_COMBO_COMM_APO
+UINT32 always_pwr_on_flag = 1;
+#else
+UINT32 always_pwr_on_flag;
+#endif
 P_WMT_PATCH_INFO pPatchInfo;
 UINT32 pAtchNum;
+UINT32 currentLpbkStatus;
 
 
 
@@ -142,33 +148,21 @@ struct device *wmt_dev;
 
 
 /*LCM on/off ctrl for wmt varabile*/
+UINT32 hif_info;
 static struct work_struct gPwrOnOffWork;
-UINT32 g_es_lr_flag_for_quick_sleep = 1;	/* for ctrl quick sleep flag */
-UINT32 g_es_lr_flag_for_lpbk_onoff;	/* for ctrl lpbk on off */
-OSAL_SLEEPABLE_LOCK g_es_lr_lock;
-
-INT32 __weak wmt_plat_set_dbg_mode(UINT32 flag)
-{
-	WMT_WARN_FUNC("wmt_plat_set_dbg_mode is not define!!!\n");
-
-	return 0;
-}
-
-VOID __weak wmt_plat_set_dynamic_dumpmem(UINT32 *buf)
-{
-	WMT_WARN_FUNC("wmt_plat_set_dynamic_dumpmem is not define!!!\n");
-
-}
+static atomic_t g_es_lr_flag_for_quick_sleep = ATOMIC_INIT(1); /* for ctrl quick sleep flag */
+static atomic_t g_es_lr_flag_for_lpbk_onoff = ATOMIC_INIT(0); /* for ctrl lpbk on off */
 
 
-#ifndef CONFIG_MTK_COMBO_COMM_APO
+/* Prevent race condition when wmt_dev_tm_temp_query is called concurrently */
+static OSAL_UNSLEEPABLE_LOCK g_temp_query_spinlock;
+
+
 #ifdef CONFIG_EARLYSUSPEND
 static VOID wmt_dev_early_suspend(struct early_suspend *h)
 {
-	osal_lock_sleepable_lock(&g_es_lr_lock);
-	g_es_lr_flag_for_quick_sleep = 1;
-	g_es_lr_flag_for_lpbk_onoff = 0;
-	osal_unlock_sleepable_lock(&g_es_lr_lock);
+	atomic_set(&g_es_lr_flag_for_quick_sleep, 1);
+	atomic_set(&g_es_lr_flag_for_lpbk_onoff, 0);
 
 	WMT_WARN_FUNC("@@@@@@@@@@wmt enter early suspend@@@@@@@@@@@@@@\n");
 
@@ -177,10 +171,8 @@ static VOID wmt_dev_early_suspend(struct early_suspend *h)
 
 static VOID wmt_dev_late_resume(struct early_suspend *h)
 {
-	osal_lock_sleepable_lock(&g_es_lr_lock);
-	g_es_lr_flag_for_quick_sleep = 0;
-	g_es_lr_flag_for_lpbk_onoff = 1;
-	osal_unlock_sleepable_lock(&g_es_lr_lock);
+	atomic_set(&g_es_lr_flag_for_quick_sleep, 0);
+	atomic_set(&g_es_lr_flag_for_lpbk_onoff, 1);
 
 	WMT_WARN_FUNC("@@@@@@@@@@wmt enter late resume@@@@@@@@@@@@@@\n");
 
@@ -212,18 +204,16 @@ static INT32 wmt_fb_notifier_callback(struct notifier_block *self, ULONG event, 
 
 	switch (blank) {
 	case FB_BLANK_UNBLANK:
-		osal_lock_sleepable_lock(&g_es_lr_lock);
-		g_es_lr_flag_for_quick_sleep = 0;
-		g_es_lr_flag_for_lpbk_onoff = 1;
-		osal_unlock_sleepable_lock(&g_es_lr_lock);
+		atomic_set(&g_es_lr_flag_for_quick_sleep, 0);
+		atomic_set(&g_es_lr_flag_for_lpbk_onoff, 1);
 		WMT_WARN_FUNC("@@@@@@@@@@wmt enter UNBLANK @@@@@@@@@@@@@@\n");
+		if (hif_info == 0)
+			break;
 		schedule_work(&gPwrOnOffWork);
 		break;
 	case FB_BLANK_POWERDOWN:
-		osal_lock_sleepable_lock(&g_es_lr_lock);
-		g_es_lr_flag_for_quick_sleep = 1;
-		g_es_lr_flag_for_lpbk_onoff = 0;
-		osal_unlock_sleepable_lock(&g_es_lr_lock);
+		atomic_set(&g_es_lr_flag_for_quick_sleep, 1);
+		atomic_set(&g_es_lr_flag_for_lpbk_onoff, 0);
 		WMT_WARN_FUNC("@@@@@@@@@@wmt enter early POWERDOWN @@@@@@@@@@@@@@\n");
 		schedule_work(&gPwrOnOffWork);
 		break;
@@ -233,7 +223,6 @@ static INT32 wmt_fb_notifier_callback(struct notifier_block *self, ULONG event, 
 	return 0;
 }
 #endif /* CONFIG_EARLYSUSPEND */
-#endif /* CONFIG_MTK_COMBO_COMM_APO */
 /*******************************************************************************
 *                          F U N C T I O N S
 ********************************************************************************
@@ -241,40 +230,57 @@ static INT32 wmt_fb_notifier_callback(struct notifier_block *self, ULONG event, 
 
 static VOID wmt_pwr_on_off_handler(struct work_struct *work)
 {
-	INT32 retryCounter = 1;
+	INT32 retry = 5;
+	INT32 desync = 0;
 
 	WMT_DBG_FUNC("wmt_pwr_on_off_handler start to run\n");
 
-	if (DisablePoweronConnsys == 0) {
-		osal_lock_sleepable_lock(&g_es_lr_lock);
-
-		if (g_es_lr_flag_for_lpbk_onoff) {
-			do {
-				if (mtk_wcn_wmt_func_on(WMTDRV_TYPE_LPBK) == MTK_WCN_BOOL_FALSE) {
-					WMT_WARN_FUNC("WMT turn on LPBK fail, retrying, retryCounter left:%d!\n",
-					retryCounter);
-					retryCounter--;
-					osal_sleep_ms(1000);
-				} else {
-					WMT_INFO_FUNC("WMT turn on LPBK suceed\n");
-					break;
-				}
-			} while (retryCounter > 0);
-		} else {
-			if (mtk_wcn_wmt_func_off(WMTDRV_TYPE_LPBK) == MTK_WCN_BOOL_FALSE)
-				WMT_WARN_FUNC("WMT turn off LPBK fail\n");
-			else
-				WMT_DBG_FUNC("WMT turn off LPBK suceed\n");
+	if (always_pwr_on_flag == 0) {
+		while ((wmt_lib_get_drv_status(WMTDRV_TYPE_LPBK) == DRV_STS_FUNC_ON) !=
+				atomic_read(&g_es_lr_flag_for_lpbk_onoff)) {
+			if (++desync > 1)
+				WMT_WARN_FUNC("suspend/resume not sync count:%d\n", desync);
+			if (wmt_lpbk_handler(atomic_read(&g_es_lr_flag_for_lpbk_onoff), retry) < 0)
+				break;
 		}
-
-		osal_unlock_sleepable_lock(&g_es_lr_lock);
 	}
+}
+
+INT32 wmt_lpbk_handler(UINT32 on_off_flag, UINT32 retry)
+{
+	UINT32 retry_count;
+
+	retry_count = retry;
+	do {
+		if (on_off_flag) {
+			if (mtk_wcn_wmt_func_on(WMTDRV_TYPE_LPBK) == MTK_WCN_BOOL_FALSE) {
+				WMT_WARN_FUNC("WMT turn on LPBK fail, retrying, retryCounter left:%d!\n",
+						retry_count);
+				retry_count--;
+				osal_sleep_ms(1000);
+			} else {
+				WMT_DBG_FUNC("WMT turn on LPBK suceed\n");
+				break;
+			}
+		} else {
+			if (mtk_wcn_wmt_func_off(WMTDRV_TYPE_LPBK) == MTK_WCN_BOOL_FALSE) {
+				WMT_WARN_FUNC("WMT turn off LPBK fail, retrying, retryCounter left:%d!\n",
+						retry_count);
+				retry_count--;
+				osal_sleep_ms(1000);
+			} else {
+				WMT_DBG_FUNC("WMT turn off LPBK suceed\n");
+				break;
+			}
+		}
+	} while (retry_count > 0);
+	return ((wmt_lib_get_drv_status(WMTDRV_TYPE_LPBK) == DRV_STS_FUNC_ON) == on_off_flag) - 1;
 }
 
 MTK_WCN_BOOL wmt_dev_get_early_suspend_state(VOID)
 {
 	MTK_WCN_BOOL bRet =
-		(g_es_lr_flag_for_quick_sleep == 0) ? MTK_WCN_BOOL_FALSE : MTK_WCN_BOOL_TRUE;
+		(atomic_read(&g_es_lr_flag_for_quick_sleep) == 0) ? MTK_WCN_BOOL_FALSE : MTK_WCN_BOOL_TRUE;
 	/* WMT_INFO_FUNC("bRet:%d\n", bRet); */
 	return bRet;
 }
@@ -400,146 +406,41 @@ INT32 wmt_dev_rx_timeout(P_OSAL_EVENT pEvent)
 	return lRet;
 }
 
-INT32 wmt_dev_read_file(PUINT8 pName, const PPUINT8 ppBufPtr, INT32 offset, INT32 padSzBuf)
+/* TODO: [ChangeFeature][George] refine this function name for general filesystem read operation, not patch only. */
+INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch)
 {
 	INT32 iRet = -1;
-	struct file *fd;
-	/* ssize_t iRet; */
-	INT32 file_len;
-	INT32 read_len;
-	PVOID pBuf;
-	char __user *p = NULL;
-	loff_t pos = 0;
+	osal_firmware *fw = NULL;
 
-	/* struct cred *cred = get_task_cred(current); */
-	const struct cred *cred = get_current_cred();
-
-	if (!ppBufPtr) {
+	if (!ppPatch) {
 		WMT_ERR_FUNC("invalid ppBufptr!\n");
 		return -1;
 	}
-	*ppBufPtr = NULL;
-
-	fd = filp_open(pName, O_RDONLY, 0);
-	if (IS_ERR(fd)) {
-		WMT_ERR_FUNC("%s %d\n", __func__, __LINE__);
-		WMT_ERR_FUNC("failed to open or read!(0x%p, %d, %d, %d)\n",
-				fd, PTR_ERR(fd), cred->fsuid, cred->fsgid);
-		return -1;
-	}
-	if (!fd->f_op) {
-		WMT_ERR_FUNC("%s %d\n", __func__, __LINE__);
-		return -2;
-	}
-
-	file_len = fd->f_path.dentry->d_inode->i_size;
-	pBuf = vmalloc((file_len + BCNT_PATCH_BUF_HEADROOM + 3) & ~0x3UL);
-	if (!pBuf) {
-		WMT_ERR_FUNC("failed to vmalloc(%d)\n", (INT32) ((file_len + 3) & ~0x3UL));
-		goto read_file_done;
-	}
-
-	do {
-		if (fd->f_pos != offset) {
-			if (fd->f_op->llseek) {
-				if (fd->f_op->llseek(fd, offset, 0) != offset) {
-					WMT_ERR_FUNC("failed to seek!!\n");
-					goto read_file_done;
-				}
-			} else
-				fd->f_pos = offset;
-		}
-		p = (__force void __user *)pBuf;
-		/*read_len = fd->f_op->read(fd, pBuf + padSzBuf, file_len, &fd->f_pos);*/
-		read_len = __vfs_read(fd, p + padSzBuf, file_len, &pos);
-		if (read_len != file_len)
-			WMT_WARN_FUNC("read abnormal: read_len(%d), file_len(%d)\n", read_len, file_len);
-	} while (false);
-
-	iRet = 0;
-	*ppBufPtr = pBuf;
-
-read_file_done:
-	if (iRet) {
-		if (pBuf)
-			vfree(pBuf);
-	}
-
-	filp_close(fd, NULL);
-
-	return (iRet) ? iRet : read_len;
-}
-
-/* TODO: [ChangeFeature][George] refine this function name for general filesystem read operation, not patch only. */
-INT32 wmt_dev_patch_get(PUINT8 pPatchName, osal_firmware **ppPatch, INT32 padSzBuf)
-{
-	INT32 iRet = -1;
-	osal_firmware *pfw;
-	uid_t orig_uid;
-	gid_t orig_gid;
-
-	/* struct cred *cred = get_task_cred(current); */
-	struct cred *cred = (struct cred *)get_current_cred();
-
-	mm_segment_t orig_fs = get_fs();
-
-	if (*ppPatch) {
-		WMT_WARN_FUNC("f/w patch already exists\n");
-		if ((*ppPatch)->data)
-			vfree((*ppPatch)->data);
-
-		kfree(*ppPatch);
-		*ppPatch = NULL;
-	}
-
-	if (!osal_strlen(pPatchName)) {
-		WMT_ERR_FUNC("empty f/w name\n");
-		osal_assert((osal_strlen(pPatchName) > 0));
-		return -1;
-	}
-
-	pfw = kzalloc(sizeof(osal_firmware), /*GFP_KERNEL */ GFP_ATOMIC);
-	if (!pfw) {
-		WMT_ERR_FUNC("kzalloc(%d) fail\n", sizeof(osal_firmware));
-		return -2;
-	}
-
-	orig_uid = cred->fsuid.val;
-	orig_gid = cred->fsgid.val;
-	cred->fsuid.val = cred->fsgid.val = 0;
-
-	set_fs(get_ds());
-
-	/* load patch file from fs */
-	iRet = wmt_dev_read_file(pPatchName, (const PPUINT8)&pfw->data, 0, padSzBuf);
-	set_fs(orig_fs);
-
-	cred->fsuid.val = orig_uid;
-	cred->fsgid.val = orig_gid;
-
-	if (iRet > 0) {
-		pfw->size = iRet;
-		*ppPatch = pfw;
-		WMT_DBG_FUNC("load (%s) to addr(0x%p) success\n", pPatchName, pfw->data);
-		return 0;
-	}
-
-	kfree(pfw);
 	*ppPatch = NULL;
-	WMT_ERR_FUNC("load file (%s) fail, iRet(%d)\n", pPatchName, iRet);
+	do {
+		iRet = request_firmware((const struct firmware **)&fw, pPatchName, NULL);
+		if (iRet == -EAGAIN) {
+			WMT_ERR_FUNC("failed to open or read!(%s), retry again!\n", pPatchName);
+			osal_sleep_ms(100);
+		}
+	} while (iRet == -EAGAIN);
+	if (iRet != 0) {
+		WMT_ERR_FUNC("failed to open or read!(%s)\n", pPatchName);
+		return -1;
+	}
+	WMT_DBG_FUNC("loader firmware %s  ok!!\n", pPatchName);
+	iRet = 0;
+	*ppPatch = fw;
 
-	return -1;
+	return iRet;
 }
 
 INT32 wmt_dev_patch_put(osal_firmware **ppPatch)
 {
 	if (*ppPatch != NULL) {
-		if ((*ppPatch)->data)
-			vfree((*ppPatch)->data);
-		kfree(*ppPatch);
+		release_firmware((const struct firmware *)*ppPatch);
 		*ppPatch = NULL;
 	}
-
 	return 0;
 }
 
@@ -551,10 +452,8 @@ VOID wmt_dev_patch_info_free(VOID)
 
 MTK_WCN_BOOL wmt_dev_is_file_exist(PUINT8 pFileName)
 {
-	struct file *fd = NULL;
-	/* ssize_t iRet; */
-	INT32 fileLen = -1;
-	const struct cred *cred = get_current_cred();
+	INT32 iRet = 0;
+	osal_firmware *fw = NULL;
 
 	if (pFileName == NULL) {
 		WMT_ERR_FUNC("invalid file name pointer(%p)\n", pFileName);
@@ -565,25 +464,13 @@ MTK_WCN_BOOL wmt_dev_is_file_exist(PUINT8 pFileName)
 		WMT_ERR_FUNC("invalid file name(%s)\n", pFileName);
 		return MTK_WCN_BOOL_FALSE;
 	}
-	/* struct cred *cred = get_task_cred(current); */
 
-	fd = filp_open(pFileName, O_RDONLY, 0);
-	if (!fd || IS_ERR(fd) || !fd->f_op || !fd->f_op->read) {
-		WMT_ERR_FUNC("failed to open or read(%s)!(0x%p, %d, %d)\n", pFileName, fd, cred->fsuid,
-				cred->fsgid);
+	iRet = request_firmware((const struct firmware **)&fw, pFileName, NULL);
+	if (iRet != 0) {
+		WMT_ERR_FUNC("failed to open or read!(%s)\n", pFileName);
 		return MTK_WCN_BOOL_FALSE;
 	}
-
-	fileLen = fd->f_path.dentry->d_inode->i_size;
-	filp_close(fd, NULL);
-	fd = NULL;
-	if (fileLen <= 0) {
-		WMT_ERR_FUNC("invalid file(%s), length(%d)\n", pFileName, fileLen);
-		return MTK_WCN_BOOL_FALSE;
-	}
-
-	WMT_ERR_FUNC("valid file(%s), length(%d)\n", pFileName, fileLen);
-
+	release_firmware(fw);
 	return true;
 }
 
@@ -681,17 +568,30 @@ static UINT32 wmt_dev_tra_poll(VOID)
 
 LONG wmt_dev_tm_temp_query(VOID)
 {
-#define HISTORY_NUM       5
-#define TEMP_THRESHOLD   65
+#define HISTORY_NUM       3
+#define TEMP_THRESHOLD   60
 #define REFRESH_TIME    300	/* sec */
 
-	static INT32 temp_table[HISTORY_NUM] = { 99 };	/* not query yet. */
-	static INT32 idx_temp_table;
-	static struct timeval query_time, now_time;
-	INT8 query_cond = 0;
+	static INT32 s_temp_table[HISTORY_NUM] = { 99 };	/* not query yet. */
+	static INT32 s_idx_temp_table;
+	static struct timeval s_query_time;
+
+	INT32 temp_table[HISTORY_NUM];
+	INT32 idx_temp_table;
+	struct timeval query_time;
+
+	struct timeval now_time;
 	INT32 current_temp = 0;
 	INT32 index = 0;
 	LONG return_temp = 0;
+	INT8 query_cond = 0;
+
+	/* Let us work on the copied version of function static variables */
+	osal_lock_unsleepable_lock(&g_temp_query_spinlock);
+	osal_memcpy(temp_table, s_temp_table, sizeof(s_temp_table));
+	osal_memcpy(&query_time, &s_query_time, sizeof(struct timeval));
+	idx_temp_table = s_idx_temp_table;
+	osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
 
 	/* Query condition 1: */
 	/* If we have the high temperature records on the past, we continue to query/monitor */
@@ -711,7 +611,10 @@ LONG wmt_dev_tm_temp_query(VOID)
 	if (!query_cond) {
 		if (wmt_dev_tra_poll() == 0) {
 			query_cond = 1;
-			WMT_INFO_FUNC("traffic , we must query temperature..\n");
+			WMT_DBG_FUNC("traffic , we must query temperature..\n");
+		} else if (temp_table[idx_temp_table] >= TEMP_THRESHOLD) {
+			WMT_INFO_FUNC("temperature maybe greater than 60, query temperature\n");
+			query_cond = 1;
 		} else
 			WMT_DBG_FUNC("idle traffic ....\n");
 
@@ -736,12 +639,12 @@ LONG wmt_dev_tm_temp_query(VOID)
 		/* time overflow, we refresh temp table again for simplicity! */
 		if ((now_time.tv_sec < query_time.tv_sec) ||
 		    ((now_time.tv_sec > query_time.tv_sec) &&
-			 (now_time.tv_sec - query_time.tv_sec) > REFRESH_TIME)) {
+			(now_time.tv_sec - query_time.tv_sec) > REFRESH_TIME)) {
 			query_cond = 1;
 
 			WMT_INFO_FUNC
-				("It is long time (> %d sec) not to query, we must query temp temperature..\n",
-				 REFRESH_TIME);
+				("It is long time (prev(%ld), now(%ld), > %d sec) not to query, query temp again..\n",
+				 query_time.tv_sec, now_time.tv_sec, REFRESH_TIME);
 			for (index = 0; index < HISTORY_NUM; index++)
 				temp_table[index] = 99;
 
@@ -753,26 +656,60 @@ LONG wmt_dev_tm_temp_query(VOID)
 		mtk_wcn_wmt_therm_ctrl(WMTTHERM_ENABLE);
 		current_temp = mtk_wcn_wmt_therm_ctrl(WMTTHERM_READ);
 		mtk_wcn_wmt_therm_ctrl(WMTTHERM_DISABLE);
-		idx_temp_table = (idx_temp_table + 1) % HISTORY_NUM;
-		temp_table[idx_temp_table] = current_temp;
-		do_gettimeofday(&query_time);
 
-		WMT_INFO_FUNC("[Thermal] current_temp = 0x%x\n", (current_temp & 0xFF));
+		/* Only update temperature if our index hasn't been modified by the concurrent thread */
+		osal_lock_unsleepable_lock(&g_temp_query_spinlock);
+		if (idx_temp_table == s_idx_temp_table) {
+			osal_memcpy(s_temp_table, temp_table, sizeof(s_temp_table));
+			s_idx_temp_table = (s_idx_temp_table + 1) % HISTORY_NUM;
+			s_temp_table[s_idx_temp_table] = current_temp;
+			do_gettimeofday(&s_query_time);
+			index = -1;
+		} else {
+			index = s_idx_temp_table;
+		}
+		osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
+
+		if (index == -1) {
+			WMT_INFO_FUNC("[Thermal] current_temp = 0x%x\n", (current_temp & 0xFF));
+		} else {
+			WMT_ERR_FUNC("Temperature(0x%x) update failed due to modified idx_temp_table(%d, %d)",
+				(current_temp & 0xFF), idx_temp_table, index);
+		}
 	} else {
-		current_temp = temp_table[idx_temp_table];
-		idx_temp_table = (idx_temp_table + 1) % HISTORY_NUM;
-		temp_table[idx_temp_table] = current_temp;
+		/* Only update temperature if our index hasn't been modified by the concurrent thread */
+		osal_lock_unsleepable_lock(&g_temp_query_spinlock);
+		if (idx_temp_table == s_idx_temp_table) {
+			current_temp = s_temp_table[s_idx_temp_table];
+			s_idx_temp_table = (s_idx_temp_table + 1) % HISTORY_NUM;
+			s_temp_table[s_idx_temp_table] = current_temp;
+			index = -1;
+		} else {
+			/* Return the last valid temperature which has just been modified by the concurrent thread */
+			current_temp = s_temp_table[s_idx_temp_table];
+			index = s_idx_temp_table;
+		}
+		osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
+		if (index != -1) {
+			WMT_DBG_FUNC("Use last valid temperature (0x%x) due to modified idx_temp_table(%d, %d)",
+				(current_temp & 0xFF), idx_temp_table, index);
+		}
 	}
 
 	/*  */
 	/* Dump information */
 	/*  */
-	WMT_DBG_FUNC("[Thermal] idx_temp_table = %d\n", idx_temp_table);
-	WMT_DBG_FUNC("[Thermal] now.time = %d, query.time = %d, REFRESH_TIME = %d\n", now_time.tv_sec,
-		     query_time.tv_sec, REFRESH_TIME);
+	if (gWmtDbgLvl >= WMT_LOG_DBG) {
+		osal_lock_unsleepable_lock(&g_temp_query_spinlock);
+		WMT_DBG_FUNC("[Thermal] s_idx_temp_table = %d, idx_temp_table = %d\n",
+			s_idx_temp_table, idx_temp_table);
+		WMT_DBG_FUNC("[Thermal] now.time = %d, s_query.time = %d, query.time = %d, REFRESH_TIME = %d\n",
+			now_time.tv_sec, s_query_time.tv_sec, query_time.tv_sec, REFRESH_TIME);
 
-	WMT_DBG_FUNC("[0] = %d, [1] = %d, [2] = %d, [3] = %d, [4] = %d\n----\n",
-		     temp_table[0], temp_table[1], temp_table[2], temp_table[3], temp_table[4]);
+		WMT_DBG_FUNC("[0] = %d, [1] = %d, [2] = %d\n----\n",
+			s_temp_table[0], s_temp_table[1], s_temp_table[2]);
+		osal_unlock_unsleepable_lock(&g_temp_query_spinlock);
+	}
 
 	return_temp = ((current_temp & 0x80) == 0x0) ? current_temp : (-1) * (current_temp & 0x7f);
 
@@ -918,6 +855,10 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 			bRet = wmt_lib_put_act_op(pOp);
 			WMT_DBG_FUNC("WMT_OPID_HIF_CONF result(%d)\n", bRet);
 			iRet = (bRet == MTK_WCN_BOOL_FALSE) ? -EFAULT : 0;
+			if (iRet == 0) {
+				WMT_INFO_FUNC("luncher set STP mode success!\n");
+				hif_info = 1;
+			}
 		} while (0);
 		break;
 	case WMT_IOCTL_FUNC_ONOFF_CTRL:	/* test turn on/off func */
@@ -933,26 +874,27 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 		} while (0);
 		break;
 	case WMT_IOCTL_LPBK_POWER_CTRL:
-		/* switch Loopback function on/off
-		 * arg:
-		 * bit0 = 1:turn loopback function on
-		 * bit0 = 0:turn loopback function off
-		 * bit1 = 1:do not power on connsys
-		 * bit1 = 0:do power on connsys
-		 */
-		DisablePoweronConnsys = (arg & 0x02) >> 1;
-		if (DisablePoweronConnsys == 0) {
-			do {
-				MTK_WCN_BOOL bRet = MTK_WCN_BOOL_FALSE;
+		do {
+			MTK_WCN_BOOL bRet = MTK_WCN_BOOL_TRUE;
 
-				if (arg & 0x01)
+			switch (arg) {
+			case 0:
+				if (always_pwr_on_flag)
+					bRet	= mtk_wcn_wmt_func_off(WMTDRV_TYPE_LPBK);
+				break;
+			case 1:
+				if (always_pwr_on_flag)
 					bRet = mtk_wcn_wmt_func_on(WMTDRV_TYPE_LPBK);
-				else
-					bRet = mtk_wcn_wmt_func_off(WMTDRV_TYPE_LPBK);
-				iRet = (bRet == MTK_WCN_BOOL_FALSE) ? -EFAULT : 0;
-
-			} while (0);
-		}
+				break;
+			case 2:
+				bRet = mtk_wcn_wmt_func_on(WMTDRV_TYPE_LPBK);
+				break;
+			case 3:
+				bRet = mtk_wcn_wmt_func_off(WMTDRV_TYPE_LPBK);
+				break;
+			}
+			iRet = (bRet == MTK_WCN_BOOL_TRUE) ? 0 : -EFAULT;
+		} while (0);
 		break;
 	case WMT_IOCTL_LPBK_TEST:
 		do {
@@ -1012,6 +954,11 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 			}
 			WMT_INFO_FUNC("OPID(%d) length(%d) ok\n", pOp->op.opId, pOp->op.au4OpData[0]);
 			iRet = pOp->op.au4OpData[0];
+			if ((iRet > sizeof(gLpbkBuf)) || (iRet < 0)) {
+				iRet = -EFAULT;
+				WMT_ERR_FUNC("length is too long\n");
+				break;
+			}
 			if (copy_to_user((PVOID)arg + sizeof(SIZE_T) + sizeof(UINT8[2048]), gLpbkBuf, iRet)) {
 				iRet = -EFAULT;
 				break;
@@ -1053,6 +1000,11 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 			}
 			WMT_INFO_FUNC("OPID(%d) length(%d) ok\n", pOp->op.opId, pOp->op.au4OpData[0]);
 			iRet = pOp->op.au4OpData[0];
+			if ((iRet > sizeof(gLpbkBuf)) || (iRet < 0)) {
+				iRet = -EFAULT;
+				WMT_ERR_FUNC("length is too long\n");
+				break;
+			}
 			if (copy_to_user((PVOID)arg + sizeof(SIZE_T), gLpbkBuf, iRet)) {
 				iRet = -EFAULT;
 				break;
@@ -1108,12 +1060,12 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 			wmt_lib_set_stp_wmt_last_close(0);
 		break;
 	case WMT_IOCTL_SET_PATCH_NUM:
-		pAtchNum = arg;
-		if (pAtchNum == 0 || pAtchNum > MAX_PATCH_NUM) {
-			WMT_ERR_FUNC("patch num(%d) == 0 or > %d!\n", pAtchNum, MAX_PATCH_NUM);
+		if (arg == 0 || arg > MAX_PATCH_NUM) {
+			WMT_ERR_FUNC("patch num(%d) == 0 or > %d!\n", arg, MAX_PATCH_NUM);
 			iRet = -1;
 			break;
 		}
+		pAtchNum = arg;
 
 		pPatchInfo = kcalloc(pAtchNum, sizeof(WMT_PATCH_INFO), GFP_ATOMIC);
 		if (!pPatchInfo) {
@@ -1142,9 +1094,8 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 				iRet = -EFAULT;
 				break;
 			}
-
-			if (wMtPatchInfo.dowloadSeq > pAtchNum || wMtPatchInfo.dowloadSeq == 0) {
-				WMT_ERR_FUNC("dowloadSeq num(%u) > %u or == 0!\n", wMtPatchInfo.dowloadSeq, pAtchNum);
+			if (wMtPatchInfo.dowloadSeq > pAtchNum) {
+				WMT_ERR_FUNC("dowloadSeq num(%d) > %d!\n", wMtPatchInfo.dowloadSeq, pAtchNum);
 				iRet = -EFAULT;
 				counter = 0;
 				break;
@@ -1265,7 +1216,7 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 				if (pBuf[i] == '/') {
 					k = 0;
 					j++;
-				} else if (k <= 10) {
+				} else if (isascii(pBuf[i]) && k <= 10) {
 					Buffer[j][k] = pBuf[i];
 					k++;
 				}
@@ -1276,7 +1227,7 @@ LONG WMT_unlocked_ioctl(struct file *filp, UINT32 cmd, ULONG arg)
 					WMT_ERR_FUNC("string convert fail(%d)\n", iRet);
 					break;
 				}
-				WMT_INFO_FUNC("dynamic dump data buf[%d]:(0x%x)\n", j, int_buf[j]);
+				WMT_INFO_FUNC("dynamic dump data buf[%d]:(0x%x)\n", i, int_buf[i]);
 			}
 			wmt_plat_set_dynamic_dumpmem(int_buf);
 			kfree(pBuf);
@@ -1388,7 +1339,7 @@ static INT32 WMT_init(VOID)
 	INT32 ret = -1;
 	ENUM_WMT_CHIP_TYPE chip_type;
 
-	WMT_INFO_FUNC("WMT Version= %s DATE=%s\n", MTK_WMT_VERSION, MTK_WMT_DATE);
+	WMT_DBG_FUNC("WMT Version= %s DATE=%s\n", MTK_WMT_VERSION, MTK_WMT_DATE);
 	/* Prepare a UINT8 device */
 	/*static allocate chrdev */
 	gWmtInitDone = 0;
@@ -1460,7 +1411,8 @@ static INT32 WMT_init(VOID)
 	if (chip_type == WMT_CHIP_TYPE_COMBO)
 		mtk_wcn_hif_sdio_update_cb_reg(wmt_dev_tra_sdio_update);
 
-	WMT_INFO_FUNC("wmt_dev register thermal cb\n");
+	WMT_DBG_FUNC("wmt_dev register thermal cb\n");
+	osal_unsleepable_lock_init(&g_temp_query_spinlock);
 	wmt_lib_register_thermal_ctrl_cb(wmt_dev_tm_temp_query);
 
 	if (chip_type == WMT_CHIP_TYPE_SOC)
@@ -1469,9 +1421,7 @@ static INT32 WMT_init(VOID)
 	gWmtInitDone = 1;
 	wake_up(&gWmtInitWq);
 
-	osal_sleepable_lock_init(&g_es_lr_lock);
 	INIT_WORK(&gPwrOnOffWork, wmt_pwr_on_off_handler);
-#ifndef CONFIG_MTK_COMBO_COMM_APO
 #ifdef CONFIG_EARLYSUSPEND
 	register_early_suspend(&wmt_early_suspend_handler);
 	WMT_INFO_FUNC("register_early_suspend finished\n");
@@ -1481,10 +1431,9 @@ static INT32 WMT_init(VOID)
 	if (ret)
 		WMT_ERR_FUNC("wmt register fb_notifier failed! ret(%d)\n", ret);
 	else
-		WMT_INFO_FUNC("wmt register fb_notifier OK!\n");
+		WMT_DBG_FUNC("wmt register fb_notifier OK!\n");
 #endif /* CONFIG_EARLYSUSPEND */
-#endif /* CONFIG_MTK_COMBO_COMM_APO */
-	WMT_INFO_FUNC("success\n");
+	WMT_DBG_FUNC("success\n");
 
 	return 0;
 
@@ -1519,15 +1468,13 @@ static VOID WMT_exit(VOID)
 {
 	dev_t dev = MKDEV(gWmtMajor, 0);
 
-	osal_sleepable_lock_deinit(&g_es_lr_lock);
-#ifndef CONFIG_MTK_COMBO_COMM_APO
+	osal_unsleepable_lock_deinit(&g_temp_query_spinlock);
 #ifdef CONFIG_EARLYSUSPEND
 	unregister_early_suspend(&wmt_early_suspend_handler);
 	WMT_INFO_FUNC("unregister_early_suspend finished\n");
 #else
 	fb_unregister_client(&wmt_fb_notifier);
 #endif /* CONFIG_EARLYSUSPEND */
-#endif /* CONFIG_MTK_COMBO_COMM_APO */
 
 	wmt_dev_bgw_desense_deinit();
 

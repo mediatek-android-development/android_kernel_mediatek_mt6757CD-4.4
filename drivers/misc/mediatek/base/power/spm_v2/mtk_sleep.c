@@ -28,7 +28,7 @@
 #include "mtk_spm.h"
 #include "mtk_spm_sleep.h"
 #include "mtk_spm_idle.h"
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 #include <mach/mtk_clkmgr.h>
 #endif
 
@@ -83,10 +83,11 @@
 #define slp_debug(fmt, args...)     pr_debug("[SLP] " fmt, ##args)
 static DEFINE_SPINLOCK(slp_lock);
 
-static wake_reason_t slp_wake_reason = WR_NONE;
+static unsigned int slp_wake_reason = WR_NONE;
 
 static bool slp_ck26m_on;
 bool slp_dump_gpio;
+bool slp_dump_golden_setting;
 static bool slp_dump_regs = 1;
 static bool slp_check_mtcmos_pll = 1;
 
@@ -102,14 +103,6 @@ static u32 slp_spm_flags = {
 	#ifdef CONFIG_MTK_ICUSB_SUPPORT
 	SPM_FLAG_DIS_INFRA_PDN |
 	#endif
-	#if defined(CONFIG_ARCH_MT6797)
-	SPM_FLAG_DIS_VCORE_DVS |
-	SPM_FLAG_DIS_VCORE_DFS |
-	SPM_FLAG_DIS_SYSRAM_SLEEP |
-	#if !defined(CONFIG_MTK_TINYSYS_SCP_SUPPORT)
-	SPM_FLAG_EN_HPM_SODI |
-	#endif
-	#endif
 	SPM_FLAG_DIS_DPD
 #endif
 };
@@ -117,13 +110,7 @@ static u32 slp_spm_flags = {
 #if SLP_SLEEP_DPIDLE_EN
 /* sync with mt_idle.c spm_deepidle_flags setting */
 static u32 slp_spm_deepidle_flags = {
-	#if defined(CONFIG_ARCH_MT6797)
-	SPM_FLAG_DIS_VCORE_DVS |
-	SPM_FLAG_DIS_VCORE_DFS |
-	SPM_FLAG_DIS_SYSRAM_SLEEP
-	#else
 	0
-	#endif
 };
 #endif
 /* static u32 slp_spm_data = 0; */
@@ -292,7 +279,7 @@ static int slp_suspend_ops_enter(suspend_state_t state)
 #endif
 
 #if SLP_SLEEP_DPIDLE_EN
-#if defined(CONFIG_MT_SND_SOC_6755) || defined(CONFIG_MT_SND_SOC_6797) || defined(CONFIG_MTK_SND_SOC_NEW_ARCH)
+#if defined(CONFIG_MT_SND_SOC_6755) || defined(CONFIG_MTK_SND_SOC_NEW_ARCH)
 	int fm_radio_is_playing = 0;
 
 	if (ConditionEnterSuspend() == true)
@@ -324,13 +311,7 @@ static int slp_suspend_ops_enter(suspend_state_t state)
 	if (slp_dump_regs)
 		slp_dump_pm_regs();
 #endif
-#if defined(CONFIG_ARCH_MT6755)
-#if !defined(CONFIG_FPGA_EARLY_PORTING)
-	pll_if_on();
-	subsys_if_on();
-#endif
-#endif
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 #if !defined(CONFIG_FPGA_EARLY_PORTING)
 	if (slp_check_mtcmos_pll)
 		slp_check_pm_mtcmos_pll();
@@ -340,18 +321,6 @@ static int slp_suspend_ops_enter(suspend_state_t state)
 #if 0
 	if (slp_check_mtcmos_pll)
 		slp_check_pm_mtcmos_pll();
-#endif
-
-#if defined(CONFIG_ARCH_MT6755)
-#if !defined(CONFIG_FPGA_EARLY_PORTING)
-	if (!(spm_cpusys0_can_power_down() || spm_cpusys1_can_power_down())) {
-		slp_error("CANNOT SLEEP DUE TO CPUx PON, PWR_STATUS = 0x%x, PWR_STATUS_2ND = 0x%x\n",
-		     slp_read(PWR_STATUS), slp_read(PWR_STATUS_2ND));
-		/* return -EPERM; */
-		ret = -EPERM;
-		goto LEAVE_SLEEP;
-	}
-#endif
 #endif
 
 	if (is_infra_pdn(slp_spm_flags) && !is_cpu_pdn(slp_spm_flags)) {
@@ -368,7 +337,7 @@ static int slp_suspend_ops_enter(suspend_state_t state)
 	}
 #endif
 #if SLP_SLEEP_DPIDLE_EN
-#if defined(CONFIG_MT_SND_SOC_6755) || defined(CONFIG_MT_SND_SOC_6797) || defined(CONFIG_MTK_SND_SOC_NEW_ARCH)
+#if defined(CONFIG_MT_SND_SOC_6755) || defined(CONFIG_MTK_SND_SOC_NEW_ARCH)
 	if (slp_ck26m_on | fm_radio_is_playing)
 #else
 	if (slp_ck26m_on)
@@ -464,7 +433,7 @@ int slp_set_wakesrc(u32 wakesrc, bool enable, bool ck26m_on)
 	return r;
 }
 
-wake_reason_t slp_get_wake_reason(void)
+unsigned int slp_get_wake_reason(void)
 {
 	return slp_wake_reason;
 }
@@ -530,6 +499,7 @@ module_param(slp_ck26m_on, bool, 0644);
 module_param(slp_spm_flags, uint, 0644);
 
 module_param(slp_dump_gpio, bool, 0644);
+module_param(slp_dump_golden_setting, bool, 0644);
 module_param(slp_dump_regs, bool, 0644);
 module_param(slp_check_mtcmos_pll, bool, 0644);
 

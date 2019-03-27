@@ -222,11 +222,6 @@ static int mtktsdram_sysrst_get_cur_state(struct thermal_cooling_device *cdev, u
 	return 0;
 }
 
-/* [lidebiao start]*/
-static int dram_sysrst_happened = 0;
-extern int send_sysrst_signal(unsigned int type);
-/* [lidebiao end] */
-
 static int mtktsdram_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 {
 	mtktsdram_dprintk("mtktsdram_sysrst_set_cur_state = %d\n", cl_dev_sysrst_state);
@@ -238,13 +233,7 @@ static int mtktsdram_sysrst_set_cur_state(struct thermal_cooling_device *cdev, u
 		pr_debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
 
 
-		/* [lidebiao start] */
-		if (0 == dram_sysrst_happened) {
-			send_sysrst_signal(0);
-			dram_sysrst_happened = 1;
-		}
-		//*(unsigned int *)0x0 = 0xdead; /* To trigger data abort to reset the system for thermal protection. */
-		/* [lidebiao end] */
+		*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
 
 	}
 	return 0;
@@ -328,8 +317,8 @@ static ssize_t mtktsdram_write(struct file *file, const char __user *buffer, siz
 		&ptr_mtktsdram_data->trip[8], &ptr_mtktsdram_data->t_type[8], ptr_mtktsdram_data->bind8,
 		&ptr_mtktsdram_data->trip[9], &ptr_mtktsdram_data->t_type[9], ptr_mtktsdram_data->bind9,
 		&ptr_mtktsdram_data->time_msec) == 32) {
-		down(&sem_mutex);
 		mtktsdram_dprintk("[mtktsdram_write] mtktsdram_unregister_thermal\n");
+		down(&sem_mutex);
 		mtktsdram_unregister_thermal();
 
 		for (i = 0; i < num_trip; i++)

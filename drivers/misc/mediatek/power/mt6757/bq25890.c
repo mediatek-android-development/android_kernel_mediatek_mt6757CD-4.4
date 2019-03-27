@@ -996,7 +996,7 @@ int hw_charging_get_charger_type(void)
 	hw_bc11_init();
 
 	/* Force charger type detection */
-	pr_err("Force charger type detection\n");
+	pr_info("Force charger type detection\n");
 	bq25890_set_force_dpdm(1);
 
 	msleep(200);
@@ -1004,7 +1004,7 @@ int hw_charging_get_charger_type(void)
 	pg_stat = bq25890_get_pg_state();
 	while (!pg_stat) {
 		count++;
-		pr_err("pg_stat is not ready:0x%x\n", pg_stat);
+		pr_info("pg_stat is not ready:0x%x\n", pg_stat);
 		msleep(100);
 
 		pg_stat = bq25890_get_pg_state();
@@ -1012,7 +1012,7 @@ int hw_charging_get_charger_type(void)
 			break;
 	}
 	vbus_stat = bq25890_get_vbus_state();
-	pr_err("vbus_stat: 0x%x, pg_stat:0x%x\n", vbus_stat, pg_stat);
+	pr_info("vbus_stat: 0x%x, pg_stat:0x%x\n", vbus_stat, pg_stat);
 
 	switch (vbus_stat) {
 	case 0: /* No input */

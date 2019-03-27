@@ -108,7 +108,7 @@ static DEFINE_MUTEX(auddrv_pmic_mutex);
 static DEFINE_MUTEX(audEMI_Clk_mutex);
 
 /* AUDIO_APLL_DIVIDER_GROUP may vary by chip!!! */
-typedef enum {
+enum audio_apll_divider_group {
 	AUDIO_APLL1_DIV0,
 	AUDIO_APLL2_DIV0,
 	AUDIO_APLL12_DIV1,
@@ -117,10 +117,10 @@ typedef enum {
 	AUDIO_APLL12_DIV4,
 	AUDIO_APLL12_DIVB,
 	AUDIO_APLL_DIV_NUM
-} AUDIO_APLL_DIVIDER_GROUP;
+};
 
 /* mI2SAPLLDivSelect may vary by chip!!! */
-static const uint32 mI2SAPLLDivSelect[Soc_Aud_I2S_CLKDIV_NUMBER] = {
+static const unsigned int mI2SAPLLDivSelect[Soc_Aud_I2S_CLKDIV_NUMBER] = {
 	AUDIO_APLL1_DIV0,
 	AUDIO_APLL2_DIV0,
 	AUDIO_APLL12_DIV1,
@@ -278,8 +278,8 @@ void AudDrv_Bus_Init(void)
 
 void AudDrv_Clk_Power_On(void)
 {
-	/*volatile uint32 *AFE_Register = (volatile uint32 *)Get_Afe_Powertop_Pointer();*/
-	volatile uint32 val_tmp;
+	/*volatile unsigned int *AFE_Register = (volatile unsigned int *)Get_Afe_Powertop_Pointer();*/
+	unsigned int val_tmp;
 
 	pr_warn("%s\n", __func__);
 #ifdef MT6757_READY
@@ -620,9 +620,9 @@ void AudDrv_Clk_Off(void)
 		if (aud_clks[CLOCK_AFE].clk_prepare)
 			clk_disable(aud_clks[CLOCK_AFE].clock);
 
-		if (aud_clks[CLOCK_MUX_AUDIOINTBUS].clk_prepare) {
+		if (aud_clks[CLOCK_MUX_AUDIOINTBUS].clk_prepare)
 			clk_disable(aud_clks[CLOCK_MUX_AUDIOINTBUS].clock);
-		}
+
 		if (aud_clks[CLOCK_INFRA_SYS_AUDIO].clk_prepare)
 			clk_disable(aud_clks[CLOCK_INFRA_SYS_AUDIO].clock);
 
@@ -633,8 +633,8 @@ void AudDrv_Clk_Off(void)
 		/* bit25=1, with 133m mastesr and 66m slave bus clock cg gating */
 #endif
 	} else if (Aud_AFE_Clk_cntr < 0) {
-		PRINTK_AUD_ERROR("!! AudDrv_Clk_Off, Aud_AFE_Clk_cntr<0 (%d)\n",
-				 Aud_AFE_Clk_cntr);
+		pr_warn("!! AudDrv_Clk_Off, Aud_AFE_Clk_cntr<0 (%d)\n",
+			Aud_AFE_Clk_cntr);
 		AUDIO_ASSERT(true);
 		Aud_AFE_Clk_cntr = 0;
 	}
@@ -679,8 +679,8 @@ void AudDrv_ANA_Clk_Off(void)
 		/* TODO:: open ADC clock.... */
 #endif
 	} else if (Aud_ANA_Clk_cntr < 0) {
-		PRINTK_AUD_ERROR("!! AudDrv_ANA_Clk_Off, Aud_ADC_Clk_cntr<0 (%d)\n",
-				 Aud_ANA_Clk_cntr);
+		pr_warn("!! AudDrv_ANA_Clk_Off, Aud_ADC_Clk_cntr<0 (%d)\n",
+			Aud_ANA_Clk_cntr);
 		AUDIO_ASSERT(true);
 		Aud_ANA_Clk_cntr = 0;
 	}
@@ -854,6 +854,24 @@ void AudDrv_ADC_Hires_Clk_Off(void)
 	/* No Hires Clk in mt6757 */
 }
 
+/*****************************************************************************
+ * FUNCTION
+  *  AudDrv_ADC2_Hires_Clk_On / AudDrv_ADC2_Hires_Clk_Off
+  *
+  * DESCRIPTION
+  *  Enable/Disable analog part clock
+  *
+  *****************************************************************************/
+
+void AudDrv_ADC2_Hires_Clk_On(void)
+{
+	/* No Hires Clk in mt6757 */
+}
+
+void AudDrv_ADC2_Hires_Clk_Off(void)
+{
+	/* No Hires Clk in mt6757 */
+}
 
 /*****************************************************************************
  * FUNCTION
@@ -977,8 +995,8 @@ void AudDrv_APLL22M_Clk_Off(void)
 
 EXIT:
 	if (Aud_APLL22M_Clk_cntr < 0) {
-		PRINTK_AUD_ERROR("err, %s <0 (%d)\n", __func__,
-				 Aud_APLL22M_Clk_cntr);
+		pr_warn("err, %s <0 (%d)\n", __func__,
+			Aud_APLL22M_Clk_cntr);
 		Aud_APLL22M_Clk_cntr = 0;
 	}
 
@@ -1106,8 +1124,8 @@ void AudDrv_APLL24M_Clk_Off(void)
 	}
 EXIT:
 	if (Aud_APLL24M_Clk_cntr < 0) {
-		PRINTK_AUD_ERROR("%s <0 (%d)\n", __func__,
-				 Aud_APLL24M_Clk_cntr);
+		pr_warn("%s <0 (%d)\n", __func__,
+			Aud_APLL24M_Clk_cntr);
 		Aud_APLL24M_Clk_cntr = 0;
 	}
 
@@ -1154,8 +1172,8 @@ void AudDrv_I2S_Clk_Off(void)
 	if (Aud_I2S_Clk_cntr == 0) {
 		aud_top_con_pdn_i2s(true);
 	} else if (Aud_I2S_Clk_cntr < 0) {
-		PRINTK_AUD_ERROR("!! AudDrv_I2S_Clk_Off, Aud_I2S_Clk_cntr<0 (%d)\n",
-				 Aud_I2S_Clk_cntr);
+		pr_warn("!! AudDrv_I2S_Clk_Off, Aud_I2S_Clk_cntr<0 (%d)\n",
+			Aud_I2S_Clk_cntr);
 		AUDIO_ASSERT(true);
 		Aud_I2S_Clk_cntr = 0;
 	}
@@ -1303,8 +1321,8 @@ void AudDrv_APLL1Tuner_Clk_Off(void)
 	}
 	/* handle for clock error */
 	else if (Aud_APLL1_Tuner_cntr < 0) {
-		PRINTK_AUD_ERROR("!! AudDrv_APLLTuner_Clk_Off, Aud_APLL1_Tuner_cntr<0 (%d)\n",
-				 Aud_APLL1_Tuner_cntr);
+		pr_warn("!! AudDrv_APLLTuner_Clk_Off, Aud_APLL1_Tuner_cntr<0 (%d)\n",
+			Aud_APLL1_Tuner_cntr);
 		Aud_APLL1_Tuner_cntr = 0;
 	}
 	spin_unlock_irqrestore(&auddrv_Clk_lock, flags);
@@ -1369,8 +1387,8 @@ void AudDrv_APLL2Tuner_Clk_Off(void)
 	}
 	/* handle for clock error */
 	else if (Aud_APLL2_Tuner_cntr < 0) {
-		PRINTK_AUD_ERROR("!! AudDrv_APLL2Tuner_Clk_Off, Aud_APLL1_Tuner_cntr<0 (%d)\n",
-				 Aud_APLL2_Tuner_cntr);
+		pr_warn("!! AudDrv_APLL2Tuner_Clk_Off, Aud_APLL1_Tuner_cntr<0 (%d)\n",
+			Aud_APLL2_Tuner_cntr);
 		Aud_APLL2_Tuner_cntr = 0;
 	}
 	spin_unlock_irqrestore(&auddrv_Clk_lock, flags);
@@ -1407,8 +1425,8 @@ void AudDrv_HDMI_Clk_Off(void)
 		AudDrv_ANA_Clk_Off();
 		AudDrv_Clk_Off();
 	} else if (Aud_HDMI_Clk_cntr < 0) {
-		PRINTK_AUD_ERROR("!! AudDrv_Linein_Clk_Off, Aud_I2S_Clk_cntr<0 (%d)\n",
-				 Aud_HDMI_Clk_cntr);
+		pr_warn("!! AudDrv_Linein_Clk_Off, Aud_I2S_Clk_cntr<0 (%d)\n",
+			Aud_HDMI_Clk_cntr);
 		AUDIO_ASSERT(true);
 		Aud_HDMI_Clk_cntr = 0;
 	}
@@ -1814,7 +1832,6 @@ void AudDrv_Emi_Clk_On(void)
 		/* mutex is used in these api */
 		disable_dpidle_by_bit(MT_CG_ID_AUDIO_AFE);
 		disable_soidle_by_bit(MT_CG_ID_AUDIO_AFE);
-		disable_mcsodi_by_bit(MT_CG_ID_AUDIO_AFE);
 #endif
 #endif
 	}
@@ -1834,14 +1851,13 @@ void AudDrv_Emi_Clk_Off(void)
 		/* mutex is used in these api */
 		enable_dpidle_by_bit(MT_CG_ID_AUDIO_AFE);
 		enable_soidle_by_bit(MT_CG_ID_AUDIO_AFE);
-		enable_mcsodi_by_bit(MT_CG_ID_AUDIO_AFE);
 #endif
 #endif
 	}
 
 	if (Aud_EMI_cntr < 0) {
 		Aud_EMI_cntr = 0;
-		PRINTK_AUD_ERROR("Aud_EMI_cntr = %d\n", Aud_EMI_cntr);
+		pr_warn("Aud_EMI_cntr = %d\n", Aud_EMI_cntr);
 	}
 	mutex_unlock(&auddrv_pmic_mutex);
 }
@@ -1865,7 +1881,7 @@ void AudDrv_ANC_Clk_Off(void)
 	/* MT6755 ANC? */
 }
 
-uint32 GetApllbySampleRate(uint32 SampleRate)
+unsigned int GetApllbySampleRate(unsigned int SampleRate)
 {
 	if (SampleRate == 176400 || SampleRate == 88200 || SampleRate == 44100 ||
 	    SampleRate == 22050 || SampleRate == 11025)
@@ -1874,10 +1890,10 @@ uint32 GetApllbySampleRate(uint32 SampleRate)
 		return Soc_Aud_APLL2;
 }
 
-void SetckSel(uint32 I2snum, uint32 SampleRate)
+void SetckSel(unsigned int I2snum, unsigned int SampleRate)
 {
 	/* always from APLL1 */
-	uint32 ApllSource;
+	unsigned int ApllSource;
 
 	if (GetApllbySampleRate(SampleRate) == Soc_Aud_APLL1)
 		ApllSource = 0;
@@ -1904,7 +1920,7 @@ void SetckSel(uint32 I2snum, uint32 SampleRate)
 	pr_warn("%s I2snum = %d ApllSource = %d\n", __func__, I2snum, ApllSource);
 }
 
-void EnableALLbySampleRate(uint32 SampleRate)
+void EnableALLbySampleRate(unsigned int SampleRate)
 {
 	pr_warn("%s, APLL1Counter = %d, APLL2Counter = %d, SampleRate = %d\n", __func__,
 		APLL1Counter, APLL2Counter, SampleRate);
@@ -1939,7 +1955,7 @@ void EnableALLbySampleRate(uint32 SampleRate)
 	}
 }
 
-void DisableALLbySampleRate(uint32 SampleRate)
+void DisableALLbySampleRate(unsigned int SampleRate)
 {
 	pr_warn("%s, APLL1Counter = %d, APLL2Counter = %d, SampleRate = %d\n", __func__,
 		APLL1Counter, APLL2Counter, SampleRate);
@@ -1984,7 +2000,7 @@ void DisableALLbySampleRate(uint32 SampleRate)
 	}
 }
 
-void EnableI2SDivPower(uint32 Diveder_name, bool bEnable)
+void EnableI2SDivPower(unsigned int Diveder_name, bool bEnable)
 {
 	pr_warn("%s bEnable = %d", __func__, bEnable);
 	if (bEnable)
@@ -1993,7 +2009,7 @@ void EnableI2SDivPower(uint32 Diveder_name, bool bEnable)
 		Afe_Set_Reg(CLK_AUDDIV_0, 1 << Diveder_name, 1 << Diveder_name);
 }
 
-void EnableI2SCLKDiv(uint32 I2snum, bool bEnable)
+void EnableI2SCLKDiv(unsigned int I2snum, bool bEnable)
 {
 	pr_warn("%s mI2SAPLLDivSelect = %d, i2snum = %d\n", __func__, mI2SAPLLDivSelect[I2snum], I2snum);
 	EnableI2SDivPower(mI2SAPLLDivSelect[I2snum], bEnable);
@@ -2065,10 +2081,10 @@ void EnableApll2(bool bEnable)
 	}
 }
 
-uint32 SetCLkMclk(uint32 I2snum, uint32 SampleRate)
+unsigned int SetCLkMclk(unsigned int I2snum, unsigned int SampleRate)
 {
-	uint32 I2S_APll = 0;
-	uint32 I2s_ck_div = 0;
+	unsigned int I2S_APll = 0;
+	unsigned int I2s_ck_div = 0;
 
 	if (GetApllbySampleRate(SampleRate) == Soc_Aud_APLL1)
 		I2S_APll = 180633600;
@@ -2109,12 +2125,12 @@ uint32 SetCLkMclk(uint32 I2snum, uint32 SampleRate)
 	return I2s_ck_div;
 }
 
-void SetCLkBclk(uint32 MckDiv, uint32 SampleRate, uint32 Channels, uint32 Wlength)
+void SetCLkBclk(unsigned int MckDiv, unsigned int SampleRate, unsigned int Channels, unsigned int Wlength)
 {
 	/* BCK set only required in 6595 TDM function div4/div5 */
-	uint32 I2S_APll = 0;
-	uint32 I2S_Bclk = 0;
-	uint32 I2s_Bck_div = 0;
+	unsigned int I2S_APll = 0;
+	unsigned int I2S_Bclk = 0;
+	unsigned int I2s_Bck_div = 0;
 
 	pr_debug("%s MckDiv = %dv SampleRate = %d  Channels = %d Wlength = %d\n", __func__, MckDiv,
 		SampleRate, Channels, Wlength);

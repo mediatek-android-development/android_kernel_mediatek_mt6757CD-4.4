@@ -52,7 +52,7 @@
 #define MSDC1_BLOCK_DATPIN_BROKEN_CARD
 
 /* For DMA retry check */
-#define CONFIG_MTK_DMA_RETRY
+/* #define CONFIG_MTK_DMA_RETRY */
 
 #if defined(CONFIG_MTK_DMA_RETRY)
 #define MTK_MSDC_DMA_RETRY
@@ -95,7 +95,7 @@
 /*--------------------------------------------------------------------------*/
 /* Common Macro                                                             */
 /*--------------------------------------------------------------------------*/
-#define REG_ADDR(x)                     ((volatile u32 *)(base + OFFSET_##x))
+#define REG_ADDR(x)                     (base + OFFSET_##x)
 
 /*--------------------------------------------------------------------------*/
 /* Common Definition                                                        */
@@ -181,14 +181,6 @@ typedef void (*pm_callback_t)(pm_message_t state, void *data);
 #define MSDC_SYS_SUSPEND    (1 << 6)  /* suspended by system           */
 /* for some board, need SD power always on!! or cannot recognize the sd card*/
 #define MSDC_SD_NEED_POWER  (1 << 31)
-
-/*
-#define MSDC_CMD_PIN        (0)
-#define MSDC_DAT_PIN        (1)
-#define MSDC_CD_PIN         (2)
-#define MSDC_WP_PIN         (3)
-#define MSDC_RST_PIN        (4)
-*/
 
 #define MSDC_DATA1_INT      (1)
 
@@ -432,8 +424,8 @@ struct msdc_host {
 	int                     dma_retry_force_dis;
 	int                     dma_retry_stat[10];
 	int                     fix_vcore;
-	unsigned int            chip_hw_ver;
 #endif
+	unsigned int			chip_hw_ver;
 #ifdef MTK_MSDC_DUMP_STATUS_DEBUG
 	struct timespec start_dma_time[HOST_MAX_NUM];
 	struct timespec stop_dma_time[HOST_MAX_NUM];
@@ -483,9 +475,9 @@ static inline unsigned int uffs(unsigned int x)
 	return r;
 }
 
-#define MSDC_READ8(reg)           __raw_readb((const volatile void *)reg)
-#define MSDC_READ16(reg)          __raw_readw((const volatile void *)reg)
-#define MSDC_READ32(reg)          __raw_readl((const volatile void *)reg)
+#define MSDC_READ8(reg)           __raw_readb(reg)
+#define MSDC_READ16(reg)          __raw_readw(reg)
+#define MSDC_READ32(reg)          __raw_readl(reg)
 #define MSDC_WRITE8(reg, val)     mt_reg_sync_writeb(val, reg)
 #define MSDC_WRITE16(reg, val)    mt_reg_sync_writew(val, reg)
 #define MSDC_WRITE32(reg, val)    mt_reg_sync_writel(val, reg)
@@ -505,21 +497,21 @@ static inline unsigned int uffs(unsigned int x)
 
 #define MSDC_SET_BIT32(reg, bs) \
 	do { \
-		volatile unsigned int tv = MSDC_READ32(reg);\
+		unsigned int tv = MSDC_READ32(reg);\
 		tv |= (u32)(bs); \
 		MSDC_WRITE32(reg, tv); \
 	} while (0)
 
 #define MSDC_CLR_BIT32(reg, bs) \
 	do { \
-		volatile unsigned int tv = MSDC_READ32(reg);\
+		unsigned int tv = MSDC_READ32(reg);\
 		tv &= ~((u32)(bs)); \
 		MSDC_WRITE32(reg, tv); \
 	} while (0)
 
 #define MSDC_SET_FIELD(reg, field, val) \
 	do { \
-		volatile unsigned int tv = MSDC_READ32(reg); \
+		unsigned int tv = MSDC_READ32(reg); \
 		tv &= ~(field); \
 		tv |= ((val) << (uffs((unsigned int)field) - 1)); \
 		MSDC_WRITE32(reg, tv); \
@@ -527,7 +519,7 @@ static inline unsigned int uffs(unsigned int x)
 
 #define MSDC_GET_FIELD(reg, field, val) \
 	do { \
-		volatile unsigned int tv = MSDC_READ32(reg); \
+		unsigned int tv = MSDC_READ32(reg); \
 		val = ((tv & (field)) >> (uffs((unsigned int)field) - 1)); \
 	} while (0)
 
@@ -577,7 +569,7 @@ static inline unsigned int uffs(unsigned int x)
 
 #define msdc_clr_int() \
 	do { \
-		volatile u32 val = MSDC_READ32(MSDC_INT); \
+		u32 val = MSDC_READ32(MSDC_INT); \
 		MSDC_WRITE32(MSDC_INT, val); \
 	} while (0)
 
@@ -638,7 +630,7 @@ extern unsigned char msdc_clock_src[];
 extern u32 sdio_pro_enable;
 
 extern bool emmc_sleep_failed;
-extern volatile bool sdio_autok_busy;
+extern atomic_t sdio_autok_busy;
 
 extern int msdc_rsp[];
 

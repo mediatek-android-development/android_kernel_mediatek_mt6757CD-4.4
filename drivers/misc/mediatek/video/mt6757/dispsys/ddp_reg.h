@@ -1342,7 +1342,7 @@ static inline unsigned long disp_addr_convert(unsigned long va)
 #define DISP_PWM_COMMIT_OFF                     (0x08)
 #define DISP_PWM_CON_0_OFF                      (0x10)
 #define DISP_PWM_CON_1_OFF                      (0x14)
-
+#define DISP_PWM_DEBUG                          (0x20)
 
 /* field definition */
 /* ------------------------------------------------------------- */
@@ -1463,7 +1463,8 @@ static inline unsigned long disp_addr_convert(unsigned long va)
 
 #define DISP_COLOR_START                (DISPSYS_COLOR0_BASE+0xC00)
 #define DISP_COLOR_INTEN                (DISPSYS_COLOR0_BASE+0xC04)
-#define DISP_COLOR_OUT_SEL              (DISPSYS_COLOR0_BASE+0xC08)
+#define DISP_COLOR_INTSTA               (DISPSYS_COLOR0_BASE+0xC08)
+#define DISP_COLOR_OUT_SEL              (DISPSYS_COLOR0_BASE+0xC0C)
 #define DISP_COLOR_FRAME_DONE_DEL       (DISPSYS_COLOR0_BASE+0xC10)
 #define DISP_COLOR_CRC                  (DISPSYS_COLOR0_BASE+0xC14)
 #define DISP_COLOR_SW_SCRATCH           (DISPSYS_COLOR0_BASE+0xC18)
@@ -1868,6 +1869,7 @@ static inline unsigned long disp_addr_convert(unsigned long va)
 #define DISP_REG_OD_INTEN        (DISPSYS_OD_BASE+0x008)
 #define DISP_REG_OD_INTSTA       (DISPSYS_OD_BASE+0x00C)
 #define DISP_REG_OD_STATUS       (DISPSYS_OD_BASE+0x010)
+#define DISP_REG_OD_SHADOW_CTRL  (DISPSYS_OD_BASE+0x014)
 #define DISP_REG_OD_CFG          (DISPSYS_OD_BASE+0x020)
 #define DISP_REG_OD_INPUT_COUNT	 (DISPSYS_OD_BASE+0x024)
 #define DISP_REG_OD_OUTPUT_COUNT (DISPSYS_OD_BASE+0x028)
@@ -1891,6 +1893,8 @@ static inline unsigned long disp_addr_convert(unsigned long va)
 #define DISP_REG_OD_DITHER_15	   (DISPSYS_OD_BASE+0x13C)
 #define DISP_REG_OD_DITHER_16	   (DISPSYS_OD_BASE+0x140)
 #define DISP_REG_OD_DITHER_17    (DISPSYS_OD_BASE+0x144)
+#define DISP_REG_OD_DMA_ADDR_0   (DISPSYS_OD_BASE+0x210)
+#define DISP_REG_OD_DMA_ADDR_1   (DISPSYS_OD_BASE+0x214)
 
 /* ------------------------------------------------------------- */
 /* RDMA */

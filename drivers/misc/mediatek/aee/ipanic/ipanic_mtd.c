@@ -74,7 +74,7 @@ static int ipanic_mtd_block_read(struct ipanic_mtd_data *ctx, off_t file_offset,
 		page_no = file_offset / ctx->mtd->writesize;
 		page_offset = file_offset % ctx->mtd->writesize;
 
-		rc = ipanic_mtd_block_read_single(ctx, page_no * ctx->mtd->writesize, buf);
+		rc = ipanic_mtd_block_read_single(ctx, page_no * (loff_t)ctx->mtd->writesize, buf);
 		if (rc < 0) {
 			LOGE("mtd read error page_no(%d) error(%d)\n", page_no, rc);
 			return -1;
@@ -202,7 +202,11 @@ static void ipanic_mtd_block_erase(void)
 			LOGE("Erase of 0x%llx, 0x%llx failed\n",
 			     (unsigned long long)erase.addr, (unsigned long long)erase.len);
 			if (rc == -EIO) {
+#if defined(CONFIG_MTK_TLC_NAND_SUPPORT)
+				if (ctx->mtd->_block_markbad(ctx->mtd, erase.addr, NULL)) {
+#else
 				if (ctx->mtd->_block_markbad(ctx->mtd, erase.addr)) {
+#endif
 					LOGE("aee-ipanic: Err marking blk bad\n");
 					goto out;
 				}

@@ -118,7 +118,8 @@ static UINT_8 gatewayIp[4];
 do { \
 	if (IS_BMCAST_MAC_ADDR(pucEthDestAddr)) { \
 		prCurrSwRfb->eDst = RX_PKT_DESTINATION_HOST_WITH_FORWARD; \
-	} else if (UNEQUAL_MAC_ADDR(prBssInfo->aucOwnMacAddr, pucEthDestAddr)) { \
+	} else if (UNEQUAL_MAC_ADDR(prBssInfo->aucOwnMacAddr, pucEthDestAddr) && \
+			bssGetClientByAddress(prBssInfo, pucEthDestAddr)) { \
 		prCurrSwRfb->eDst = RX_PKT_DESTINATION_FORWARD; \
 		/* TODO : need to check the dst mac is valid */ \
 		/* If src mac is invalid, the packet will be freed in fw */ \
@@ -1009,8 +1010,6 @@ P_MSDU_INFO_T qmEnqueueTxPackets(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMs
 
 			wlanUpdateTxStatistics(prAdapter, prCurrentMsduInfo, FALSE);	/*get per-AC Tx packets */
 
-			DBGLOG(QM, LOUD, "Enqueue MSDU by StaRec[%u]!\n", prCurrentMsduInfo->ucStaRecIndex);
-
 			switch (prCurrentMsduInfo->ucStaRecIndex) {
 			case STA_REC_INDEX_BMCAST:
 				prTxQue = &prQM->arTxQueue[TX_QUEUE_INDEX_BMCAST];
@@ -1050,21 +1049,22 @@ P_MSDU_INFO_T qmEnqueueTxPackets(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMs
 				break;	/*default */
 			}	/* switch (prCurrentMsduInfo->ucStaRecIndex) */
 
-			if (prCurrentMsduInfo->eSrc == TX_PACKET_FORWARDING) {
-				DBGLOG(QM, TRACE, "Forward Pkt to STA[%u] BSS[%u]\n",
-						   prCurrentMsduInfo->ucStaRecIndex, prCurrentMsduInfo->ucBssIndex);
-
-				if (prTxQue && (prTxQue->u4NumElem >= prQM->u4MaxForwardBufferCount)) {
-					DBGLOG(QM, INFO,
-					       "Drop the Packet for full Tx queue (forwarding) Bss %u\n",
-						prCurrentMsduInfo->ucBssIndex);
+			if ((prTxQue != &rNotEnqueuedQue) &&
+			    (prCurrentMsduInfo->eSrc == TX_PACKET_FORWARDING)) {
+				if (prTxQue->u4NumElem >= prQM->u4MaxForwardBufferCount) {
+					DBGLOG_LIMITED(QM, INFO,
+					       "Drop the Packet for full TxQue on forwarding (%u>=%u)\n",
+					       prTxQue->u4NumElem, prQM->u4MaxForwardBufferCount);
 					prTxQue = &rNotEnqueuedQue;
 					TX_INC_CNT(&prAdapter->rTxCtrl, TX_FORWARD_OVERFLOW_DROP);
+				} else {
+					DBGLOG(QM, LOUD, "Forward Pkt to STA[%u] TC[%u]\n",
+					       prCurrentMsduInfo->ucStaRecIndex, ucTC);
 				}
 			}
 
 		} else {
-			DBGLOG(QM, TRACE, "Drop the Packet for inactive Bss %u\n", prCurrentMsduInfo->ucBssIndex);
+			DBGLOG(QM, INFO, "Drop the Packet for inactive BSS[%u]\n", prCurrentMsduInfo->ucBssIndex);
 			QM_DBG_CNT_INC(prQM, QM_DBG_CNT_31);
 			prTxQue = &rNotEnqueuedQue;
 			TX_INC_CNT(&prAdapter->rTxCtrl, TX_INACTIVE_BSS_DROP);
@@ -1085,6 +1085,8 @@ P_MSDU_INFO_T qmEnqueueTxPackets(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMs
 		 * Record how many packages enqueue to TX during statistic intervals
 		 */
 		if (prTxQue != &rNotEnqueuedQue) {
+			DBGLOG(QM, LOUD, "Enqueue MSDU[0x%p] to STA[%u] TC[%u]\n",
+			       prCurrentMsduInfo, prCurrentMsduInfo->ucStaRecIndex, prCurrentMsduInfo->ucTC);
 			prQM->u4EnqueueCounter++;
 			/* how many page count this frame wanted */
 			prQM->au4QmTcWantedPageCounter[ucTC] += prCurrentMsduInfo->ucPageCount;
@@ -1095,7 +1097,6 @@ P_MSDU_INFO_T qmEnqueueTxPackets(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMs
 
 			if (prCurrentMsduInfo->ucPageCount > prTxCtrl->rTc.au2FreePageCount[ucTC])
 				prQM->au4QmTcResourceEmptyCounter[prCurrentMsduInfo->ucBssIndex][ucTC]++;
-
 		}
 #endif
 
@@ -1112,7 +1113,6 @@ P_MSDU_INFO_T qmEnqueueTxPackets(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMs
 			qmTestCases(prAdapter);
 		}
 #endif
-
 	} while (prNextMsduInfo);
 
 	if (QUEUE_IS_NOT_EMPTY(&rNotEnqueuedQue)) {
@@ -1149,8 +1149,8 @@ VOID qmDetermineStaRecIndex(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInf
 
 	ASSERT(prMsduInfo);
 
-	DBGLOG(QM, LOUD, "Msdu BSS Idx[%u] OpMode[%u] StaRecOfApExist[%u]\n",
-			  prMsduInfo->ucBssIndex, prBssInfo->eCurrentOPMode, prBssInfo->prStaRecOfAP ? TRUE : FALSE);
+	DBGLOG(QM, LOUD, "MSDU BSS[%u] OpMode[%u] StaRecOfApExist[%u]\n",
+	       prMsduInfo->ucBssIndex, prBssInfo->eCurrentOPMode, prBssInfo->prStaRecOfAP ? TRUE : FALSE);
 
 	switch (prBssInfo->eCurrentOPMode) {
 	case OP_MODE_IBSS:
@@ -1182,7 +1182,7 @@ VOID qmDetermineStaRecIndex(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInf
 			prTempStaRec = prBssInfo->prStaRecOfAP;
 
 			DBGLOG(QM, LOUD,
-			       "StaOfAp Idx[%u] WIDX[%u] Valid[%u] TxAllowed[%u] InUse[%u] Type[%u]\n",
+			       "StaRecOfAP Idx[%u] WIDX[%u] Valid[%u] TxAllowed[%u] InUse[%u] Type[%u]\n",
 				prTempStaRec->ucIndex, prTempStaRec->ucWlanIndex,
 				prTempStaRec->fgIsValid, prTempStaRec->fgIsTxAllowed,
 				prTempStaRec->fgIsInUse, prTempStaRec->eStaType);
@@ -1216,7 +1216,7 @@ VOID qmDetermineStaRecIndex(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInf
 
 	/* 4 <4> No STA found, Not BMCAST --> Indicate NOT_FOUND to FW */
 	prMsduInfo->ucStaRecIndex = STA_REC_INDEX_NOT_FOUND;
-	DBGLOG(QM, LOUD, "QM: TX with STA_REC_INDEX_NOT_FOUND\n");
+	DBGLOG(QM, LOUD, "TX with STA_REC_INDEX_NOT_FOUND\n");
 
 #if (QM_TEST_MODE && QM_TEST_FAIR_FORWARDING)
 	prMsduInfo->ucStaRecIndex = (UINT_8) prQM->u4CurrentStaRecIndexToEnqueue;
@@ -2479,9 +2479,7 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 				if (prCurrSwRfb->pvHeader)
 					DBGLOG_MEM8(RX, WARN, prCurrSwRfb->pvHeader,
 						prCurrSwRfb->u2PacketLen > 32 ? 32:prCurrSwRfb->u2PacketLen);
-#if CFG_CHIP_RESET_SUPPORT
-				glResetTrigger(prAdapter);
-#endif
+				GL_RESET_TRIGGER(prAdapter, RST_FLAG_DO_CORE_DUMP);
 				continue;
 			}
 
@@ -2565,7 +2563,57 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 				continue;
 			}
 
+		} else {
+			UINT_16 u2FrameCtrl = 0;
+			P_WLAN_MAC_HEADER_T prWlanHeader = NULL;
+			UINT_8 aucTaAddr[MAC_ADDR_LEN];
+
+			prWlanHeader = (P_WLAN_MAC_HEADER_T) prCurrSwRfb->pvHeader;
+			u2FrameCtrl = prWlanHeader->u2FrameCtrl;
+			if (prCurrSwRfb->prStaRec == NULL && RXM_IS_DATA_FRAME(u2FrameCtrl)) {
+				/* rx header translation */
+				DBGLOG(QM, INFO,
+					"RXD Trans: FrameCtrl=0x%02x GVLD=0x%x, StaRecIdx=%d, WlanIdx=%d PktLen=%d\n",
+					u2FrameCtrl, prCurrSwRfb->ucGroupVLD,
+					prCurrSwRfb->ucStaRecIdx, prCurrSwRfb->ucWlanIdx, prCurrSwRfb->u2PacketLen);
+
+				/* search StaRec related info */
+				kalMemCopy(aucTaAddr, prWlanHeader->aucAddr2, MAC_ADDR_LEN); /* use A2 instead */
+				prCurrSwRfb->ucStaRecIdx = secLookupStaRecIndexFromTA(prAdapter, aucTaAddr);
+				if (prCurrSwRfb->ucStaRecIdx < CFG_NUM_OF_STA_RECORD) {
+					prCurrSwRfb->prStaRec =
+					    cnmGetStaRecByIndex(prAdapter, prCurrSwRfb->ucStaRecIdx);
+					DBGLOG(QM, WARN,
+					       "Re-search staRec=%d, mac=" MACSTR ", byteCnt=%d\n",
+						prCurrSwRfb->ucStaRecIdx,
+						MAC2STR(aucTaAddr), HAL_RX_STATUS_GET_RX_BYTE_CNT(prRxStatus));
+				}
+
+				if (prCurrSwRfb->prStaRec != NULL) {
+					UINT_16 u2MACLen = 0;
+
+					if (RXM_IS_QOS_DATA_FRAME(u2FrameCtrl)) /* QoS data, VHT */
+						u2MACLen = sizeof(WLAN_MAC_HEADER_QOS_T);
+					else
+						u2MACLen = sizeof(WLAN_MAC_HEADER_T);
+					u2MACLen += ETH_LLC_LEN + ETH_SNAP_OUI_LEN;
+					u2MACLen -= ETHER_TYPE_LEN_OFFSET;
+
+					prCurrSwRfb->pvHeader += u2MACLen; /* use prWlanHeader think deeply */
+					kalMemCopy(prCurrSwRfb->pvHeader, prWlanHeader->aucAddr1, MAC_ADDR_LEN);
+					kalMemCopy(prCurrSwRfb->pvHeader + MAC_ADDR_LEN, prWlanHeader->aucAddr3,
+						MAC_ADDR_LEN);
+					prCurrSwRfb->u2PacketLen -= u2MACLen;
+
+					prCurrSwRfb->ucWlanIdx = prCurrSwRfb->prStaRec->ucWlanIndex;
+					GLUE_SET_PKT_BSS_IDX(prCurrSwRfb->pvPacket,
+						     secGetBssIdxByWlanIdx(prAdapter, prCurrSwRfb->ucWlanIdx));
+					DBGLOG_MEM8(QM, WARN, (PUINT_8) prCurrSwRfb->pvHeader,
+						(prCurrSwRfb->u2PacketLen > 64) ? 64 : prCurrSwRfb->u2PacketLen);
+				}
+			}
 		}
+
 #if CFG_SUPPORT_WAPI
 		/* Todo:: Move the data class error check here */
 		if (prCurrSwRfb->u2PacketLen > ETHER_HEADER_LEN) {
@@ -2587,6 +2635,7 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 			}
 		}
 #endif
+
 		if (prCurrSwRfb->fgReorderBuffer && !fgIsBMC && fgIsHTran) {
 			/*
 			 *  If this packet should dropped or indicated to the host immediately,
@@ -2599,8 +2648,7 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 
 		} else if (prCurrSwRfb->fgDataFrame) {
 			/* Check Class Error */
-			if (prCurrSwRfb->prStaRec && (secCheckClassError(prAdapter, prCurrSwRfb,
-									prCurrSwRfb->prStaRec) == TRUE)) {
+			if (secCheckClassError(prAdapter, prCurrSwRfb, prCurrSwRfb->prStaRec) == TRUE) {
 				P_RX_BA_ENTRY_T prReorderQueParm = NULL;
 
 				/* Invalid BA aggrement */
@@ -2716,7 +2764,13 @@ VOID qmProcessPktWithReordering(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb,
 
 	prRxStatus = prSwRfb->prRxStatus;
 	prSwRfb->ucTid = (UINT_8) (HAL_RX_STATUS_GET_TID(prRxStatus));
-	/* prSwRfb->eDst = RX_PKT_DESTINATION_HOST; */
+	if (prSwRfb->ucTid >= CFG_RX_MAX_BA_TID_NUM) {
+		DBGLOG(QM, WARN, "TID from RXD = %d, out of range!!\n", prSwRfb->ucTid);
+		DBGLOG_MEM8(QM, ERROR, prSwRfb->pucRecvBuff, HAL_RX_STATUS_GET_RX_BYTE_CNT(prRxStatus));
+		prSwRfb->eDst = RX_PKT_DESTINATION_NULL;
+		QUEUE_INSERT_TAIL(prReturnedQue, (P_QUE_ENTRY_T) prSwRfb);
+		return;
+	}
 
 #if 0
 	if (!(prStaRec->fgIsValid)) {
@@ -3901,6 +3955,7 @@ BOOLEAN qmIsIndependentPkt(IN P_SW_RFB_T prSwRfb)
 	return FALSE;
 }
 #endif
+
 VOID mqmParseAssocReqWmmIe(IN P_ADAPTER_T prAdapter, IN PUINT_8 pucIE, IN P_STA_RECORD_T prStaRec)
 {
 	P_IE_WMM_INFO_T prIeWmmInfo;
@@ -4839,7 +4894,7 @@ qmGetFrameAction(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBssIndex,
 	DEBUGFUNC("qmGetFrameAction");
 
 	prBssInfo = GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIndex);
-	prStaRec = QM_GET_STA_REC_PTR_FROM_INDEX(prAdapter, ucStaRecIdx);
+	prStaRec = (ucStaRecIdx < CFG_STA_REC_NUM) ? &prAdapter->arStaRec[ucStaRecIdx] : NULL;
 
 	do {
 		/* 4 <1> Tx, if FORCE_TX is set */
@@ -4869,7 +4924,7 @@ qmGetFrameAction(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBssIndex,
 				    prWifiVar->ucCmdRsvResource + QM_MGMT_QUEUED_THRESHOLD;
 
 				/* 4 <3.2.1> Tx, if resource is enough */
-				if (u2FreeResource > ucReqResource) {
+				if (u2FreeResource >= ucReqResource) {
 					eFrameAction = FRAME_ACTION_TX_PKT;
 					break;
 				}
@@ -4883,28 +4938,28 @@ qmGetFrameAction(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBssIndex,
 		}
 		/* 4 <4> Queue, if BSS is absent */
 		if (prBssInfo->fgIsNetAbsent) {
-			DBGLOG(QM, TRACE, "Queue packets (BSS[%u] Absent)\n", prBssInfo->ucBssIndex);
+			DBGLOG(QM, INFO, "Queue packets (BSS[%u] Absent)\n", prBssInfo->ucBssIndex);
 			eFrameAction = FRAME_ACTION_QUEUE_PKT;
 			break;
 		}
 
+		/* <5> Reserve resource for CMD & 1X */
+		if (eFrameType == FRAME_TYPE_MMPDU) {
+			ucReqResource = nicTxGetPageCount(u2FrameLength, FALSE) + prWifiVar->ucCmdRsvResource;
+
+			if (u2FreeResource < ucReqResource) {
+				eFrameAction = FRAME_ACTION_QUEUE_PKT;
+				DBGLOG(QM, INFO, "Queue MGMT (MSDU[0x%p] Req/Rsv/Free[%u/%u/%u])\n",
+				       prMsduInfo,
+				       nicTxGetPageCount(u2FrameLength, FALSE),
+				       prWifiVar->ucCmdRsvResource, u2FreeResource);
+			}
+		}
 	} while (FALSE);
 
-	/* <5> Resource CHECK! */
-	/* <5.1> Reserve resource for CMD & 1X */
-	if (eFrameType == FRAME_TYPE_MMPDU) {
-		ucReqResource = nicTxGetPageCount(u2FrameLength, FALSE) + prWifiVar->ucCmdRsvResource;
-
-		if (u2FreeResource < ucReqResource) {
-			eFrameAction = FRAME_ACTION_QUEUE_PKT;
-			DBGLOG(QM, INFO, "Queue MGMT (MSDU[0x%p] Req/Rsv/Free[%u/%u/%u])\n",
-					  prMsduInfo,
-					  nicTxGetPageCount(u2FrameLength, FALSE),
-					  prWifiVar->ucCmdRsvResource, u2FreeResource);
-		}
-
-		/* <6> Timeout check! */
 #if CFG_ENABLE_PKT_LIFETIME_PROFILE
+	/* <6> Timeout check! */
+	if (eFrameType == FRAME_TYPE_MMPDU) {
 		if ((eFrameAction == FRAME_ACTION_QUEUE_PKT) && prMsduInfo) {
 			OS_SYSTIME rCurrentTime, rEnqTime;
 
@@ -4915,11 +4970,11 @@ qmGetFrameAction(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBssIndex,
 					      MSEC_TO_SYSTIME(prWifiVar->u4MgmtQueueDelayTimeout))) {
 				eFrameAction = FRAME_ACTION_DROP_PKT;
 				DBGLOG(QM, INFO, "Drop MGMT (MSDU[0x%p] timeout[%ums])\n",
-						  prMsduInfo, prWifiVar->u4MgmtQueueDelayTimeout);
+				       prMsduInfo, prWifiVar->u4MgmtQueueDelayTimeout);
 			}
 		}
-#endif
 	}
+#endif
 
 	return eFrameAction;
 }
@@ -5678,7 +5733,6 @@ mqmRxModifyBaEntryStatus(IN P_ADAPTER_T prAdapter, IN P_RX_BA_ENTRY_T prRxBaEntr
 		kalMemCopy(prCmdBody->aucMacAddr, prStaRec->aucMacAddr, PARAM_MAC_ADDR_LEN);
 
 		wlanoidResetBAScoreboard(prAdapter, prCmdBody, sizeof(CMD_RESET_BA_SCOREBOARD_T));
-
 		cnmMemFree(prAdapter, prCmdBody);
 	}
 

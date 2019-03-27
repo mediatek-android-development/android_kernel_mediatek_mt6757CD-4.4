@@ -452,6 +452,7 @@ struct cpuhvfs_dvfsp {
 			  unsigned int floor);
 
 	void (*set_notify)(struct cpuhvfs_dvfsp *dvfsp, dvfs_notify_t callback);
+	void (*trig_notify)(struct cpuhvfs_dvfsp *dvfsp);
 
 	void (*set_mode)(struct cpuhvfs_dvfsp *dvfsp, enum power_mode mode);
 	void (*mmc_hint)(struct cpuhvfs_dvfsp *dvfsp, unsigned int start);
@@ -561,6 +562,7 @@ static struct hrtimer nfy_trig_timer;
 
 static struct task_struct *dvfs_nfy_task;
 static atomic_t dvfs_nfy_req = ATOMIC_INIT(0);
+static atomic_t nfy_trig = ATOMIC_INIT(0);
 
 /* log_box[MAX_LOG_FETCH] is also used to save last log entry */
 static struct dvfs_log log_box[1 + MAX_LOG_FETCH];
@@ -586,6 +588,7 @@ static void cspm_set_opp_limit(struct cpuhvfs_dvfsp *dvfsp, unsigned int cluster
 
 #ifdef CPUHVFS_HW_GOVERNOR
 static void cspm_set_dvfs_notify(struct cpuhvfs_dvfsp *dvfsp, dvfs_notify_t callback);
+static void cspm_trig_dvfs_notify(struct cpuhvfs_dvfsp *dvfsp);
 
 static void cspm_set_power_mode(struct cpuhvfs_dvfsp *dvfsp, enum power_mode mode);
 static void cspm_hint_mmc_event(struct cpuhvfs_dvfsp *dvfsp, unsigned int start);
@@ -628,6 +631,7 @@ static struct cpuhvfs_dvfsp g_dvfsp = {
 	.hw_gov_en	= 1,
 
 	.set_notify	= cspm_set_dvfs_notify,
+	.trig_notify	= cspm_trig_dvfs_notify,
 
 	.set_mode	= cspm_set_power_mode,
 	.mmc_hint	= cspm_hint_mmc_event,
@@ -691,16 +695,18 @@ do {								\
 #define log_get_volt(log)		(((log) & LOG_V_MASK) >> 0)
 #define log_get_freq(log)		(((log) & LOG_F_MASK) >> 7)
 
-#define cspm_err(fmt, args...)		pr_err("[CPUHVFS] " fmt, ##args)
-#define cspm_warn(fmt, args...)		pr_warn("[CPUHVFS] " fmt, ##args)
-#define cspm_debug(fmt, args...)	pr_debug("[CPUHVFS] " fmt, ##args)
+#define TAG	"[CPUHVFS] "
+#define tag_pr_err(fmt, args...)	pr_err(TAG fmt, ##args)
+#define tag_pr_notice(fmt, args...)	pr_notice(TAG fmt, ##args)
+#define tag_pr_info(fmt, args...)	pr_info(TAG fmt, ##args)
+#define tag_pr_debug(fmt, args...)	pr_debug(TAG fmt, ##args)
 
 #define cspm_dbgx(flag, fmt, args...)			\
 do {							\
 	if (dbgx_log_en & DLF_##flag)			\
-		cspm_err(fmt, ##args);			\
+		tag_pr_info(fmt, ##args);		\
 	else if (dbgx_log_en & (DLF_##flag << 16))	\
-		cspm_debug(fmt, ##args);		\
+		tag_pr_debug(fmt, ##args);		\
 	else						\
 		;					\
 } while (0)
@@ -778,9 +784,9 @@ static inline void stop_notify_trigger_timer(void)
 	hrtimer_cancel(&nfy_trig_timer);
 }
 
-static inline void kick_kthread_to_notify(void)
+static inline void kick_kthread_to_notify(int req)
 {
-	atomic_inc(&dvfs_nfy_req);
+	atomic_add(req, &dvfs_nfy_req);
 	wake_up_process(dvfs_nfy_task);
 }
 #endif
@@ -791,11 +797,6 @@ static inline void kick_kthread_to_notify(void)
  **************************************/
 #define set_dvfsp_init_done(dvfsp)	((dvfsp)->init_done = 1)
 #define is_dvfsp_uninit(dvfsp)		(!(dvfsp)->init_done)
-
-#define cpuhvfs_crit(fmt, args...)	pr_err("[CPUHVFS] " fmt, ##args)
-#define cpuhvfs_err(fmt, args...)	pr_err("[CPUHVFS] " fmt, ##args)
-#define cpuhvfs_warn(fmt, args...)	pr_warn("[CPUHVFS] " fmt, ##args)
-#define cpuhvfs_debug(fmt, args...)	pr_debug("[CPUHVFS] " fmt, ##args)
 
 #define DEFINE_FOPS_RO(fname)						\
 static int fname##_open(struct inode *inode, struct file *file)		\
@@ -837,7 +838,7 @@ static void __cspm_pcm_sw_reset(void)
 
 	sta = cspm_read(CSPM_PCM_FSM_STA);
 	if (sta != PCM_FSM_STA_DEF) {
-		cspm_err("FAILED TO RESET PCM (0x%x)\n", sta);
+		tag_pr_err("FAILED TO RESET PCM (0x%x)\n", sta);
 		BUG();
 	}
 }
@@ -1084,31 +1085,31 @@ static void cspm_dump_debug_info(struct cpuhvfs_dvfsp *dvfsp, const char *fmt, .
 	vsnprintf(msg, sizeof(msg), fmt, args);
 	va_end(args);
 
-	cspm_err("(%u) %s\n",    dvfsp->hw_gov_en, msg);
-	cspm_err("FW_VER: %s\n", dvfsp->pcmdesc->version);
+	tag_pr_notice("(%u) %s\n",    dvfsp->hw_gov_en, msg);
+	tag_pr_notice("FW_VER: %s\n", dvfsp->pcmdesc->version);
 
-	cspm_err("PCM_TIMER: %08x\n", timer);
-	cspm_err("PCM_REG15: %u, SEMA: 0x(%x %x)\n", reg15, ap_sema, spm_sema);
+	tag_pr_notice("PCM_TIMER: %08x\n", timer);
+	tag_pr_notice("PCM_REG15: %u, SEMA: 0x(%x %x)\n", reg15, ap_sema, spm_sema);
 
-	cspm_err("SW_RSV6: 0x%x\n", rsv6);
-	cspm_err("SW_RSV7: 0x%x\n", rsv7);
-	cspm_err("SW_RSV0: 0x%x\n", rsv0);
-	cspm_err("SW_RSV1: 0x%x\n", rsv1);
-	cspm_err("SW_RSV2: 0x%x\n", rsv2);
+	tag_pr_notice("SW_RSV6: 0x%x\n", rsv6);
+	tag_pr_notice("SW_RSV7: 0x%x\n", rsv7);
+	tag_pr_notice("SW_RSV0: 0x%x\n", rsv0);
+	tag_pr_notice("SW_RSV1: 0x%x\n", rsv1);
+	tag_pr_notice("SW_RSV2: 0x%x\n", rsv2);
 
-	cspm_err("EVT_VEC: 0x(%x,%x,%x,%x,%x,%x,%x,%x), SPARE: 0x(%x,%x)\n",
-			      cspm_read(CSPM_PCM_EVENT_VECTOR2),
-			      cspm_read(CSPM_PCM_EVENT_VECTOR3),
-			      cspm_read(CSPM_PCM_EVENT_VECTOR4),
-			      cspm_read(CSPM_PCM_EVENT_VECTOR5),
-			      cspm_read(CSPM_PCM_EVENT_VECTOR7),
-			      cspm_read(CSPM_PCM_EVENT_VECTOR8),
-			      cspm_read(CSPM_PCM_EVENT_VECTOR9),
-			      cspm_read(CSPM_PCM_EVENT_VECTOR10),
-			      cspm_read(CSPM_SPARE8),
-			      cspm_read(CSPM_SPARE9));
+	tag_pr_notice("EVT_VEC: 0x(%x,%x,%x,%x,%x,%x,%x,%x), SPARE: 0x(%x,%x)\n",
+				cspm_read(CSPM_PCM_EVENT_VECTOR2),
+				cspm_read(CSPM_PCM_EVENT_VECTOR3),
+				cspm_read(CSPM_PCM_EVENT_VECTOR4),
+				cspm_read(CSPM_PCM_EVENT_VECTOR5),
+				cspm_read(CSPM_PCM_EVENT_VECTOR7),
+				cspm_read(CSPM_PCM_EVENT_VECTOR8),
+				cspm_read(CSPM_PCM_EVENT_VECTOR9),
+				cspm_read(CSPM_PCM_EVENT_VECTOR10),
+				cspm_read(CSPM_SPARE8),
+				cspm_read(CSPM_SPARE9));
 
-	cspm_err("PCM_FSM_STA: 0x%x\n", cspm_read(CSPM_PCM_FSM_STA));
+	tag_pr_notice("PCM_FSM_STA: 0x%x\n", cspm_read(CSPM_PCM_FSM_STA));
 }
 
 static int __cspm_pause_pcm_running(struct cpuhvfs_dvfsp *dvfsp, u32 psf)
@@ -1419,6 +1420,12 @@ static void cspm_set_power_mode(struct cpuhvfs_dvfsp *dvfsp, enum power_mode mod
 		break;
 	}
 	spin_unlock(&dvfs_lock);
+}
+
+static void cspm_trig_dvfs_notify(struct cpuhvfs_dvfsp *dvfsp)
+{
+	atomic_inc(&nfy_trig);
+	kick_kthread_to_notify(2);
 }
 
 static void cspm_set_dvfs_notify(struct cpuhvfs_dvfsp *dvfsp, dvfs_notify_t callback)
@@ -1753,8 +1760,14 @@ static void fetch_dvfs_log_and_notify(struct cpuhvfs_dvfsp *dvfsp)
 				  log_box[i].opp[2], next_log_offs, log_time_curr_offs());
 	}
 
-	if (log_box[0].time == 0 && i >= 2)
+	if (log_box[0].time == 0 && i >= 2) {
 		log_box[0] = log_box[1];
+		if (i == 2)
+			i = 1;
+	}
+
+	if (i == 1)
+		log_box[MAX_LOG_FETCH].time = 0;
 
 	if (i >= 2 && i <= MAX_LOG_FETCH)
 		log_box[MAX_LOG_FETCH] = log_box[i - 1];
@@ -1780,6 +1793,11 @@ static int dvfs_nfy_task_fn(void *data)
 
 		__set_current_state(TASK_RUNNING);
 
+		if (atomic_read(&nfy_trig) > 0) {
+			usleep_range(1100, 1500);
+			atomic_dec(&nfy_trig);
+		}
+
 		fetch_dvfs_log_and_notify(dvfsp);
 		atomic_dec(&dvfs_nfy_req);
 	}
@@ -1789,7 +1807,7 @@ static int dvfs_nfy_task_fn(void *data)
 
 static enum hrtimer_restart nfy_trig_timer_fn(struct hrtimer *timer)
 {
-	kick_kthread_to_notify();
+	kick_kthread_to_notify(1);
 
 	hrtimer_forward_now(timer, ms_to_ktime(DVFS_NOTIFY_INTV));
 
@@ -1824,25 +1842,25 @@ static int cspm_probe(struct platform_device *pdev)
 
 	cspm_base = of_iomap(pdev->dev.of_node, 0);
 	if (!cspm_base) {
-		cspm_err("FAILED TO MAP CSPM REGISTER\n");
+		tag_pr_notice("FAILED TO MAP CSPM REGISTER\n");
 		return -ENOMEM;
 	}
 
 	csram_base = of_iomap(pdev->dev.of_node, 1);
 	if (!csram_base) {
-		cspm_err("FAILED TO MAP CSRAM MEMORY\n");
+		tag_pr_notice("FAILED TO MAP CSRAM MEMORY\n");
 		return -ENOMEM;
 	}
 
 #ifdef CPUHVFS_USE_I2C
 	i2c_clk = devm_clk_get(&pdev->dev, "i2c");
 	if (IS_ERR(i2c_clk)) {
-		cspm_err("FAILED TO GET I2C CLOCK (%ld)\n", PTR_ERR(i2c_clk));
+		tag_pr_notice("FAILED TO GET I2C CLOCK (%ld)\n", PTR_ERR(i2c_clk));
 		return PTR_ERR(i2c_clk);
 	}
 	r = clk_prepare(i2c_clk);
 	if (r) {
-		cspm_err("FAILED TO PREPARE I2C CLOCK (%d)\n", r);
+		tag_pr_notice("FAILED TO PREPARE I2C CLOCK (%d)\n", r);
 		return r;
 	}
 #endif
@@ -1893,19 +1911,19 @@ static int cspm_module_init(struct cpuhvfs_dvfsp *dvfsp)
 
 	r = platform_driver_register(&cspm_driver);
 	if (r) {
-		cspm_err("FAILED TO REGISTER CSPM DRIVER (%d)\n", r);
+		tag_pr_notice("FAILED TO REGISTER CSPM DRIVER (%d)\n", r);
 		return r;
 	}
 
 	if (!cspm_probe_done) {
-		cspm_err("FAILED TO PROBE CSPM DEVICE\n");
+		tag_pr_notice("FAILED TO PROBE CSPM DEVICE\n");
 		return -ENODEV;
 	}
 
 #ifdef CPUHVFS_HW_GOVERNOR
 	r = create_resource_for_dvfs_notify(dvfsp);
 	if (r) {
-		cspm_err("FAILED TO CREATE RESOURCE FOR NOTIFY (%d)\n", r);
+		tag_pr_notice("FAILED TO CREATE RESOURCE FOR NOTIFY (%d)\n", r);
 		return r;
 	}
 #endif
@@ -2093,12 +2111,12 @@ static void init_cpuhvfs_debug_repo(struct cpuhvfs_data *cpuhvfs)
 	dbg_repo_bak[REPO_I_WDT_LATCH2] = cspm_read(CSPM_PCM_WDT_LATCH2);
 	dbg_repo_bak[REPO_I_WDT_LATCH3] = cspm_read(CSPM_PCM_WDT_LATCH3);
 	dbg_repo_bak[REPO_I_WDT_LATCH4] = cspm_read(CSPM_PCM_WDT_LATCH4);
-	cpuhvfs_crit("WDT_LATCH0: 0x%x, LATCH1: 0x%x, LATCH2: 0x%x, LATCH3: 0x%x, LATCH4: 0x%x\n",
-		     dbg_repo_bak[REPO_I_WDT_LATCH0],
-		     dbg_repo_bak[REPO_I_WDT_LATCH1],
-		     dbg_repo_bak[REPO_I_WDT_LATCH2],
-		     dbg_repo_bak[REPO_I_WDT_LATCH3],
-		     dbg_repo_bak[REPO_I_WDT_LATCH4]);
+	tag_pr_info("WDT_LATCH0: 0x%x, LATCH1: 0x%x, LATCH2: 0x%x, LATCH3: 0x%x, LATCH4: 0x%x\n",
+		    dbg_repo_bak[REPO_I_WDT_LATCH0],
+		    dbg_repo_bak[REPO_I_WDT_LATCH1],
+		    dbg_repo_bak[REPO_I_WDT_LATCH2],
+		    dbg_repo_bak[REPO_I_WDT_LATCH3],
+		    dbg_repo_bak[REPO_I_WDT_LATCH4]);
 
 	dbg_repo[0] = REPO_GUARD0;
 	dbg_repo[1] = REPO_GUARD1;
@@ -2259,7 +2277,7 @@ int cpuhvfs_enable_hw_governor(struct init_sta *sta)
 		return -ENODEV;
 
 	if (!dvfsp->is_kicked(dvfsp)) {
-		cpuhvfs_err("CANNOT ENABLE HWGOV, DVFSP IS NOT KICKED\n");
+		tag_pr_notice("CANNOT ENABLE HWGOV, DVFSP IS NOT KICKED\n");
 		return -EPERM;
 	}
 
@@ -2280,7 +2298,7 @@ int cpuhvfs_disable_hw_governor(struct init_sta *ret_sta)
 		return -ENODEV;
 
 	if (!dvfsp->is_kicked(dvfsp)) {
-		cpuhvfs_err("CANNOT DISABLE HWGOV, DVFSP IS NOT KICKED\n");
+		tag_pr_notice("CANNOT DISABLE HWGOV, DVFSP IS NOT KICKED\n");
 		return -EPERM;
 	}
 
@@ -2310,6 +2328,16 @@ void cpuhvfs_set_power_mode(enum power_mode mode)
 	dvfsp->set_mode(dvfsp, mode);
 }
 
+void cpuhvfs_trigger_dvfs_notify(void)
+{
+	struct cpuhvfs_dvfsp *dvfsp = g_cpuhvfs.dvfsp;
+
+	if (is_dvfsp_uninit(dvfsp))
+		return;
+
+	dvfsp->trig_notify(dvfsp);
+}
+
 void cpuhvfs_register_dvfs_notify(dvfs_notify_t callback)
 {
 	struct cpuhvfs_dvfsp *dvfsp = g_cpuhvfs.dvfsp;
@@ -2326,7 +2354,7 @@ void cpuhvfs_set_opp_limit(unsigned int cluster, unsigned int ceiling, unsigned 
 		return;
 
 	if (ceiling > floor) {
-		cpuhvfs_err("OPP FLOOR IS OVER CEILING\n");
+		tag_pr_notice("OPP FLOOR IS OVER CEILING\n");
 		return;
 	}
 
@@ -2353,7 +2381,7 @@ int cpuhvfs_set_target_opp(unsigned int cluster, unsigned int index, unsigned in
 		return -ENODEV;
 
 	if (!dvfsp->is_kicked(dvfsp)) {
-		cpuhvfs_err("CANNOT SET OPP, DVFSP IS NOT KICKED\n");
+		tag_pr_notice("CANNOT SET OPP, DVFSP IS NOT KICKED\n");
 		return -EPERM;
 	}
 
@@ -2436,7 +2464,7 @@ int cpuhvfs_module_init(void)
 	struct cpuhvfs_data *cpuhvfs = &g_cpuhvfs;
 
 	if (!cpuhvfs->dbg_repo) {
-		cpuhvfs_err("FAILED TO PRE-INIT CPUHVFS\n");
+		tag_pr_notice("FAILED TO PRE-INIT CPUHVFS\n");
 		return -ENODEV;
 	}
 
@@ -2444,7 +2472,7 @@ int cpuhvfs_module_init(void)
 
 	r = create_cpuhvfs_debug_fs(cpuhvfs);
 	if (r) {
-		cpuhvfs_err("FAILED TO CREATE DEBUG FILESYSTEM (%d)\n", r);
+		tag_pr_notice("FAILED TO CREATE DEBUG FILESYSTEM (%d)\n", r);
 		return r;
 	}
 
@@ -2458,7 +2486,7 @@ static int cpuhvfs_pre_module_init(void)
 
 	r = cpuhvfs->dvfsp->init_dvfsp(cpuhvfs->dvfsp);
 	if (r) {
-		cpuhvfs_err("FAILED TO INIT DVFS PROCESSOR (%d)\n", r);
+		tag_pr_notice("FAILED TO INIT DVFS PROCESSOR (%d)\n", r);
 		return r;
 	}
 
@@ -2470,4 +2498,4 @@ fs_initcall(cpuhvfs_pre_module_init);
 
 #endif	/* CONFIG_HYBRID_CPU_DVFS */
 
-MODULE_DESCRIPTION("Hybrid CPU DVFS Driver v0.4");
+MODULE_DESCRIPTION("Hybrid CPU DVFS Driver v0.5.1");

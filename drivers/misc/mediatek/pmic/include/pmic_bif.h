@@ -19,31 +19,5 @@ extern int mtk_bif_get_vbat(int *vbat);
 extern int mtk_bif_get_tbat(int *tbat);
 extern bool mtk_bif_is_hw_exist(void);
 extern int pmic_bif_init(void);
-#if 0
-static inline int mtk_bif_init(void)
-{
-	return -ENOTSUPP;
-}
-
-static inline int mtk_bif_get_vbat(int *vbat)
-{
-	return -ENOTSUPP;
-}
-
-static inline int mtk_bif_get_tbat(int *tbat)
-{
-	return -ENOTSUPP;
-}
-
-static inline bool mtk_bif_is_hw_exist(void)
-{
-	return false;
-}
-
-static int pmic_bif_init(void)
-{
-	return -ENOTSUPP;
-}
-#endif /* CONFIG_MTK_BIF_SUPPORT */
 
 #endif /* __MTK_BIF_INTF_H */

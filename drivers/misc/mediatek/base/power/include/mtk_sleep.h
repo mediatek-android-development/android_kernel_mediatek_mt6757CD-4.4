@@ -14,22 +14,17 @@
 #ifndef __MT_SLEEP_H__
 #define __MT_SLEEP_H__
 
-#if defined(CONFIG_ARCH_MT6755) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_ARCH_MT6797) \
-	|| defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 
 #include "spm_v2/mtk_sleep.h"
 
-#elif defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6753)
+#elif defined(CONFIG_MACH_MT6799) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6759)
 
-#include "../mt6735/mt_sleep.h"
+#include "spm_v3/mtk_sleep.h"
 
-#elif defined(CONFIG_ARCH_MT6580)
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6739)
 
-#include "spm_v1/mt_sleep.h"
-
-#elif defined(CONFIG_ARCH_ELBRUS)
-
-#include "spm_v3/mt_sleep.h"
+#include "spm_v4/mtk_sleep.h"
 
 #endif
 

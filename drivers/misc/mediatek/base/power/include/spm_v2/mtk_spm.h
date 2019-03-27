@@ -22,7 +22,7 @@ extern void __iomem *spm_base;
 extern void __iomem *spm_infracfg_ao_base;
 extern void __iomem *spm_cksys_base;
 extern void __iomem *spm_mcucfg;
-#if defined(CONFIG_ARCH_MT6755) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 extern void __iomem *spm_bsi1cfg;
 #endif
 #if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
@@ -48,11 +48,6 @@ extern u32 spm_irq_7;
 /* #include <mach/mt_irq.h> */
 #include <mt-plat/sync_write.h>
 
-#if defined(CONFIG_ARCH_MT6797)
-/* for SPM/SCP debug */
-extern u32 is_check_scp_freq_req(void);
-#endif
-
 /**************************************
  * Config and Parameter
  **************************************/
@@ -67,14 +62,14 @@ extern u32 is_check_scp_freq_req(void);
 
 #include "mtk_spm_reg.h"
 
-typedef enum {
+enum {
 	WR_NONE = 0,
 	WR_UART_BUSY = 1,
 	WR_PCM_ASSERT = 2,
 	WR_PCM_TIMER = 3,
 	WR_WAKE_SRC = 4,
 	WR_UNKNOWN = 5,
-} wake_reason_t;
+};
 
 enum mt_vcorefs_fw {
 	VCOREFS_FW_LPM	 = (1 << 0),	/*  1600/1.0  : 1270/0.9 : 1066/0.9 */
@@ -133,11 +128,6 @@ enum {
 };
 void spm_pmic_power_mode(int mode, int force, int lock);
 void spm_bypass_boost_gpio_set(void);
-#if defined(CONFIG_ARCH_MT6797)
-/* for SPM/SCP debug */
-extern u32 is_check_scp_freq_req(void);
-bool spm_save_thermal_adc(void);
-#endif
 
 extern void unmask_edge_trig_irqs_for_cirq(void);
 

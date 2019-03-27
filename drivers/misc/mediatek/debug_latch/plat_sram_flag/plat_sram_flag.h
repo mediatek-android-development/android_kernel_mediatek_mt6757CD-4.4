@@ -65,5 +65,4 @@
 int set_sram_flag_lastpc_valid(void);
 int set_sram_flag_dfd_valid(void);
 int set_sram_flag_etb_user(unsigned int utb_id, unsigned int user_id);
-int set_sram_flag_dfd_invalid(void);
 #endif

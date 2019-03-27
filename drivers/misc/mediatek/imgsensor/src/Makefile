@@ -19,23 +19,17 @@ MTK_PROJECT_PATH_ROOT := $(srctree)/drivers/misc/mediatek/mach/$(MTK_PLATFORM)/$
 
 CONFIG_MTK_PLATFORM_SENSOR := $(CONFIG_MTK_PLATFORM)
 
-ifeq ($(CONFIG_ARCH_MT6735M),y)
-CONFIG_MTK_PLATFORM_SENSOR := mt6735m
-endif
-
-ifeq ($(CONFIG_ARCH_MT6753),y)
-CONFIG_MTK_PLATFORM_SENSOR := mt6753
-endif
-
 subdir-ccflags-y += -I$(MTK_PROJECT_PATH_ROOT)/camera/camera \
 
 MTK_CUSTOM_PATH  := $(srctree)/drivers/misc/mediatek
 
 subdir-ccflags-y += -I$(MTK_CUSTOM_PATH)/camera/$(MTK_PLATFORM) \
              -I$(MTK_CUSTOM_PATH)/imgsensor/inc \
+             -I$(MTK_CUSTOM_PATH)/imgsensor/src/$(CONFIG_MTK_PLATFORM_SENSOR) \
              -I$(MTK_CUSTOM_PATH)/imgsensor/src/$(CONFIG_MTK_PLATFORM_SENSOR)/camera_hw \
              -I$(MTK_CUSTOM_PATH)/cam_cal/inc \
              -I$(MTK_CUSTOM_PATH)/smi \
+             -I$(MTK_CUSTOM_PATH)/include/mt-plat/$(MTK_PLATFORM)/include/mach \
 
 
 CUSTOM_KERNEL_FLAGS := $(addprefix -D, $(shell echo \

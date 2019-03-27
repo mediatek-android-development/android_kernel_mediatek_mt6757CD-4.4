@@ -16,13 +16,17 @@
 
 #include <linux/types.h>
 
-typedef struct {
+struct struct_PIN_addr {
 	unsigned long addr;
-} PIN_addr;
+};
 
-typedef struct {
+struct struct_PIN_offset {
 	s8 offset;
-} PIN_offset;
+};
+
+#define PIN_addr struct struct_PIN_addr
+#define PIN_offset struct struct_PIN_offset
+
 /*#define GPIO_BASE (0x10005000)*/
 #define IOCFG_0_BASE (0x000)
 #define IOCFG_1_BASE (0x200)
@@ -1842,12 +1846,12 @@ PIN_offset PUPD_offset[] = {
 /* 27 */ {-1},
 /* 28 */ {-1},
 /* 29 */ {-1},
-/* 30 */ {4},
-/* 31 */ {20},
-/* 32 */ {0},
-/* 33 */ {8},
+/* 30 */ {0},
+/* 31 */ {4},
+/* 32 */ {8},
+/* 33 */ {12},
 /* 34 */ {16},
-/* 35 */ {12},
+/* 35 */ {20},
 /* 36 */ {0},
 /* 37 */ {4},
 /* 38 */ {8},
@@ -1913,8 +1917,8 @@ PIN_offset PUPD_offset[] = {
 /* 98 */ {-1},
 /* 99 */ {-1},
 /* 100 */ {-1},
-/* 101 */ {4},
-/* 102 */ {0},
+/* 101 */ {0},
+/* 102 */ {4},
 /* 103 */ {16},
 /* 104 */ {20},
 /* 105 */ {-1},

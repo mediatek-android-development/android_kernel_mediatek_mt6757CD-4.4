@@ -288,7 +288,7 @@ static int ovl2mem_callback(unsigned int userdata)
 	}
 
 	atomic_set(&g_release_ticket, userdata);
-	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagPulse, 0x05,
+	mmprofile_log_ex(ddp_mmp_get_events()->ovl_trigger, MMPROFILE_FLAG_PULSE, 0x05,
 			(atomic_read(&g_trigger_ticket)<<16) | atomic_read(&g_release_ticket));
 
 	return 0;
@@ -307,7 +307,7 @@ int ovl2mem_init(unsigned int session)
 
 	DISPMSG("ovl2mem_init\n");
 
-	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagPulse, 0x01, 0);
+	mmprofile_log_ex(ddp_mmp_get_events()->ovl_trigger, MMPROFILE_FLAG_PULSE, 0x01, 0);
 
 	dpmgr_init();
 	mutex_init(&(pgc->lock));
@@ -409,7 +409,7 @@ int ovl2mem_init(unsigned int session)
 
 Exit:
 	_ovl2mem_path_unlock(__func__);
-	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagPulse, 0x01, 1);
+	mmprofile_log_ex(ddp_mmp_get_events()->ovl_trigger, MMPROFILE_FLAG_PULSE, 0x01, 1);
 
 	DISPDBG("ovl2mem_init done\n");
 
@@ -463,7 +463,7 @@ int ovl2mem_trigger(int blocking, void *callback, unsigned int userdata)
 	pgc->need_trigger_path = 0;
 	atomic_add(1, &g_trigger_ticket);
 
-	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagPulse, 0x02,
+	mmprofile_log_ex(ddp_mmp_get_events()->ovl_trigger, MMPROFILE_FLAG_PULSE, 0x02,
 			(atomic_read(&g_trigger_ticket)<<16) | atomic_read(&g_release_ticket));
 
 	DISPINFO("ovl2mem_trigger done %d\n", get_ovl2mem_ticket());
@@ -575,6 +575,8 @@ int ovl2mem_frame_cfg(struct disp_frame_cfg_t *cfg)
 {
 	int ret = 0;
 	unsigned int session_id = 0;
+	int i = 0;
+	int layer_id = 0;
 	struct disp_session_sync_info *session_info = disp_get_session_sync_info_for_debug(cfg->session_id);
 	struct dprec_logger_event *input_event, *output_event, *trigger_event;
 
@@ -589,6 +591,17 @@ int ovl2mem_frame_cfg(struct disp_frame_cfg_t *cfg)
 	}
 
 	_ovl2mem_path_lock(__func__);
+
+	for (i = 0; i < cfg->input_layer_num; i++) {
+		layer_id = cfg->input_cfg[i].layer_id;
+#ifdef MTK_FB_ION_SUPPORT
+		mtkfb_update_buf_ticket(session_id, layer_id, cfg->input_cfg[i].next_buff_idx,
+								get_ovl2mem_ticket());
+#endif
+	}
+
+	mtkfb_update_buf_ticket(session_id, disp_sync_get_output_timeline_id(),
+						cfg->output_cfg.buff_idx, get_ovl2mem_ticket());
 
 	if (pgc->state == 0) {
 		DISPERR("ovl2mem is already slept\n");
@@ -613,7 +626,7 @@ int ovl2mem_frame_cfg(struct disp_frame_cfg_t *cfg)
 		    (current->comm[1] << 16) | (current->comm[2] << 8) | (current->comm[3] << 0);
 		dprec_start(trigger_event, proc_name, 0);
 	}
-	DISPPR_FENCE("T+/M%d\n", DISP_SESSION_DEV(session_id));
+	DISPPR_FENCE("T+/M%d /t%d\n", DISP_SESSION_DEV(session_id), get_ovl2mem_ticket());
 	ovl2mem_trigger(1, NULL, 0);
 
 	dprec_done(trigger_event, 0, 0);
@@ -660,7 +673,7 @@ int ovl2mem_deinit(void)
 
 	DISPFUNC();
 
-	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagStart, 0x03,
+	mmprofile_log_ex(ddp_mmp_get_events()->ovl_trigger, MMPROFILE_FLAG_START, 0x03,
 			(atomic_read(&g_trigger_ticket)<<16) | atomic_read(&g_release_ticket));
 
 	_ovl2mem_path_lock(__func__);
@@ -678,7 +691,7 @@ int ovl2mem_deinit(void)
 		loop_cnt++;
 	}
 	/*[SVP]switch ddp mosule to nonsec when deinit the extension path*/
-	switch_module_to_nonsec(pgc->dpmgr_handle, NULL, __func__);
+	switch_module_to_nonsec(pgc->dpmgr_handle, NULL, DISP_MODULE_NUM, __func__);
 
 	dpmgr_path_stop(pgc->dpmgr_handle, CMDQ_DISABLE);
 	dpmgr_path_reset(pgc->dpmgr_handle, CMDQ_DISABLE);
@@ -697,7 +710,7 @@ int ovl2mem_deinit(void)
 
 Exit:
 	_ovl2mem_path_unlock(__func__);
-	MMProfileLogEx(ddp_mmp_get_events()->ovl_trigger, MMProfileFlagEnd, 0x03, (loop_cnt<<24)|1);
+	mmprofile_log_ex(ddp_mmp_get_events()->ovl_trigger, MMPROFILE_FLAG_END, 0x03, (loop_cnt<<24)|1);
 
 	DISPMSG("ovl2mem_deinit done\n");
 	return ret;

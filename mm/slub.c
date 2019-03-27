@@ -463,6 +463,29 @@ static inline bool cmpxchg_double_slab(struct kmem_cache *s, struct page *page,
 	return false;
 }
 
+static void slab_bug_freelist(struct kmem_cache *s, char *fmt, ...)
+{
+	struct va_format vaf;
+	va_list args;
+
+	va_start(args, fmt);
+	vaf.fmt = fmt;
+	vaf.va = &args;
+	pr_err("=============================================================================\n");
+	pr_err("BUG %s (%s): %pV\n", s->name, print_tainted(), &vaf);
+	pr_err("-----------------------------------------------------------------------------\n\n");
+
+	add_taint(TAINT_BAD_PAGE, LOCKDEP_NOW_UNRELIABLE);
+	va_end(args);
+}
+
+static void print_page_info_freelist(struct page *page)
+{
+	pr_err("INFO: Slab 0x%p objects=%u used=%u fp=0x%p flags=0x%04lx\n",
+	       page, page->objects, page->inuse, page->freelist, page->flags);
+
+}
+
 #ifdef CONFIG_SLUB_DEBUG
 /*
  * Determine a map of object in use on a page.
@@ -2659,6 +2682,14 @@ redo:
 			note_cmpxchg_failure("slab_alloc", s, tid);
 			goto redo;
 		}
+
+		if (next_object && unlikely(!virt_addr_valid(next_object))) {
+			slab_bug_freelist(s, "Error: Freelist has been corrupted, object: %lx, next_object: %lx",
+					(unsigned long)object, (unsigned long)next_object);
+			print_page_info_freelist(page);
+			BUG();
+		}
+
 		prefetch_freepointer(s, next_object);
 		stat(s, ALLOC_FASTPATH);
 	}
@@ -3689,6 +3720,39 @@ void *__kmalloc_node(size_t size, gfp_t flags, int node)
 }
 EXPORT_SYMBOL(__kmalloc_node);
 #endif
+
+#ifdef CONFIG_HARDENED_USERCOPY
+/*
+ * Rejects objects that are incorrectly sized.
+ *
+ * Returns NULL if check passes, otherwise const char * to name of cache
+ * to indicate an error.
+ */
+const char *__check_heap_object(const void *ptr, unsigned long n,
+				struct page *page)
+{
+	struct kmem_cache *s;
+	unsigned long offset;
+	size_t object_size;
+
+	/* Find object and usable object size. */
+	s = page->slab_cache;
+	object_size = slab_ksize(s);
+
+	/* Reject impossible pointers. */
+	if (ptr < page_address(page))
+		return s->name;
+
+	/* Find offset within object. */
+	offset = (ptr - page_address(page)) % s->size;
+
+	/* Allow address range falling entirely within object size. */
+	if (offset <= object_size && n <= object_size - offset)
+		return NULL;
+
+	return s->name;
+}
+#endif /* CONFIG_HARDENED_USERCOPY */
 
 static size_t __ksize(const void *object)
 {
@@ -5383,6 +5447,7 @@ static void memcg_propagate_slab_attrs(struct kmem_cache *s)
 		char mbuf[64];
 		char *buf;
 		struct slab_attribute *attr = to_slab_attr(slab_attrs[i]);
+		ssize_t len;
 
 		if (!attr || !attr->store || !attr->show)
 			continue;
@@ -5407,8 +5472,9 @@ static void memcg_propagate_slab_attrs(struct kmem_cache *s)
 			buf = buffer;
 		}
 
-		attr->show(root_cache, buf);
-		attr->store(s, buf, strlen(buf));
+		len = attr->show(root_cache, buf);
+		if (len > 0)
+			attr->store(s, buf, len);
 	}
 
 	if (buffer)
@@ -5703,6 +5769,9 @@ static int mtk_memcfg_add_location(struct loc_track *t, struct kmem_cache *s,
 #endif
 			break;
 	}
+	/* copy all addrs if we cannot match track->addr */
+	if (i == TRACK_ADDRS_COUNT)
+		i = 0;
 	cnt = min(MTK_MEMCFG_SLABTRACE_CNT, TRACK_ADDRS_COUNT - i);
 #ifdef MTK_COMPACT_SLUB_TRACK
 	{
@@ -5765,7 +5834,7 @@ static int mtk_memcfg_add_location(struct loc_track *t, struct kmem_cache *s,
 	/*
 	 * Not found. Insert new tracking element.
 	 */
-	if (t->count >= t->max && !alloc_loc_track(t, 2 * t->max, GFP_ATOMIC))
+	if (t->count >= t->max && !alloc_loc_track(t, 2 * t->max, __GFP_HIGH | __GFP_ATOMIC))
 		return 0;
 
 	l = t->loc + pos;

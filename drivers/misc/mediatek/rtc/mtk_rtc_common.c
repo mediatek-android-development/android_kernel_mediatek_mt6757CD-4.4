@@ -75,8 +75,6 @@
 #include <mt-plat/charging.h>
 #endif
 
-#include <mt-plat/mtk_battery.h>	// [lidebiao] Added to enter shipping_mode
-
 #define RTC_NAME	"mt-rtc"
 #define RTC_RELPWR_WHEN_XRST	1	/* BBPU = 0 when xreset_rstb goes low */
 
@@ -269,7 +267,7 @@ bool rtc_low_power_detected(void)
 }
 EXPORT_SYMBOL(rtc_low_power_detected);
 
-void rtc_gpio_enable_32k(rtc_gpio_user_t user)
+void rtc_gpio_enable_32k(enum rtc_gpio_user_t user)
 {
 	unsigned long flags;
 
@@ -284,7 +282,7 @@ void rtc_gpio_enable_32k(rtc_gpio_user_t user)
 }
 EXPORT_SYMBOL(rtc_gpio_enable_32k);
 
-void rtc_gpio_disable_32k(rtc_gpio_user_t user)
+void rtc_gpio_disable_32k(enum rtc_gpio_user_t user)
 {
 	unsigned long flags;
 
@@ -407,6 +405,7 @@ u16 rtc_rdwr_uart_bits(u16 *val)
 void rtc_bbpu_power_down(void)
 {
 	unsigned long flags;
+#ifdef CONFIG_MTK_SMART_BATTERY
 	unsigned char exist;
 	bool charger_status;
 
@@ -416,8 +415,11 @@ void rtc_bbpu_power_down(void)
 	else
 		charger_status = false;
 	rtc_xinfo("charger_status = %d\n", charger_status);
+#endif
 	spin_lock_irqsave(&rtc_lock, flags);
+#ifdef CONFIG_MTK_SMART_BATTERY
 	hal_rtc_bbpu_pwdn(charger_status);
+#endif
 	spin_unlock_irqrestore(&rtc_lock, flags);
 }
 
@@ -425,19 +427,12 @@ void mt_power_off(void)
 {
 #if !defined(CONFIG_POWER_EXT)
 	int count = 0;
+#ifdef CONFIG_MTK_SMART_BATTERY
 	unsigned char exist;
+#endif
 #endif
 
 	rtc_xinfo("mt_power_off\n");
-
-	/* [lidebiao start] Added to enter shipping_mode */
-	if (is_set_transport_mode()) {
-		rtc_xinfo("set_transport_mode\n");
-		set_shippingmode();
-	}
-	rtc_xinfo("not set_transport_mode\n");
-	/* [lidebiao end] */
-
 	dump_stack();
 	/* pull PWRBB low */
 	rtc_bbpu_power_down();
@@ -487,13 +482,14 @@ static void rtc_handler(void)
 	bool pwron_alm = false, isLowPowerIrq = false, pwron_alarm = false;
 	struct rtc_time nowtm;
 	struct rtc_time tm;
+	unsigned long flags;
 
 	rtc_xinfo("rtc_tasklet_handler start\n");
 
-	spin_lock(&rtc_lock);
+	spin_lock_irqsave(&rtc_lock, flags);
 	isLowPowerIrq = hal_rtc_is_lp_irq();
 	if (isLowPowerIrq) {
-		spin_unlock(&rtc_lock);
+		spin_unlock_irqrestore(&rtc_lock, flags);
 		return;
 	}
 #if RTC_RELPWR_WHEN_XRST
@@ -515,13 +511,22 @@ static void rtc_handler(void)
 #if defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
 			if (get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT
 			    || get_boot_mode() == LOW_POWER_OFF_CHARGING_BOOT) {
-				time += 1;
-				rtc_time_to_tm(time, &tm);
-				tm.tm_year -= RTC_MIN_YEAR_OFFSET;
-				tm.tm_mon += 1;
-				/* tm.tm_sec += 1; */
-				hal_rtc_set_alarm(&tm);
-				spin_unlock(&rtc_lock);
+				do {
+					now_time += 1;
+					rtc_time_to_tm(now_time, &tm);
+					tm.tm_year -= RTC_MIN_YEAR_OFFSET;
+					tm.tm_mon += 1;
+					hal_rtc_set_pwron_alarm_time(&tm);
+					hal_rtc_set_alarm(&tm);
+					hal_rtc_is_pwron_alarm(&nowtm, &tm);
+					nowtm.tm_year += RTC_MIN_YEAR;
+					tm.tm_year += RTC_MIN_YEAR;
+					now_time = mktime(nowtm.tm_year, nowtm.tm_mon, nowtm.tm_mday,
+						nowtm.tm_hour, nowtm.tm_min, nowtm.tm_sec);
+					time = mktime(tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour,
+						tm.tm_min, tm.tm_sec);
+				} while (time <= now_time);
+				spin_unlock_irqrestore(&rtc_lock, flags);
 				arch_reset(0, "kpoc");
 			} else {
 				hal_rtc_save_pwron_alarm();
@@ -532,16 +537,14 @@ static void rtc_handler(void)
 			pwron_alm = true;
 #endif
 		} else if (now_time < time) {	/* set power-on alarm */
-			if (tm.tm_sec == 0) {
-				tm.tm_sec = 59;
-				tm.tm_min -= 1;
-			} else {
-				tm.tm_sec -= 1;
-			}
+			time -= 1;
+			rtc_time_to_tm(time, &tm);
+			tm.tm_year -= RTC_MIN_YEAR_OFFSET;
+			tm.tm_mon += 1;
 			hal_rtc_set_alarm(&tm);
 		}
 	}
-	spin_unlock(&rtc_lock);
+	spin_unlock_irqrestore(&rtc_lock, flags);
 
 	if (rtc != NULL)
 		rtc_update_irq(rtc, 1, RTC_IRQF | RTC_AF);
@@ -763,35 +766,9 @@ static struct rtc_class_ops rtc_ops = {
 	.ioctl = rtc_ops_ioctl,
 };
 
-/* [liguanxiong] For on_boot vibration flag */
-static ssize_t boot_vib_disable_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	return sprintf(buf,"%d", check_rtc_boot_vibration_disable());
-}
-static ssize_t boot_vib_disable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t count)
-{
-	int cmd = 0;
-	int ret = 0;
-	ret = kstrtoint(buf, 10, &cmd);
-	if (cmd)
-	{
-		set_rtc_boot_vibration_disable(1);
-	}
-	else
-	{
-		set_rtc_boot_vibration_disable(0);
-	}
-	printk("set  on boot vibration flag %d done!\n", cmd);
-	return count;
-}
-static DEVICE_ATTR(boot_vib_disable, 0660, boot_vib_disable_show, boot_vib_disable_store);
-/* [liguanxiong end] */
-
 static int rtc_pdrv_probe(struct platform_device *pdev)
 {
 	unsigned long flags;
-	/* [liguanxiong] For on_boot vibration flag */
-	int ret = 0;
 
 	/* only enable LPD interrupt in engineering build */
 	spin_lock_irqsave(&rtc_lock, flags);
@@ -805,14 +782,10 @@ static int rtc_pdrv_probe(struct platform_device *pdev)
 		rtc_xerror("register rtc device failed (%ld)\n", PTR_ERR(rtc));
 		return PTR_ERR(rtc);
 	}
-#ifdef PMIC_REGISTER_INTERRUPT_ENABLE
-#ifdef CONFIG_MTK_PMIC
+
 	pmic_register_interrupt_callback(RTC_INTERRUPT_NUM, rtc_irq_handler);
 	pmic_enable_interrupt(RTC_INTERRUPT_NUM, 1, "RTC");
-#endif
-#endif
-	/* [liguanxiong] For on_boot vibration flag */
-	ret = sysfs_create_file(kernel_kobj, &dev_attr_boot_vib_disable.attr);
+
 	return 0;
 }
 

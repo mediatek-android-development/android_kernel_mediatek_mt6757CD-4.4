@@ -1,12 +1,15 @@
 /*
- * Copyright (c) 2013 TRUSTONIC LIMITED
- * All rights reserved
+ * Copyright (c) 2013-2016 TRUSTONIC LIMITED
+ * All Rights Reserved.
  *
- * The present software is the confidential and proprietary information of
- * TRUSTONIC LIMITED. You shall not disclose the present software and shall
- * use it only in accordance with the terms of the license agreement you
- * entered into with TRUSTONIC LIMITED. This software may be subject to
- * export or import laws in certain countries.
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License
+ * version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
  */
 
 /**
@@ -42,16 +45,16 @@ typedef uint32_t dciReturnCode_t;
 /**
  * DCI command header.
  */
-typedef struct{
+struct dciCommandHeader_t {
 	dciCommandId_t commandId; /**< Command ID */
-} dciCommandHeader_t;
+};
 
 /**
  * DCI response header.
  */
-typedef struct{
+struct dciResponseHeader_t {
 	dciResponseId_t     responseId; /**< Response ID (must be command ID | RSP_ID_MASK )*/
 	dciReturnCode_t     returnCode; /**< Return code of command */
-} dciResponseHeader_t;
+};
 
 #endif

@@ -47,9 +47,6 @@
 #include "psm_core.h"
 #include "stp_sdio.h"
 #include "stp_dbg.h"
-#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-#include <mtk_clkbuf_ctl.h>
-#endif
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -74,13 +71,19 @@ static const WMT_IC_PIN_STATE cmb_aif2pin_stat[] = {
 	[CMB_STUB_AIF_1] = WMT_IC_AIF_1,
 	[CMB_STUB_AIF_2] = WMT_IC_AIF_2,
 	[CMB_STUB_AIF_3] = WMT_IC_AIF_3,
+	[CMB_STUB_AIF_4] = WMT_IC_PIN_STATE_MAX,
 };
 
 #if CFG_WMT_PS_SUPPORT
 static UINT32 gPsIdleTime = STP_PSM_IDLE_TIME_SLEEP;
 static UINT32 gPsEnable = 1;
 static PF_WMT_SDIO_PSOP sdio_own_ctrl;
+static PF_WMT_SDIO_DEBUG sdio_reg_rw;
 #endif
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+static PF_WMT_SDIO_DEEP_SLEEP sdio_deep_sleep_flag_set;
+#endif
+
 
 #define WMT_STP_CPUPCR_BUF_SIZE 6144
 static UINT8 g_cpupcr_buf[WMT_STP_CPUPCR_BUF_SIZE] = { 0 };
@@ -121,109 +124,11 @@ static MTK_WCN_BOOL wmt_lib_hw_state_show(VOID);
 *                              F U N C T I O N S
 ********************************************************************************
 */
-VOID __weak wmt_plat_func_ctrl_cb_reg(func_ctrl_cb subsys_func_ctrl)
-{
-	WMT_ERR_FUNC("wmt_plat_func_ctrl_cb_reg is not define!!!\n");
-}
-VOID __weak wmt_plat_deep_idle_ctrl_cb_reg(deep_idle_ctrl_cb deep_idle_ctrl)
-{
-	WMT_ERR_FUNC("wmt_plat_deep_idle_ctrl_cb_reg is not define!!!\n");
-}
-INT32 __weak wmt_plat_soc_init(UINT32 co_clock_type)
-{
-	WMT_ERR_FUNC("wmt_plat_soc_init is not define!!!\n");
-
-	return 0;
-}
-UINT32 __weak wmt_plat_soc_co_clock_flag_get(VOID)
-{
-	WMT_ERR_FUNC("wmt_plat_soc_co_clock_flag_get is not define!!!\n");
-
-	return 0;
-}
-P_CONSYS_EMI_ADDR_INFO __weak wmt_plat_get_emi_phy_add(VOID)
-{
-	WMT_ERR_FUNC("wmt_plat_get_emi_phy_add is not define!!!\n");
-
-	return NULL;
-}
-UINT8 * __weak wmt_plat_get_emi_virt_add(UINT32 offset)
-{
-	WMT_ERR_FUNC("wmt_plat_get_emi_virt_add is not define!!!\n");
-
-	return 0;
-}
-VOID __weak wmt_plat_thermal_ctrl_cb_reg(thermal_query_ctrl_cb thermal_query_ctrl)
-{
-	WMT_ERR_FUNC("wmt_plat_thermal_ctrl_cb_reg is not define!!!\n");
-}
-UINT32 __weak wmt_plat_jtag_flag_ctrl(UINT32 en)
-{
-	WMT_ERR_FUNC("wmt_plat_jtag_flag_ctrl is not define!!!\n");
-
-	return 0;
-}
 INT32 __weak mtk_wcn_consys_stp_btif_dpidle_ctrl(ENUM_BTIF_DPIDLE_CTRL en_flag)
 {
 	WMT_ERR_FUNC("mtk_wcn_consys_stp_btif_dpidle_ctrl is not define!!!\n");
 
 	return 0;
-}
-
-INT32 __weak wmt_plat_init(P_PWR_SEQ_TIME pPwrSeqTime)
-{
-	WMT_ERR_FUNC("wmt_plat_init is not define!!!\n");
-
-	return 0;
-}
-
-VOID __weak wmt_lib_plat_irq_cb_reg(irq_cb bgf_irq_cb)
-{
-	WMT_ERR_FUNC("wmt_lib_plat_irq_cb_reg is not define!!!\n");
-
-}
-
-INT32 __weak wmt_plat_stub_init(VOID)
-{
-	WMT_ERR_FUNC("wmt_plat_stub_init is not define!!!\n");
-
-	return 0;
-}
-
-INT32 __weak wmt_plat_set_comm_if_type(ENUM_STP_TX_IF_TYPE type)
-{
-	WMT_ERR_FUNC("wmt_plat_set_comm_if_type is not define!!!\n");
-
-	return 0;
-}
-
-INT32 __weak wmt_plat_merge_if_flag_ctrl(UINT32 enable)
-{
-	WMT_ERR_FUNC("wmt_plat_merge_if_flag_ctrl is not define!!!\n");
-
-	return 0;
-}
-
-VOID __weak wmt_lib_plat_aif_cb_reg(device_audio_if_cb aif_ctrl_cb)
-{
-	WMT_ERR_FUNC("wmt_lib_plat_aif_cb_reg is not define!!!\n");
-
-}
-
-INT32 __weak wmt_plat_merge_if_flag_get(VOID)
-{
-	WMT_ERR_FUNC("wmt_plat_merge_if_flag_get is not define!!!\n");
-
-	return 0;
-}
-VOID __weak wmt_plat_irq_cb_reg(irq_cb bgf_irq_cb)
-{
-
-}
-
-VOID __weak wmt_plat_aif_cb_reg(device_audio_if_cb aif_ctrl_cb)
-{
-
 }
 
 INT32 wmt_lib_idc_lock_aquire(VOID)
@@ -249,6 +154,8 @@ void wmt_lib_psm_lock_release(VOID)
 INT32 DISABLE_PSM_MONITOR(VOID)
 {
 	INT32 ret = 0;
+	PUINT8 pbuf = NULL;
+	INT32 len = 0;
 
 	/* osal_lock_sleepable_lock(&gDevWmt.psm_lock); */
 	ret = wmt_lib_psm_lock_aquire();
@@ -261,6 +168,11 @@ INT32 DISABLE_PSM_MONITOR(VOID)
 	if (ret) {
 		WMT_ERR_FUNC("wmt_lib_ps_disable fail, ret=%d\n", ret);
 		wmt_lib_psm_lock_release();
+		pbuf = "wmt_lib_ps_disable fail, just collect SYS_FTRACE to DB";
+		len = osal_strlen(pbuf);
+		stp_dbg_trigger_collect_ftrace(pbuf, len);
+		wmt_lib_trigger_reset();
+
 	}
 #endif
 	return ret;
@@ -352,47 +264,32 @@ INT32 wmt_lib_init(VOID)
 	osal_event_init(&pDevWmt->cmdReq);
 	/* initialize platform resources */
 
-	chip_type = wmt_detect_get_chip_type();
-	if (chip_type == WMT_CHIP_TYPE_COMBO) {
-		if (gDevWmt.rWmtGenConf.cfgExist != 0) {
-			PWR_SEQ_TIME pwrSeqTime;
+	if (gDevWmt.rWmtGenConf.cfgExist != 0) {
+		PWR_SEQ_TIME pwrSeqTime;
 
-			pwrSeqTime.ldoStableTime = gDevWmt.rWmtGenConf.pwr_on_ldo_slot;
-			pwrSeqTime.rstStableTime = gDevWmt.rWmtGenConf.pwr_on_rst_slot;
-			pwrSeqTime.onStableTime = gDevWmt.rWmtGenConf.pwr_on_on_slot;
-			pwrSeqTime.offStableTime = gDevWmt.rWmtGenConf.pwr_on_off_slot;
-			pwrSeqTime.rtcStableTime = gDevWmt.rWmtGenConf.pwr_on_rtc_slot;
-			WMT_INFO_FUNC("set pwr on seq par to hw conf\n");
-			WMT_INFO_FUNC("ldo(%d)rst(%d)on(%d)off(%d)rtc(%d)\n", pwrSeqTime.ldoStableTime,
-					pwrSeqTime.rstStableTime, pwrSeqTime.onStableTime,
-					pwrSeqTime.offStableTime, pwrSeqTime.rtcStableTime);
-			iRet = wmt_plat_init(&pwrSeqTime);
-		} else {
-			WMT_ERR_FUNC("no pwr on seq par found\n");
-			iRet = wmt_plat_init(NULL);
-		}
-	} else if (chip_type == WMT_CHIP_TYPE_SOC) {
-		if (gDevWmt.rWmtGenConf.cfgExist != 0)
-			iRet = wmt_plat_soc_init(gDevWmt.rWmtGenConf.co_clock_flag & 0x0f);
-		else
-			iRet = wmt_plat_soc_init(0);
-		gDevWmt.rWmtGenConf.co_clock_flag = wmt_plat_soc_co_clock_flag_get();
-		#if defined(CONFIG_MTK_PMIC_CHIP_MT6355)
-		if (gDevWmt.rWmtGenConf.co_clock_flag) {
-			/*Need clk buf driver to turn on/off 26M*/
-			clk_buf_init_connsys_clkbuf(1);
-		} else {
-			/*Need connsys driver to turn on/off 26M for TCXO*/
-			clk_buf_init_connsys_clkbuf(0);
-		}
-		#endif
+		pwrSeqTime.ldoStableTime = gDevWmt.rWmtGenConf.pwr_on_ldo_slot;
+		pwrSeqTime.rstStableTime = gDevWmt.rWmtGenConf.pwr_on_rst_slot;
+		pwrSeqTime.onStableTime = gDevWmt.rWmtGenConf.pwr_on_on_slot;
+		pwrSeqTime.offStableTime = gDevWmt.rWmtGenConf.pwr_on_off_slot;
+		pwrSeqTime.rtcStableTime = gDevWmt.rWmtGenConf.pwr_on_rtc_slot;
+		WMT_INFO_FUNC("set pwr on seq par to hw conf\n");
+		WMT_INFO_FUNC("ldo(%d)rst(%d)on(%d)off(%d)rtc(%d)\n", pwrSeqTime.ldoStableTime,
+				pwrSeqTime.rstStableTime, pwrSeqTime.onStableTime,
+				pwrSeqTime.offStableTime, pwrSeqTime.rtcStableTime);
+		iRet = wmt_plat_init(&pwrSeqTime, gDevWmt.rWmtGenConf.co_clock_flag & 0x0f);
+	} else {
+		WMT_ERR_FUNC("no pwr on seq and clk par found\n");
+		iRet = wmt_plat_init(NULL, 0);
 	}
+	chip_type = wmt_detect_get_chip_type();
+	if (chip_type == WMT_CHIP_TYPE_SOC)
+		gDevWmt.rWmtGenConf.co_clock_flag = wmt_plat_soc_co_clock_flag_get();
+
 	if (iRet) {
 		WMT_ERR_FUNC("wmt_plat_init() fail(%d)\n", iRet);
 		return -3;
 	}
-	if (chip_type == WMT_CHIP_TYPE_COMBO)
-		wmt_plat_stub_init();
+
 #if CFG_WMT_PS_SUPPORT
 	iRet = wmt_lib_ps_init();
 	if (iRet) {
@@ -407,15 +304,10 @@ INT32 wmt_lib_init(VOID)
 		WMT_ERR_FUNC("osal_thread_run(0x%p) fail(%d)\n", pThread, iRet);
 		return -5;
 	}
-	if (wmt_detect_get_chip_type() == WMT_CHIP_TYPE_COMBO) {
-		/*4. register irq callback to WMT-PLAT */
-		wmt_lib_plat_irq_cb_reg(wmt_lib_ps_irq_cb);
-		/*5. register audio if control callback to WMT-PLAT */
-		wmt_lib_plat_aif_cb_reg(wmt_lib_set_aif);
-	} else {
-		wmt_plat_irq_cb_reg(wmt_lib_ps_irq_cb);
-		wmt_plat_aif_cb_reg(wmt_lib_set_aif);
-	}
+	/*4. register irq callback to WMT-PLAT */
+	wmt_plat_irq_cb_reg(wmt_lib_ps_irq_cb);
+	/*5. register audio if control callback to WMT-PLAT */
+	wmt_plat_aif_cb_reg(wmt_lib_set_aif);
 	/*6. register function control callback to WMT-PLAT */
 	wmt_plat_func_ctrl_cb_reg(mtk_wcn_wmt_func_ctrl_for_plat);
 
@@ -595,7 +487,7 @@ INT32 wmt_lib_set_hif(ULONG hifconf)
 		return -2;
 	}
 
-	WMT_INFO_FUNC("new hifType:%d, fcCtrl:%d, baud:%d, fm:%d\n",
+	WMT_DBG_FUNC("new hifType:%d, fcCtrl:%d, baud:%d, fm:%d\n",
 		      pHif->hifType, pHif->uartFcCtrl, pHif->au4HifConf[0], pHif->au4StrapConf[0]);
 	return 0;
 }
@@ -696,7 +588,7 @@ static MTK_WCN_BOOL wmt_lib_ps_action(MTKSTP_PSM_ACTION_T action)
 }
 
 #if CFG_WMT_LTE_COEX_HANDLING
-MTK_WCN_BOOL wmt_lib_handle_idc_msg(ipc_ilm_t *idc_infor)
+MTK_WCN_BOOL wmt_lib_handle_idc_msg(struct ipc_ilm *idc_infor)
 {
 	P_OSAL_OP lxop;
 	MTK_WCN_BOOL bRet = MTK_WCN_BOOL_FALSE;
@@ -715,7 +607,7 @@ MTK_WCN_BOOL wmt_lib_handle_idc_msg(ipc_ilm_t *idc_infor)
 		WMT_ERR_FUNC("--->lock idc_lock failed, ret=%d\n", ret);
 		return MTK_WCN_BOOL_FALSE;
 	}
-	msg_len = idc_infor->local_para_ptr->msg_len - osal_sizeof(local_para_struct);
+	msg_len = idc_infor->local_para_ptr->msg_len - osal_sizeof(struct local_para);
 	osal_memcpy(&msg_local_buffer[0], &msg_len, osal_sizeof(msg_len));
 	osal_memcpy(&msg_local_buffer[osal_sizeof(msg_len)],
 			&(idc_infor->local_para_ptr->data[0]), msg_len - 1);
@@ -1006,6 +898,18 @@ VOID wmt_lib_ps_set_sdio_psop(PF_WMT_SDIO_PSOP own_cb)
 #endif
 }
 
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+VOID wmt_lib_sdio_deep_sleep_flag_set_cb_reg(PF_WMT_SDIO_DEEP_SLEEP flag_cb)
+{
+	sdio_deep_sleep_flag_set = flag_cb;
+}
+#endif
+
+VOID wmt_lib_sdio_reg_rw_cb(PF_WMT_SDIO_DEBUG reg_rw_cb)
+{
+	sdio_reg_rw = reg_rw_cb;
+}
+
 UINT32 wmt_lib_wait_event_checker(P_OSAL_THREAD pThread)
 {
 	P_DEV_WMT pDevWmt;
@@ -1182,8 +1086,15 @@ P_OSAL_OP wmt_lib_get_free_op(VOID)
 
 	osal_assert(pDevWmt);
 	pOp = wmt_lib_get_op(&pDevWmt->rFreeOpQ);
-	if (pOp)
+	if (pOp) {
 		osal_memset(&pOp->op, 0, osal_sizeof(pOp->op));
+
+		/* at the moment the signal's timeoutValue is initialized by caller of wmt_lib_get_free_op(),
+		 * and the signal's comp is initialized in wmt_lib_put_act_op(),
+		 * leaving us with no choice but to initialize timeoutExtension here.
+		 */
+		pOp->signal.timeoutExtension = 0;
+	}
 	return pOp;
 }
 
@@ -1194,9 +1105,6 @@ MTK_WCN_BOOL wmt_lib_put_act_op(P_OSAL_OP pOp)
 	MTK_WCN_BOOL bCleanup = MTK_WCN_BOOL_FALSE;
 	P_OSAL_SIGNAL pSignal = NULL;
 	INT32 waitRet = -1;
-	P_OSAL_THREAD pThread;
-	PUINT8 pbuf = NULL;
-	INT32 len = 0;
 
 	osal_assert(pWmtDev);
 	osal_assert(pOp);
@@ -1243,24 +1151,15 @@ MTK_WCN_BOOL wmt_lib_put_act_op(P_OSAL_OP pOp)
 		/* check result */
 		/* wait_ret = wait_for_completion_interruptible_timeout(&pOp->comp, msecs_to_jiffies(u4WaitMs)); */
 		/* wait_ret = wait_for_completion_timeout(&pOp->comp, msecs_to_jiffies(u4WaitMs)); */
-		waitRet = osal_wait_for_signal_timeout(pSignal);
+		waitRet = osal_wait_for_signal_timeout(pSignal, &pWmtDev->thread);
 		WMT_DBG_FUNC("osal_wait_for_signal_timeout:%d\n", waitRet);
 
 		/* if (unlikely(!wait_ret)) { */
-		if (waitRet == 0) {
-			pThread = &gDevWmt.thread;
-			pbuf = "Wait wmtd complation timeout, just collect SYS_FTRACE to DB";
-			len = osal_strlen(pbuf);
-			WMT_ERR_FUNC
-				("wait completion timeout, opId(%d), show wmtd_thread stack!\n", pOp->op.opId);
-			/* TODO: how to handle it? retry? */
-			/* wcn_wmtd_timeout_collect_ftrace();*/ /*trigger collect SYS_FTRACE */
-			osal_thread_show_stack(pThread);
-			stp_dbg_trigger_collect_ftrace(pbuf, len);
-		} else {
-			if (pOp->result)
-				WMT_WARN_FUNC("opId(%d) result:%d\n", pOp->op.opId, pOp->result);
-		}
+		if (waitRet == 0)
+			WMT_ERR_FUNC("opId(%d) completion timeout\n", pOp->op.opId);
+		else if (pOp->result)
+			WMT_WARN_FUNC("opId(%d) result:%d\n", pOp->op.opId, pOp->result);
+
 		/* op completes, check result */
 		bRet = (pOp->result) ? MTK_WCN_BOOL_FALSE : MTK_WCN_BOOL_TRUE;
 	} while (0);
@@ -1373,7 +1272,7 @@ PUINT8 wmt_lib_def_patch_name(VOID)
 }
 
 
-MTK_WCN_BOOL wmt_lib_is_therm_ctrl_support(VOID)
+MTK_WCN_BOOL wmt_lib_is_therm_ctrl_support(ENUM_WMTTHERM_TYPE_T eType)
 {
 	MTK_WCN_BOOL bIsSupportTherm = MTK_WCN_BOOL_TRUE;
 	/* TODO:[FixMe][GeorgeKuo]: move IC-dependent checking to ic-implementation file */
@@ -1385,10 +1284,11 @@ MTK_WCN_BOOL wmt_lib_is_therm_ctrl_support(VOID)
 	}
 	if ((!osal_test_bit(WMT_STAT_STP_EN, &gDevWmt.state))
 	    || (!osal_test_bit(WMT_STAT_STP_RDY, &gDevWmt.state))) {
-		WMT_WARN_FUNC
-		    ("thermal command can not be send: STP is not enable(%d) or ready(%d)\n",
-		     osal_test_bit(WMT_STAT_STP_EN, &gDevWmt.state), osal_test_bit(WMT_STAT_STP_RDY,
-										   &gDevWmt.state));
+		if (eType == WMTTHERM_READ)
+			WMT_INFO_FUNC
+				("thermal command can`t send: STP is not enable(%d) or ready(%d)\n",
+				osal_test_bit(WMT_STAT_STP_EN, &gDevWmt.state),
+				osal_test_bit(WMT_STAT_STP_RDY, &gDevWmt.state));
 		bIsSupportTherm = MTK_WCN_BOOL_FALSE;
 	}
 
@@ -1919,7 +1819,7 @@ ENUM_WMTRSTRET_TYPE_T wmt_lib_cmb_rst(ENUM_WMTRSTSRC_TYPE_T src)
 		retval = rstMsg == WMTRSTMSG_RESET_END ? WMTRSTRET_SUCCESS : WMTRSTRET_FAIL;
 	}
 	mtk_wcn_stp_coredump_start_ctrl(0);
-	mtk_wcn_stp_set_wmt_evt_err_trg_assert(0);
+	mtk_wcn_stp_set_wmt_trg_assert(0);
 rstDone:
 	osal_clear_bit(WMT_STAT_RST_ON, &pDevWmt->state);
 	return retval;
@@ -1965,8 +1865,36 @@ UINT32 wmt_lib_dbg_level_set(UINT32 level)
 	gWmtDbgLvl = level > WMT_LOG_LOUD ? WMT_LOG_LOUD : level;
 	return 0;
 }
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+INT32 wmt_lib_deep_sleep_ctrl(INT32 value)
+{
+	MTK_WCN_BOOL ret = MTK_WCN_BOOL_FALSE;
 
+	WMT_INFO_FUNC("g_deep_sleep_flag value (%d) set form wmt_dbg.\n", value);
+	ret = wmt_core_deep_sleep_ctrl(value);
+	if (sdio_deep_sleep_flag_set) {
+		if (value)
+			(*sdio_deep_sleep_flag_set)(MTK_WCN_BOOL_TRUE);
+		else
+			(*sdio_deep_sleep_flag_set)(MTK_WCN_BOOL_FALSE);
+	} else {
+		WMT_ERR_FUNC("sdio_deep_sleep_flag_set is not register");
+		return -1;
+	}
+	return 0;
+}
 
+MTK_WCN_BOOL wmt_lib_deep_sleep_flag_set(MTK_WCN_BOOL flag)
+{
+	if (sdio_deep_sleep_flag_set) {
+		(*sdio_deep_sleep_flag_set)(flag);
+	} else {
+		WMT_ERR_FUNC("sdio_deep_sleep_flag_set is not register");
+		return MTK_WCN_BOOL_FALSE;
+	}
+		return MTK_WCN_BOOL_TRUE;
+}
+#endif
 INT32 wmt_lib_set_stp_wmt_last_close(UINT32 value)
 {
 	return mtk_wcn_stp_set_wmt_last_close(value);
@@ -2078,25 +2006,6 @@ UINT8 *wmt_lib_get_fwinfor_from_emi(UINT8 section, UINT32 offset, UINT8 *buf, UI
 	return 0;
 }
 
-INT32 wmt_lib_poll_cpupcr(UINT32 count, UINT16 sleep, UINT16 toAee)
-{
-	ENUM_STP_FW_ISSUE_TYPE issue_type;
-
-	issue_type = STP_DBG_PROC_TEST;
-
-	stp_dbg_poll_cpupcr(count, sleep, 1);
-
-	if (toAee) {
-		stp_dbg_set_fw_info("STP ProcTest", osal_strlen("STP ProcTest"), issue_type);
-		osal_dbg_assert_aee("[SOC_CONSYS]ProcTest",
-				    "**[WCN_ISSUE_INFO]STP Tx Timeout**\n Polling CPUPCR for FW debug usage\n");
-	} else {
-		WMT_INFO_FUNC("wmt_lib:do not pass cpupcr to AEE\n");
-	}
-	return 0;
-}
-
-
 INT32 wmt_lib_merge_if_flag_ctrl(UINT32 enable)
 {
 #if WMT_PLAT_ALPS
@@ -2153,15 +2062,20 @@ INT8 wmt_lib_co_clock_get(void)
 }
 
 
-#if WMT_FOR_SDIO_1V_AUTOK
 UINT32 wmt_lib_get_drv_status(UINT32 type)
 {
 	return wmt_core_get_drv_status((ENUM_WMTDRV_TYPE_T) type);
 }
-#endif
+
 INT32 wmt_lib_trigger_reset(VOID)
 {
 	return wmt_btm_trigger_reset();
+}
+
+INT32 wmt_lib_trigger_assert(ENUM_WMTDRV_TYPE_T type, UINT32 reason)
+{
+	wmt_core_set_coredump_state(DRV_STS_FUNC_ON);
+	return wmt_core_ctrl(WMT_CTRL_TRG_ASSERT, (PULONG)&type, (PULONG)&reason);
 }
 
 #if CFG_WMT_PS_SUPPORT
@@ -2172,11 +2086,6 @@ UINT32 wmt_lib_quick_sleep_ctrl(UINT32 en)
 	return 0;
 }
 #endif
-
-VOID wmt_lib_read_fw_cpupcr(UINT32 times, UINT32 sleep, UINT32 cmd)
-{
-	stp_dbg_poll_cpupcr(times, sleep, cmd);
-}
 
 #if CONSYS_ENALBE_SET_JTAG
 UINT32 wmt_lib_jtag_flag_set(UINT32 en)
@@ -2190,11 +2099,55 @@ UINT32 wmt_lib_soc_set_wifiver(UINT32 wifiver)
 	return stp_dbg_set_wifiver(wifiver);
 }
 
-INT32 wmt_lib_stp_dbg_poll_cpupcr(UINT32 times, UINT32 sleep, UINT32 cmd)
-{
-	return stp_dbg_poll_cpupcr(times, sleep, cmd);
-}
 UINT32 wmt_lib_co_clock_flag_get(VOID)
 {
 	return wmt_plat_soc_co_clock_flag_get();
+}
+
+INT32 wmt_lib_wifi_fem_cfg_report(PVOID pvInfoBuf)
+{
+	INT32 iRet = 0;
+	ULONG addr;
+	WMT_GEN_CONF *pWmtGenConf;
+
+	/* sanity check */
+	ASSERT(pvInfoBuf);
+
+	iRet = wmt_core_ctrl(WMT_CTRL_GET_WMT_CONF, &addr, 0);
+
+	if (iRet) {
+		WMT_ERR_FUNC("ctrl GET_WMT_CONF fail(%d)\n", iRet);
+		return -2;
+	}
+
+	pWmtGenConf = (P_WMT_GEN_CONF) addr;
+
+	WMT_DBG_FUNC("pWmtGenConf->coex_wmt_wifi_path=0x%x\n", pWmtGenConf->coex_wmt_wifi_path);
+
+	/* Memory copy */
+	osal_memcpy((PUINT8)(pvInfoBuf), &pWmtGenConf->coex_wmt_wifi_path,
+		osal_sizeof(pWmtGenConf->coex_wmt_wifi_path));
+	return iRet;
+}
+
+INT32 wmt_lib_sdio_reg_rw(INT32 func_num, INT32 direction, UINT32 offset, UINT32 value)
+{
+	INT32 ret = -1;
+	ENUM_WMT_CHIP_TYPE chip_type;
+
+	chip_type = wmt_detect_get_chip_type();
+
+	if (chip_type == WMT_CHIP_TYPE_COMBO) {
+		if (sdio_reg_rw)
+			ret = sdio_reg_rw(func_num, direction, offset, value);
+		else
+			WMT_ERR_FUNC("sdio_reg_rw callback is not set, maybe the sdio funcxx write/read not used\n");
+	} else
+		WMT_ERR_FUNC("It`s soc project, this function is not used\n");
+	return ret;
+}
+
+VOID wmt_lib_dump_wmtd_backtrace(VOID)
+{
+	osal_thread_show_stack(&gDevWmt.thread);
 }

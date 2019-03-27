@@ -2435,6 +2435,19 @@ static uint8_t parse_861_short_descriptors (
 								MHL_TX_EDID_INFO(mhl_edid_3d_data->dev_context,
 										"EDID -> Short Descriptor Colorimetry Block\n");
 								break;
+				case ETC_VENDOR_SPECIFIC_VIDEO_DATA_BLOCK:
+				case ETC_VESA_VIDEO_DISPLAY_DEVICE_INFORMATION_DATA_BLOCK:
+				case ETC_VESA_VIDEO_DATA_BLOCK:
+				case ETC_HDMI_VIDEO_DATA_BLOCK:
+				case ETC_VIDEO_RELATED:
+				case ETC_CEA_MISC_AUDIO_FIELDS:
+				case ETC_VENDOR_SPECIFIC_AUDIO_DATA_BLOCK:
+				case ETC_HDMI_AUDIO_DATA_BLOCK:
+				case ETC_AUDIO_RELATED:
+				case ETC_GENERAL:
+					break;
+				default:
+					break;
 						}
 					}
 
@@ -2490,7 +2503,7 @@ static uint8_t parse_861_short_descriptors (
 				   			update_av_info_edid(true, HDMI_4k30_DSC, 0);
 				   		else if( (MHL_4k_VIC[i] == 3) || (MHL_4k_VIC[i] == 4))	
 				   			update_av_info_edid(true, HDMI_4k24_DSC, 0);
-						printk("MHL_4k_VIC[%d]=%d\n", i, MHL_4k_VIC[i]);
+						pr_info("MHL_4k_VIC[%d]=%d\n", i, MHL_4k_VIC[i]);
 					}
 			    }
 

@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2015 MediaTek Inc.
- * Author: Cheng-En Chung <cheng-en.chung@mediatek.com>
+ * Copyright (C) 2016 MediaTek Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -8,8 +7,8 @@
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
  */
 
 #include <linux/cpuidle.h>
@@ -34,29 +33,20 @@
 #include <mtk_clkmgr.h>
 #include <mtk_cpuidle.h>
 #if defined(CONFIG_MTK_RAM_CONSOLE) || defined(CONFIG_TRUSTONIC_TEE_SUPPORT)
-#include <mtk_secure_api.h>
+#include <mt-plat/mtk_secure_api.h>
 #endif
 #include <mtk_spm.h>
 #include <mtk_spm_misc.h>
 
 #ifdef CONFIG_MTK_RAM_CONSOLE
-static volatile void __iomem *mtk_cpuidle_aee_phys_addr;
-static volatile void __iomem *mtk_cpuidle_aee_virt_addr;
+static void __iomem *mtk_cpuidle_aee_phys_addr;
+static void __iomem *mtk_cpuidle_aee_virt_addr;
 #endif
 
 #if MTK_CPUIDLE_TIME_PROFILING
 static u64 mtk_cpuidle_timestamp[CONFIG_NR_CPUS][MTK_CPUIDLE_TIMESTAMP_COUNT];
+static struct mtk_cpuidle_time_profile report[CONFIG_NR_CPUS];
 static char mtk_cpuidle_timestamp_buf[1024] = { 0 };
-#endif
-
-static unsigned int kp_irq_nr;
-static unsigned int conn_wdt_irq_nr;
-static unsigned int lowbattery_irq_nr;
-static unsigned int md1_wdt_irq_nr;
-#ifdef CONFIG_MTK_MD3_SUPPORT
-#if CONFIG_MTK_MD3_SUPPORT /* Using this to check >0 */
-static unsigned int c2k_wdt_irq_nr;
-#endif
 #endif
 
 #define CPU_IDLE_STA_OFFSET 10
@@ -64,40 +54,24 @@ static unsigned int c2k_wdt_irq_nr;
 static unsigned long dbg_data[40];
 static int mtk_cpuidle_initialized;
 
-static void mtk_spm_irq_set_pending(int wakeup_src, int irq_nr)
-{
-	if (spm_read(SPM_WAKEUP_STA) & wakeup_src)
-		mt_irq_set_pending(irq_nr);
-}
-
 static void mtk_spm_wakeup_src_restore(void)
 {
-	/* Set the pending bit for spm wakeup source that is edge triggerd */
-	mtk_spm_irq_set_pending(WAKE_SRC_R12_KP_IRQ_B, kp_irq_nr);
-	mtk_spm_irq_set_pending(WAKE_SRC_R12_CONN_WDT_IRQ_B, conn_wdt_irq_nr);
-	mtk_spm_irq_set_pending(WAKE_SRC_R12_LOWBATTERY_IRQ_B, lowbattery_irq_nr);
-	mtk_spm_irq_set_pending(WAKE_SRC_R12_MD1_WDT_B, md1_wdt_irq_nr);
-#ifdef CONFIG_MTK_MD3_SUPPORT
-#if CONFIG_MTK_MD3_SUPPORT /* Using this to check >0 */
-	mtk_spm_irq_set_pending(WAKE_SRC_R12_C2K_WDT_IRQ_B, c2k_wdt_irq_nr);
-#endif
-#endif
+	int i;
+
+	for (i = 0; i < IRQ_NR_MAX; i++) {
+		if (spm_read(SPM_WAKEUP_STA) & wake_src_irq[i])
+			mt_irq_set_pending(irq_nr[i]);
+	}
 }
 
 static void mtk_cpuidle_timestamp_init(void)
 {
 #if MTK_CPUIDLE_TIME_PROFILING
-	int i, k;
-
-	for (i = 0; i < CONFIG_NR_CPUS; i++)
-		for (k = 0; k < MTK_CPUIDLE_TIMESTAMP_COUNT; k++)
-			mtk_cpuidle_timestamp[i][k] = 0;
-
 	kernel_smc_msg(0, 1, virt_to_phys(mtk_cpuidle_timestamp));
 #endif
 }
 
-static void mtk_cpuidle_timestamp_print(int cpu)
+static void mtk_cpuidle_timestamp_report(int cpu)
 {
 #if MTK_CPUIDLE_TIME_PROFILING
 	int i;
@@ -111,7 +85,91 @@ static void mtk_cpuidle_timestamp_print(int cpu)
 	for (i = 0; i < MTK_CPUIDLE_TIMESTAMP_COUNT; i++)
 		p += sprintf(p, ",%llu", mtk_cpuidle_timestamp[cpu][i]);
 
-	pr_err("%s\n", mtk_cpuidle_timestamp_buf);
+	pr_debug("%s\n", mtk_cpuidle_timestamp_buf);
+
+	report[cpu].count++;
+
+	report[cpu].kernel_plat_backup +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_BEFORE_ATF] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_ENTER_CPUIDLE]);
+	report[cpu].kernel_to_atf +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_ENTER_ATF] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_BEFORE_ATF]);
+	report[cpu].atf_l2_flush +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_AFTER_L2_FLUSH] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_BEFORE_L2_FLUSH]);
+	report[cpu].atf_spm_suspend +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_LEAVE_SPM_SUSPEND] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_ENTER_SPM_SUSPEND]);
+	report[cpu].atf_gic_backup +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P2] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P1]);
+	report[cpu].atf_plat_backup +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P1] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_LEAVE_SPM_SUSPEND]);
+	report[cpu].atf_setup +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_BEFORE_L2_FLUSH] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_ENTER_ATF]) +
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_ENTER_SPM_SUSPEND] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_AFTER_L2_FLUSH]) +
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_BEFORE_WFI] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P2]);
+
+	report[cpu].atf_cpu_init +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P3] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_AFTER_WFI]);
+	report[cpu].atf_gic_restore +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P4] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P3]);
+	report[cpu].atf_spm_suspend_finish +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_LEAVE_SPM_SUSPEND_FINISH] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_ENTER_SPM_SUSPEND_FINISH]);
+	report[cpu].atf_plat_restore +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_ENTER_SPM_SUSPEND_FINISH] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_GIC_P4]);
+	report[cpu].atf_to_kernel +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_AFTER_ATF] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_LEAVE_SPM_SUSPEND_FINISH]);
+	report[cpu].kernel_plat_restore +=
+		(mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_LEAVE_CPUIDLE] -
+		mtk_cpuidle_timestamp[cpu][MTK_SUSPEND_TIMESTAMP_AFTER_ATF]);
+
+	if (report[cpu].count == 1000) {
+
+		pr_emerg("======== MTK_CPUIDLE Time Profiling Start ========\n");
+		pr_emerg(",CPU,%d,CPU Freq,%d\n", cpu, mt_cpufreq_get_cur_freq(cpu >> 2));
+
+		pr_emerg(",Kernel Platform Backup,%u\n", report[cpu].kernel_plat_backup / report[cpu].count);
+		pr_emerg(",Kernel to ATF,%u\n", report[cpu].kernel_to_atf / report[cpu].count);
+		pr_emerg(",ATF Setup,%u\n", report[cpu].atf_setup / report[cpu].count);
+		pr_emerg(",ATF L2 Flush,%u\n", report[cpu].atf_l2_flush / report[cpu].count);
+		pr_emerg(",ATF SPM Suspend,%u\n", report[cpu].atf_spm_suspend / report[cpu].count);
+		pr_emerg(",ATF GIC Backup,%u\n", report[cpu].atf_gic_backup / report[cpu].count);
+		pr_emerg(",ATF Platform Backup,%u\n", report[cpu].atf_plat_backup / report[cpu].count);
+
+		pr_emerg("ATF CPU Init,%u\n", report[cpu].atf_cpu_init / report[cpu].count);
+		pr_emerg("ATF GIC Restore,%u\n", report[cpu].atf_gic_restore / report[cpu].count);
+		pr_emerg("ATF SPM Suspend Finish,%u\n", report[cpu].atf_spm_suspend_finish / report[cpu].count);
+		pr_emerg("ATF Platform Restore,%u\n", report[cpu].atf_plat_restore / report[cpu].count);
+		pr_emerg("ATF to Kernel,%u\n", report[cpu].atf_to_kernel / report[cpu].count);
+		pr_emerg("Kernel Platform Restore,%u\n", report[cpu].kernel_plat_restore / report[cpu].count);
+		pr_emerg("======== MTK_CPUIDLE Time Profiling Done ========\n");
+
+		report[cpu].count = 0;
+		report[cpu].kernel_plat_backup = 0;
+		report[cpu].kernel_to_atf = 0;
+		report[cpu].atf_setup = 0;
+		report[cpu].atf_l2_flush = 0;
+		report[cpu].atf_plat_backup = 0;
+		report[cpu].atf_spm_suspend = 0;
+		report[cpu].atf_gic_backup = 0;
+		report[cpu].atf_cpu_init = 0;
+		report[cpu].atf_spm_suspend_finish = 0;
+		report[cpu].atf_gic_restore = 0;
+		report[cpu].atf_plat_restore = 0;
+		report[cpu].atf_to_kernel = 0;
+		report[cpu].kernel_plat_restore = 0;
+	}
 #endif
 }
 
@@ -127,62 +185,42 @@ static void mtk_cpuidle_ram_console_init(void)
 #endif
 }
 
-static const struct of_device_id kp_irq_match[] = {
-	{ .compatible = "mediatek,mt6757-keypad" },
-	{},
-};
-static const struct of_device_id consys_irq_match[] = {
-	{ .compatible = "mediatek,mt6757-consys" },
-	{},
-};
-static const struct of_device_id auxadc_irq_match[] = {
-	{ .compatible = "mediatek,mt6757-auxadc" },
-	{},
-};
-static const struct of_device_id mdcldma_irq_match[] = {
-	{ .compatible = "mediatek,mdcldma" },
-	{},
-};
-static const struct of_device_id ap2c2k_irq_match[] = {
-	{ .compatible = "mediatek,ap2c2k_ccif" },
-	{},
-};
-
-static u32 get_dts_node_irq_nr(const struct of_device_id *matches, int index)
+static u32 get_dts_node_irq_nr(const char *irq_match, int index)
 {
-	const struct of_device_id *matched_np;
 	struct device_node *node;
 	unsigned int irq_nr;
 
-	node = of_find_matching_node_and_match(NULL, matches, &matched_np);
+	node = of_find_compatible_node(NULL, NULL, irq_match);
 	if (!node)
-		pr_err("error: cannot find node [%s]\n", matches->compatible);
+		pr_err("error: cannot find node [%s]\n", irq_match);
 
 	irq_nr = irq_of_parse_and_map(node, index);
 	if (!irq_nr)
-		pr_err("error: cannot property_read [%s]\n", matches->compatible);
+		pr_err("error: cannot property_read [%s]\n", irq_match);
 
 	of_node_put(node);
-	pr_debug("compatible = %s, irq_nr = %u\n", matched_np->compatible, irq_nr);
+	pr_debug("compatible = %s, irq_nr = %u\n", irq_match, irq_nr);
 
 	return irq_nr;
 }
 
-static int mtk_cpuidle_dts_map(void)
+static void mtk_cpuidle_dts_map(void)
 {
-	kp_irq_nr = get_dts_node_irq_nr(kp_irq_match, 0);
-	conn_wdt_irq_nr = get_dts_node_irq_nr(consys_irq_match, 1);
-	lowbattery_irq_nr = get_dts_node_irq_nr(auxadc_irq_match, 0);
-	md1_wdt_irq_nr = get_dts_node_irq_nr(mdcldma_irq_match, 2);
-#ifdef CONFIG_MTK_MD3_SUPPORT
-#if CONFIG_MTK_MD3_SUPPORT /* Using this to check >0 */
-	c2k_wdt_irq_nr = get_dts_node_irq_nr(ap2c2k_irq_match, 1);
-#endif
-#endif
+	int i;
 
-	return 0;
+	for (i = 0; i < IRQ_NR_MAX; i++)
+		irq_nr[i] = get_dts_node_irq_nr(irq_match[i], irq_offset[i]);
 }
 
+static void mtk_switch_armpll(int cpu, int hw_mode)
+{
+	if (cpu < 4)
+		switch_armpll_ll_hwmode(hw_mode);
+	else if (cpu < 8)
+		switch_armpll_l_hwmode(hw_mode);
+}
+
+#if 0
 static void mtk_dbg_save_restore(int cpu, int save)
 {
 	unsigned int cpu_idle_sta;
@@ -200,18 +238,31 @@ static void mtk_dbg_save_restore(int cpu, int save)
 			mt_copy_dbg_regs(cpu, __builtin_ffs(~cpu_idle_sta) - 1);
 	}
 }
+#endif
+
+static void mtk_dbg_save_restore(int cpu, int save)
+{
+	if (save)
+		mt_save_dbg_regs(dbg_data, cpu);
+	else
+		mt_restore_dbg_regs(dbg_data, cpu);
+}
 
 static void mtk_platform_save_context(int cpu, int idx)
 {
+	mtk_switch_armpll(cpu, 1);
 	mtk_dbg_save_restore(cpu, 1);
+	dpm_mcsi_mtcmos_on_flow(0);
 }
 
 static void mtk_platform_restore_context(int cpu, int idx)
 {
-	if (idx > MTK_MCDI_MODE)
+	if (idx > MTK_MCDI_CLUSTER_MODE)
 		mtk_spm_wakeup_src_restore();
 
 	mtk_dbg_save_restore(cpu, 0);
+	mtk_switch_armpll(cpu, 0);
+	dpm_mcsi_mtcmos_on_flow(1);
 }
 
 int mtk_enter_idle_state(int idx)
@@ -223,48 +274,31 @@ int mtk_enter_idle_state(int idx)
 
 	cpu = smp_processor_id();
 
-	mtk_cpuidle_footprint_log(cpu, 0);
-	mtk_cpuidle_timestamp_log(cpu, 0);
+	mtk_cpuidle_footprint_log(cpu, MTK_SUSPEND_FOOTPRINT_ENTER_CPUIDLE);
+	mtk_cpuidle_timestamp_log(cpu, MTK_SUSPEND_TIMESTAMP_ENTER_CPUIDLE);
 	ret = cpu_pm_enter();
 	if (!ret) {
-		mtk_cpuidle_footprint_log(cpu, 1);
-
-		if (cpu < 4)
-			switch_armpll_ll_hwmode(1);
-		else if (cpu < 8)
-			switch_armpll_l_hwmode(1);
-
-		mtk_cpuidle_footprint_log(cpu, 2);
 		mtk_platform_save_context(cpu, idx);
 
-		mtk_cpuidle_footprint_log(cpu, 3);
-		mtk_cpuidle_timestamp_log(cpu, 1);
+		mtk_cpuidle_footprint_log(cpu, MTK_SUSPEND_FOOTPRINT_BEFORE_ATF);
+		mtk_cpuidle_timestamp_log(cpu, MTK_SUSPEND_TIMESTAMP_BEFORE_ATF);
 		/*
 		 * Pass idle state index to cpu_suspend which in turn will
 		 * call the CPU ops suspend protocol with idle index as a
 		 * parameter.
 		 */
 		ret = arm_cpuidle_suspend(idx);
-		mtk_cpuidle_timestamp_log(cpu, 14);
+		mtk_cpuidle_footprint_log(cpu, MTK_SUSPEND_FOOTPRINT_AFTER_ATF);
+		mtk_cpuidle_timestamp_log(cpu, MTK_SUSPEND_TIMESTAMP_AFTER_ATF);
 
-		mtk_cpuidle_footprint_log(cpu, 12);
 		mtk_platform_restore_context(cpu, idx);
-
-		mtk_cpuidle_footprint_log(cpu, 13);
-
-		if (cpu < 4)
-			switch_armpll_ll_hwmode(0);
-		else if (cpu < 8)
-			switch_armpll_l_hwmode(0);
-
-		mtk_cpuidle_footprint_log(cpu, 14);
 
 		cpu_pm_exit();
 
 		mtk_cpuidle_footprint_clr(cpu);
-		mtk_cpuidle_timestamp_log(cpu, 15);
+		mtk_cpuidle_timestamp_log(cpu, MTK_SUSPEND_TIMESTAMP_LEAVE_CPUIDLE);
 
-		mtk_cpuidle_timestamp_print(cpu);
+		mtk_cpuidle_timestamp_report(cpu);
 	}
 
 	return ret ? -1 : idx;
@@ -285,3 +319,4 @@ int mtk_cpuidle_init(void)
 
 	return 0;
 }
+

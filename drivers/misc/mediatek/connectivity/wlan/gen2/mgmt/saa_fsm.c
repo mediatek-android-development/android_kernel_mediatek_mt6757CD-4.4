@@ -215,7 +215,6 @@ saaFsmSteps(IN P_ADAPTER_T prAdapter,
 				} else {
 					prStaRec->ucTxAuthAssocRetryCount++;
 					prStaRec->ucAuthTranNum = AUTH_TRANSACTION_SEQ_3;
-
 #if !CFG_SUPPORT_AAA
 					if (authSendAuthFrame(prAdapter,
 						prStaRec, AUTH_TRANSACTION_SEQ_3) != WLAN_STATUS_SUCCESS) {
@@ -530,7 +529,8 @@ VOID saaFsmRunEventFTContinue(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr)
 		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_2);
 		saaFsmSteps(prAdapter, prStaRec, SAA_STATE_SEND_ASSOC1, (P_SW_RFB_T) NULL);
 	}
-}				/* end of saaFsmRunEventStart() */
+}
+
 /*----------------------------------------------------------------------------*/
 /*!
 * @brief This function will handle TxDone(Auth1/Auth3/AssocReq) Event of SAA FSM.
@@ -747,6 +747,13 @@ static BOOLEAN saaCheckOverLoadRN(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T pr
 {
 	static UINT_32 u4OverLoadRN;
 	P_BSS_INFO_T prAisBssInfo;
+	PARAM_SSID_T rSsid;
+	P_CONNECTION_SETTINGS_T prConnSettings;
+	P_AIS_FSM_INFO_T prAisFsmInfo;
+
+	kalMemZero(&rSsid, sizeof(PARAM_SSID_T));
+	prConnSettings = &(prAdapter->rWifiVar.rConnSettings);
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
 
 	prAisBssInfo = &(prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_AIS_INDEX]);
 
@@ -756,7 +763,16 @@ static BOOLEAN saaCheckOverLoadRN(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T pr
 			if (u4OverLoadRN < JOIN_MAX_RETRY_OVERLOAD_RN) {
 				P_BSS_DESC_T prBssDesc;
 
-				prBssDesc = scanSearchBssDescByBssid(prAdapter, prStaRec->aucMacAddr);
+				prBssDesc = prAisFsmInfo->prTargetBssDesc;
+				if (prBssDesc)
+					COPY_SSID(rSsid.aucSsid, rSsid.u4SsidLen,
+						prBssDesc->aucSSID, prBssDesc->ucSSIDLen);
+				else
+					COPY_SSID(rSsid.aucSsid, rSsid.u4SsidLen,
+						prConnSettings->aucSSID, prConnSettings->ucSSIDLen);
+
+				prBssDesc = scanSearchBssDescByBssidAndSsid(prAdapter,
+								prStaRec->aucMacAddr, TRUE, &rSsid);
 				if (prBssDesc) {
 					aisAddBlacklist(prAdapter, prBssDesc);
 					if (prBssDesc->prBlack)
@@ -821,7 +837,7 @@ VOID saaFsmRunEventRxAuth(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 				authProcessRxAuth2_Auth4Frame(prAdapter, prSwRfb);
 				prStaRec->ucAuthTranNum = AUTH_TRANSACTION_SEQ_2;
 				/* after received Auth2 for FT, should indicate to supplicant
-				 * and wait response from supplicant
+				* and wait response from supplicant
 				*/
 				if (prStaRec->ucAuthAlgNum == AUTH_ALGORITHM_NUM_FAST_BSS_TRANSITION)
 					eNextState = AA_STATE_IDLE;
@@ -877,6 +893,7 @@ VOID saaFsmRunEventRxAuth(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 					saaFsmSteps(prAdapter, prStaRec, AA_STATE_IDLE, (P_SW_RFB_T) NULL);
 					break;
 				}
+
 				/* Update Station Record - Class 2 Flag */
 				cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_2);
 
@@ -1057,8 +1074,12 @@ static VOID saaAutoReConnect(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRe
 {
 	OS_SYSTIME rCurrentTime;
 	P_CONNECTION_SETTINGS_T prConnSettings;
+	P_AIS_FSM_INFO_T prAisFsmInfo;
+	PARAM_SSID_T rSsid;
 
+	kalMemZero(&rSsid, sizeof(PARAM_SSID_T));
 	prConnSettings = &(prAdapter->rWifiVar.rConnSettings);
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
 	GET_CURRENT_SYSTIME(&rCurrentTime);
 
 	/*
@@ -1089,8 +1110,16 @@ static VOID saaAutoReConnect(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRe
 
 			prConnSettings->fgIsConnReqIssued = TRUE;
 			prConnSettings->fgIsDisconnectedByNonRequest = FALSE;
+			prAisBssInfo->u2DeauthReason = prStaRec->u2ReasonCode;
 
-			prBssDesc = scanSearchBssDescByBssid(prAdapter, prStaRec->aucMacAddr);
+			prBssDesc = prAisFsmInfo->prTargetBssDesc;
+			if (prBssDesc)
+				COPY_SSID(rSsid.aucSsid, rSsid.u4SsidLen, prBssDesc->aucSSID, prBssDesc->ucSSIDLen);
+			else
+				COPY_SSID(rSsid.aucSsid, rSsid.u4SsidLen,
+						prConnSettings->aucSSID, prConnSettings->ucSSIDLen);
+
+			prBssDesc = scanSearchBssDescByBssidAndSsid(prAdapter, prStaRec->aucMacAddr, TRUE, &rSsid);
 			if (prBssDesc) {
 				aisAddBlacklist(prAdapter, prBssDesc);
 				if (prStaRec->u2ReasonCode == REASON_CODE_DISASSOC_AP_OVERLOAD) {
@@ -1100,14 +1129,15 @@ static VOID saaAutoReConnect(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRe
 						prBlackList->u2DeauthReason = prStaRec->u2ReasonCode;
 				}
 				prBssDesc->fgDeauthLastTime = TRUE;
+				prBssDesc->fgIsConnected = FALSE;
 			} else
 				DBGLOG(SAA, INFO, "<drv> prBssDesc is NULL!\n");
 			aisFsmStateAbort(prAdapter, DISCONNECT_REASON_CODE_RADIO_LOST, TRUE);
 		} else if (!CHECK_FOR_TIMEOUT(rCurrentTime, prAisBssInfo->rConnTime,
-				  SEC_TO_SYSTIME(AIS_AUTORN_MIN_INTERVAL + 10))) {
+				  SEC_TO_SYSTIME(AIS_AUTORN_MIN_INTERVAL - 10))) {
 
 			DBGLOG(SAA, INFO, "<drv> AP deauth ok under reassoc 0x%x %x %x\n",
-				rCurrentTime, prAisBssInfo->rConnTime, SEC_TO_SYSTIME(AIS_AUTORN_MIN_INTERVAL + 10));
+				rCurrentTime, prAisBssInfo->rConnTime, SEC_TO_SYSTIME(AIS_AUTORN_MIN_INTERVAL - 10));
 
 			prAisBssInfo->fgDisConnReassoc = FALSE;
 			saaSendDisconnectMsgHandler(prAdapter, prStaRec, prAisBssInfo, eFrmType);
@@ -1137,7 +1167,8 @@ WLAN_STATUS saaFsmRunEventRxDeauth(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwR
 		return WLAN_STATUS_FAILURE;
 
 	prDeauthFrame = (P_WLAN_DEAUTH_FRAME_T) prSwRfb->pvHeader;
-	DBGLOG(SAA, INFO, "Rx Deauth frame from BSSID=[ %pM ].\n", prDeauthFrame->aucBSSID);
+	DBGLOG(SAA, INFO, "Rx Deauth frame from BSSID=[ %pM ], reason: %d.\n",
+		prDeauthFrame->aucBSSID, prDeauthFrame->u2ReasonCode);
 
 	do {
 		if (IS_STA_IN_AIS(prStaRec)) {

@@ -391,50 +391,45 @@ int iommu_group_add_device(struct iommu_group *group, struct device *dev)
 	device->dev = dev;
 
 	ret = sysfs_create_link(&dev->kobj, &group->kobj, "iommu_group");
-	if (ret) {
-		kfree(device);
-		return ret;
-	}
+	if (ret)
+		goto err_free_device;
 
 	device->name = kasprintf(GFP_KERNEL, "%s", kobject_name(&dev->kobj));
 rename:
 	if (!device->name) {
-		sysfs_remove_link(&dev->kobj, "iommu_group");
-		kfree(device);
-		return -ENOMEM;
+		ret = -ENOMEM;
+		goto err_remove_link;
 	}
 
 	ret = sysfs_create_link_nowarn(group->devices_kobj,
 				       &dev->kobj, device->name);
 	if (ret) {
-		kfree(device->name);
 		if (ret == -EEXIST && i >= 0) {
 			/*
 			 * Account for the slim chance of collision
 			 * and append an instance to the name.
 			 */
+			kfree(device->name);
 			device->name = kasprintf(GFP_KERNEL, "%s.%d",
 						 kobject_name(&dev->kobj), i++);
 			goto rename;
 		}
-
-		sysfs_remove_link(&dev->kobj, "iommu_group");
-		kfree(device);
-		return ret;
+		goto err_free_name;
 	}
 
 	kobject_get(group->devices_kobj);
 
 	dev->iommu_group = group;
 
-	iommu_group_create_direct_mappings(group, dev);
-
 	mutex_lock(&group->mutex);
 	list_add_tail(&device->list, &group->devices);
 	if (group->domain)
-		__iommu_attach_device(group->domain, dev);
+		ret = __iommu_attach_device(group->domain, dev);
 	mutex_unlock(&group->mutex);
+	if (ret)
+		goto err_put_group;
 
+	iommu_group_create_direct_mappings(group, dev);
 	/* Notify any listeners about change to group. */
 	blocking_notifier_call_chain(&group->notifier,
 				     IOMMU_GROUP_NOTIFY_ADD_DEVICE, dev);
@@ -444,6 +439,21 @@ rename:
 	pr_info("Adding device %s to group %d\n", dev_name(dev), group->id);
 
 	return 0;
+
+err_put_group:
+	mutex_lock(&group->mutex);
+	list_del(&device->list);
+	mutex_unlock(&group->mutex);
+	dev->iommu_group = NULL;
+	kobject_put(group->devices_kobj);
+err_free_name:
+	kfree(device->name);
+err_remove_link:
+	sysfs_remove_link(&dev->kobj, "iommu_group");
+err_free_device:
+	kfree(device);
+	pr_err("Failed to add device %s to group %d: %d\n", dev_name(dev), group->id, ret);
+	return ret;
 }
 EXPORT_SYMBOL_GPL(iommu_group_add_device);
 
@@ -1432,7 +1442,15 @@ size_t default_iommu_map_sg(struct iommu_domain *domain, unsigned long iova,
 	min_pagesz = 1 << __ffs(domain->ops->pgsize_bitmap);
 
 	for_each_sg(sg, s, nents, i) {
-		phys_addr_t phys = page_to_phys(sg_page(s)) + s->offset;
+		phys_addr_t phys;
+
+		if (!sg_dma_address(s)) {
+			phys = page_to_phys(sg_page(s)) + s->offset;
+		} else {
+			/* this is for which sg do not have page struct */
+			phys = sg_dma_address(s);
+			s->length = sg_dma_len(s);
+		}
 
 		/*
 		 * We are mapping on IOMMU page boundaries, so offset within

@@ -6,6 +6,7 @@
 #include <linux/bio.h>
 #include <linux/blkdev.h>
 #include <linux/scatterlist.h>
+#include <mt-plat/mtk_blocktag.h>
 
 #include "blk.h"
 
@@ -92,8 +93,30 @@ static struct bio *blk_bio_segment_split(struct request_queue *q,
 	bool do_split = true;
 	struct bio *new = NULL;
 	const unsigned max_sectors = get_max_io_size(q, bio);
+	unsigned bvecs = 0;
 
 	bio_for_each_segment(bv, bio, iter) {
+		/*
+		 * With arbitrary bio size, the incoming bio may be very
+		 * big. We have to split the bio into small bios so that
+		 * each holds at most BIO_MAX_PAGES bvecs because
+		 * bio_clone() can fail to allocate big bvecs.
+		 *
+		 * It should have been better to apply the limit per
+		 * request queue in which bio_clone() is involved,
+		 * instead of globally. The biggest blocker is the
+		 * bio_clone() in bio bounce.
+		 *
+		 * If bio is splitted by this reason, we should have
+		 * allowed to continue bios merging, but don't do
+		 * that now for making the change simple.
+		 *
+		 * TODO: deal with bio bounce's bio_clone() gracefully
+		 * and convert the global limit into per-queue limit.
+		 */
+		if (bvecs++ >= BIO_MAX_PAGES)
+			goto split;
+
 		/*
 		 * If the queue doesn't support SG gaps and adding this
 		 * offset would create a gap, disallow it.
@@ -413,7 +436,7 @@ single_segment:
 		bio_for_each_segment(bvec, bio, iter) {
 			__blk_segment_map_sg(q, &bvec, sglist, &bvprv, sg,
 					     &nsegs, &cluster);
-			mt_pidlog_map_sg(&bvec, (bio->bi_rw & REQ_WRITE)?1:0);
+			mtk_btag_pidlog_map_sg(q, bio, &bvec);
 		}
 
 	return nsegs;

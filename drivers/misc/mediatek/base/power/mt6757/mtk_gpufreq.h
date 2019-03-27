@@ -22,6 +22,10 @@
 #define DIV4_MAX_FREQ	(MAX_VCO_VALUE / (POST_DIV4 << 2))
 #define DIV4_MIN_FREQ	(MIN_VCO_VALUE / (POST_DIV4 << 2))
 
+/* For MT6757, we can't power off GPU since HW limitation */
+/* And this will cause power budge issue, so we add an extra para to support skipping PBM operation */
+#define GPUFREQ_ENABLE_KICK_PBM
+
 enum post_div_enum {
 	POST_DIV2 = 0,
 	POST_DIV4,
@@ -46,7 +50,7 @@ struct mt_gpufreq_clk_t {
 	struct clk *clk_sub_parent;	 /* substitution clock for mfg transient parent setting */
 };
 struct mt_gpufreq_pmic_t {
-	struct regulator *reg_vgpu;		/* vgpu regulator */
+	struct regulator *reg_vgpu;	/* vgpu regulator */
 	struct regulator *reg_vsram;	/* vgpu sram regulator */
 };
 /*****************

@@ -11,11 +11,11 @@
  */
 
 / {
-	rt5081_pmu_dts {
+	rt5081_pmu: rt5081_pmu_dts {
 		interrupt-controller;
 		#interrupt-cells = <1>;
-		rt,intr_gpio_num = <101>; /* direct defined GPIO num */
-		rt,intr_gpio = <&pio 101 0x0>; /* GPIO */
+		rt,intr_gpio_num = <3>; /* direct defined GPIO num */
+		rt,intr_gpio = <&pio 3 0x0>; /* GPIO */
 		core {
 			compatible = "richtek,rt5081_pmu_core";
 			interrupt-names = "otp", "vdda_ovp", "vdda_uv";
@@ -29,10 +29,9 @@
 		};
 		charger {
 			compatible = "richtek,rt5081_pmu_charger";
-			interrupt-names = "adc_donei", "chg_mivr",
-				"chg_aiclmeasi", "pumpx_donei", "attachi",
+			interrupt-names = "chg_mivr", "chg_aiclmeasi", "attachi",
 				"ovpctrl_uvp_d_evt", "chg_wdtmri", "chg_vbusov",
-				"chg_ieoci", "chg_tmri", "chg_rechgi", "chg_treg";
+				"chg_tmri", "chg_treg";
 			charger_name = "primary_chg";
 			load_switch_name = "primary_load_switch";
 			ichg = <2000000>;	/* uA */

@@ -210,7 +210,8 @@
 #define RATE_SET_BIT_36M        BIT(RATE_36M_SW_INDEX)	/* Bit 11: 36M */
 #define RATE_SET_BIT_48M        BIT(RATE_48M_SW_INDEX)	/* Bit 12: 48M */
 #define RATE_SET_BIT_54M        BIT(RATE_54M_SW_INDEX)	/* Bit 13: 54M */
-#define RATE_SET_BIT_HT_PHY     BIT(RATE_HT_PHY_SW_INDEX)	/* Bit 14: BSS Selector */
+#define RATE_SET_BIT_VHT_PHY    BIT(RATE_VHT_PHY_SW_INDEX)	/* Bit 14: BSS Selector */
+#define RATE_SET_BIT_HT_PHY     BIT(RATE_HT_PHY_SW_INDEX)	/* Bit 15: BSS Selector */
 
 /* Rate set definitions */
 #define RATE_SET_HR_DSSS            (RATE_SET_BIT_1M | \
@@ -438,8 +439,9 @@ typedef enum _ENUM_SW_RATE_INDEX_T {
 	RATE_36M_SW_INDEX,	/* 36M */
 	RATE_48M_SW_INDEX,	/* 48M */
 	RATE_54M_SW_INDEX,	/* 54M */
+	RATE_VHT_PHY_SW_INDEX,	/* BSS Selector - VHT PHY */
 	RATE_HT_PHY_SW_INDEX,	/* BSS Selector - HT PHY */
-	RATE_NUM_SW		/* 15 */
+	RATE_NUM_SW		/* 16 */
 } ENUM_SW_RATE_INDEX_T, *P_ENUM_SW_RATE_INDEX_T;
 
 typedef enum _ENUM_CCK_RATE_INDEX_T {
@@ -584,12 +586,14 @@ typedef enum _ENUM_AR_SS_T {
 	AR_SS_4,
 	AR_SS_NUM
 } ENUM_AR_SS_T, P_ENUM_AR_SS_T;
+
 typedef enum _ENUM_MAC_BANDWIDTH_T {
 	MAC_BW_20 = 0,
 	MAC_BW_40,
 	MAC_BW_80,
 	MAC_BW_160
 } ENUM_MAC_BANDWIDTH_T, *P_ENUM_MAC_BANDWIDTH_T;
+
 typedef struct _DEAUTH_INFO_T {
 	UINT_8 aucRxAddr[MAC_ADDR_LEN];
 	OS_SYSTIME rLastSendTime;
@@ -843,6 +847,12 @@ typedef struct _P2P_DEVICE_DESC_T {
 		PUINT_8 __cp = (PUINT_8)(_memAddr_p); \
 		*(PUINT_32)(_value_p) = ((UINT_32)__cp[0]) | ((UINT_32)__cp[1] << 8) | \
 					((UINT_32)__cp[2] << 16) | ((UINT_32)__cp[3] << 24); \
+	}
+
+#define WLAN_GET_FIELD_BE24(_memAddr_p, _value_p) \
+	{ \
+		PUINT_8 __cp = (PUINT_8)(_memAddr_p); \
+		*(PUINT_32)(_value_p) = ((UINT_8)__cp[0] << 16) | ((UINT_8)__cp[1] << 8) | ((UINT_8)__cp[2]); \
 	}
 
 #define WLAN_GET_FIELD_BE32(_memAddr_p, _value_p) \

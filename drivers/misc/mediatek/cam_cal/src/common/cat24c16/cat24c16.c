@@ -78,6 +78,9 @@ static DEFINE_SPINLOCK(g_CAM_CALLock);/*for SMP*/
 /*******************************************************************************
 *
 ********************************************************************************/
+#define I2C_WR_FLAG	(0x1000)
+#define I2C_MASK_FLAG	(0x00ff)
+#define I2C_DMA_FLAG    (0xdead2000)
 
 static struct i2c_client *g_pstI2Cclient;
 static int selective_read_region(u32 addr, u8 *data, u16 i2c_id, u32 size);
@@ -243,8 +246,8 @@ unsigned int cat24c16_selective_read_region(struct i2c_client *client, unsigned 
 #ifdef CAT24C16_DRIVER_ON
 #ifdef CONFIG_COMPAT
 static int compat_put_cal_info_struct(
-	COMPAT_stCAM_CAL_INFO_STRUCT __user *data32,
-	stCAM_CAL_INFO_STRUCT __user *data)
+	struct COMPAT_stCAM_CAL_INFO_STRUCT __user *data32,
+	struct stCAM_CAL_INFO_STRUCT __user *data)
 {
 	compat_uptr_t p;
 	compat_uint_t i;
@@ -262,8 +265,8 @@ static int compat_put_cal_info_struct(
 	return err;
 }
 static int compat_get_cal_info_struct(
-	COMPAT_stCAM_CAL_INFO_STRUCT __user *data32,
-	stCAM_CAL_INFO_STRUCT __user *data)
+	struct COMPAT_stCAM_CAL_INFO_STRUCT __user *data32,
+	struct stCAM_CAL_INFO_STRUCT __user *data)
 {
 	compat_uptr_t p;
 	compat_uint_t i;
@@ -282,8 +285,8 @@ static int compat_get_cal_info_struct(
 static long cat24c16_Ioctl_Compat(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	long ret = 0, err = 0;
-	COMPAT_stCAM_CAL_INFO_STRUCT __user *data32 = NULL;
-	stCAM_CAL_INFO_STRUCT __user *data = NULL;
+	struct COMPAT_stCAM_CAL_INFO_STRUCT *data32 = NULL;
+	struct stCAM_CAL_INFO_STRUCT __user *data = NULL;
 
 	CAM_CALDB("[CAMERA SENSOR] cat24c16_Ioctl_Compat,%p %p %x ioc size %d\n",
 	filp->f_op, filp->f_op->unlocked_ioctl, cmd, _IOC_SIZE(cmd));
@@ -340,7 +343,7 @@ static long CAM_CAL_Ioctl(
 	int i4RetValue = 0;
 	u8 *pBuff = NULL;
 	u8 *pu1Params = NULL;
-	stCAM_CAL_INFO_STRUCT *ptempbuf = NULL;
+	struct stCAM_CAL_INFO_STRUCT *ptempbuf = NULL;
 
 	CAM_CALDB("[S24CAM_CAL] ioctl\n");
 
@@ -350,7 +353,7 @@ static long CAM_CAL_Ioctl(
 #endif
 
 	if (_IOC_DIR(a_u4Command) != _IOC_NONE) {
-		pBuff = kmalloc(sizeof(stCAM_CAL_INFO_STRUCT), GFP_KERNEL);
+		pBuff = kmalloc(sizeof(struct stCAM_CAL_INFO_STRUCT), GFP_KERNEL);
 
 		if (pBuff == NULL) {
 			CAM_CALDB(" ioctl allocate mem failed\n");
@@ -358,7 +361,7 @@ static long CAM_CAL_Ioctl(
 		}
 
 		if (_IOC_WRITE & _IOC_DIR(a_u4Command)) {
-			if (copy_from_user((u8 *) pBuff, (u8 *) a_u4Param, sizeof(stCAM_CAL_INFO_STRUCT))) {
+			if (copy_from_user((u8 *) pBuff, (u8 *) a_u4Param, sizeof(struct stCAM_CAL_INFO_STRUCT))) {
 				/* get input structure address */
 				kfree(pBuff);
 				CAM_CALDB("[S24CAM_CAL] ioctl copy from user failed\n");
@@ -367,7 +370,7 @@ static long CAM_CAL_Ioctl(
 		}
 	}
 
-	ptempbuf = (stCAM_CAL_INFO_STRUCT *)pBuff;
+	ptempbuf = (struct stCAM_CAL_INFO_STRUCT *)pBuff;
 	pu1Params = kmalloc(ptempbuf->u4Length, GFP_KERNEL);
 	if (pu1Params == NULL) {
 		kfree(pBuff);

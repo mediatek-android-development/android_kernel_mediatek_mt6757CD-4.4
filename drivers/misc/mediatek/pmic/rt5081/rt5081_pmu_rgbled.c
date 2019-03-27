@@ -50,29 +50,20 @@ struct rt5081_pmu_rgbled_data {
 	.store = rt_led_##_name##_attr_store,\
 }
 
-#define RT_LED_CONFIG_ATTR(_name) {\
-	.attr = {\
-		.name = #_name,\
-		.mode = 0666,\
-	},\
-	.show = rt_led_##_name##_attr_show,\
-	.store = rt_led_##_name##_attr_store,\
-}
-
 static const uint8_t rgbled_init_data[] = {
-	0x6A, /* RT5081_PMU_REG_RGB1DIM: 0x82 [yanlin] changed from 0x60, N=10 */
-	0x71, /* RT5081_PMU_REG_RGB2DIM: 0x83 [yanlin] changed from 0x60, N=17 */
+	0x60, /* RT5081_PMU_REG_RGB1DIM: 0x82 */
+	0x60, /* RT5081_PMU_REG_RGB2DIM: 0x83 */
 	0x60, /* RT5081_PMU_REG_RGB3DIM: 0x84 */
 	0x0f, /* RT5081_PMU_REG_RGBEN: 0x85 */
-	0x38, /* RT5081_PMU_REG_RGB1ISINK: 0x86 [yanlin] changed from 0x08 */
-	0x38, /* RT5081_PMU_REG_RGB2ISINK: 0x87 [yanlin] changed from 0x08 */
-	0x38, /* RT5081_PMU_REG_RGB3ISINK: 0x88 [yanlin] changed from 0x08 */
-	0x13, /* RT5081_PMU_REG_RGB1TR: 0x89 [yanlin] changed from 0x52 */
-	0x31, /* RT5081_PMU_REG_RGB1TF: 0x8A [yanlin] changed from 0x25 */
-	0x12, /* RT5081_PMU_REG_RGB1TONTOFF: 0x8B [yanlin] changed from 0x11 */
-	0x13, /* RT5081_PMU_REG_RGB2TR: 0x8C [yanlin] changed from 0x52 */
-	0x31, /* RT5081_PMU_REG_RGB2TF: 0x8D [yanlin] changed from 0x25 */
-	0x12, /* RT5081_PMU_REG_RGB2TONTOFF: 0x8E [yanlin] changed from 0x11 */
+	0x08, /* RT5081_PMU_REG_RGB1ISINK: 0x86 */
+	0x08, /* RT5081_PMU_REG_RGB2ISINK: 0x87 */
+	0x08, /* RT5081_PMU_REG_RGB3ISINK: 0x88 */
+	0x52, /* RT5081_PMU_REG_RGB1TR: 0x89 */
+	0x25, /* RT5081_PMU_REG_RGB1TF: 0x8A */
+	0x11, /* RT5081_PMU_REG_RGB1TONTOFF: 0x8B */
+	0x52, /* RT5081_PMU_REG_RGB2TR: 0x8C */
+	0x25, /* RT5081_PMU_REG_RGB2TF: 0x8D */
+	0x11, /* RT5081_PMU_REG_RGB2TONTOFF: 0x8E */
 	0x52, /* RT5081_PMU_REG_RGB3TR: 0x8F */
 	0x25, /* RT5081_PMU_REG_RGB3TF: 0x90 */
 	0x11, /* RT5081_PMU_REG_RGB3TONTOFF: 0x91 */
@@ -682,8 +673,8 @@ static ssize_t rt_led_pwm_dim_freq_attr_store(struct device *dev,
 }
 
 static const struct device_attribute rt_led_pwm_mode_attrs[] = {
-	RT_LED_CONFIG_ATTR(pwm_duty),
-	RT_LED_CONFIG_ATTR(pwm_dim_freq),
+	RT_LED_ATTR(pwm_duty),
+	RT_LED_ATTR(pwm_dim_freq),
 };
 static void rt5081_pmu_led_pwm_activate(struct led_classdev *led_cdev)
 {

@@ -354,6 +354,9 @@ static int raw_send_hdrinc(struct sock *sk, struct flowi4 *fl4,
 			       rt->dst.dev->mtu);
 		return -EMSGSIZE;
 	}
+	if (length < sizeof(struct iphdr))
+		return -EINVAL;
+
 	if (flags&MSG_PROBE)
 		goto out;
 
@@ -497,16 +500,11 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	int err;
 	struct ip_options_data opt_copy;
 	struct raw_frag_vec rfv;
-	int hdrincl;
 
 	err = -EMSGSIZE;
 	if (len > 0xFFFF)
 		goto out;
 
-	/* hdrincl should be READ_ONCE(inet->hdrincl)
-	 * but READ_ONCE() doesn't work with bit fields
-	 */
-	hdrincl = inet->hdrincl;
 	/*
 	 *	Check the flags.
 	 */
@@ -581,7 +579,7 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		/* Linux does not mangle headers on raw sockets,
 		 * so that IP options + IP_HDRINCL is non-sense.
 		 */
-		if (hdrincl)
+		if (inet->hdrincl)
 			goto done;
 		if (ipc.opt->opt.srr) {
 			if (!daddr)
@@ -603,11 +601,10 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 
 	flowi4_init_output(&fl4, ipc.oif, sk->sk_mark, tos,
 			   RT_SCOPE_UNIVERSE,
-			   hdrincl ? IPPROTO_RAW : sk->sk_protocol,
+			   inet->hdrincl ? IPPROTO_RAW : sk->sk_protocol,
 			   inet_sk_flowi_flags(sk) |
-			    (hdrincl ? FLOWI_FLAG_KNOWN_NH : 0),
-			   daddr, saddr, 0, 0, sock_i_uid(sk));
-
+			    (inet->hdrincl ? FLOWI_FLAG_KNOWN_NH : 0),
+			   daddr, saddr, 0, 0, sk->sk_uid);
 
 	if (!saddr && ipc.oif) {
 		err = l3mdev_get_saddr(net, ipc.oif, &fl4);
@@ -615,7 +612,7 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 			goto done;
 	}
 
-	if (!hdrincl) {
+	if (!inet->hdrincl) {
 		rfv.msg = msg;
 		rfv.hlen = 0;
 
@@ -640,7 +637,7 @@ static int raw_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		goto do_confirm;
 back_from_confirm:
 
-	if (hdrincl)
+	if (inet->hdrincl)
 		err = raw_send_hdrinc(sk, &fl4, msg, len,
 				      &rt, msg->msg_flags);
 

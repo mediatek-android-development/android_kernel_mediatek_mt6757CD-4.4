@@ -1,15 +1,15 @@
 /*
- * Copyright (C) 2015 MediaTek Inc.
- *
- * This program is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- * GNU General Public License for more details.
- */
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
 
 #include <linux/skbuff.h>
 #include <linux/wait.h>
@@ -73,6 +73,7 @@ static int my_wp_handler(phys_addr_t addr)
 #endif
 	return 0;
 }
+
 #if 0
 static void disable_watchpoint(void)
 {
@@ -82,6 +83,7 @@ static void disable_watchpoint(void)
 	}
 }
 #endif
+
 static void enable_watchpoint(void *address)
 {
 	int wp_err;
@@ -120,6 +122,7 @@ static int is_in_ccci_skb_pool(struct sk_buff *skb)
 	}
 	return 0;
 }
+
 static int ccci_skb_addr_checker(struct sk_buff *skb)
 {
 	unsigned long skb_addr_value;
@@ -145,6 +148,7 @@ static int ccci_skb_addr_checker(struct sk_buff *skb)
 	}
 	return 0;
 }
+
 void ccci_magic_checker(void)
 {
 	if (skb_pool_16.magic_header != SKB_MAGIC_HEADER || skb_pool_16.magic_footer != SKB_MAGIC_FOOTER) {
@@ -203,9 +207,9 @@ void ccci_print_back_trace(struct ccci_stack_trace *trace)
 	}
 }
 
-
 static unsigned int backtrace_idx;
 static struct ccci_stack_trace backtrace_history[CCCI_TRACK_HISTORY_COUNT];
+
 static void ccci_add_bt_hisory(void *ptr)
 {
 	ccci_get_back_trace(ptr, &backtrace_history[backtrace_idx]);
@@ -213,6 +217,7 @@ static void ccci_add_bt_hisory(void *ptr)
 	if (backtrace_idx == CCCI_TRACK_HISTORY_COUNT)
 		backtrace_idx = 0;
 }
+
 static void ccci_print_bt_history(char *info)
 {
 	int i, k;
@@ -364,7 +369,6 @@ struct sk_buff *ccci_alloc_skb(int size, unsigned char from_pool, unsigned char 
 
 	return skb;
 }
-EXPORT_SYMBOL(ccci_alloc_skb);
 
 void ccci_free_skb(struct sk_buff *skb)
 {
@@ -411,7 +415,6 @@ void ccci_free_skb(struct sk_buff *skb)
 		break;
 	};
 }
-EXPORT_SYMBOL(ccci_free_skb);
 
 void ccci_dump_skb_pool_usage(int md_id)
 {
@@ -509,7 +512,6 @@ void ccci_mem_dump(int md_id, void *start_addr, int len)
 		       i * 16, *curr_p, *(curr_p + 1), *(curr_p + 2), *(curr_p + 3));
 	}
 }
-EXPORT_SYMBOL(ccci_mem_dump);
 
 void ccci_cmpt_mem_dump(int md_id, void *start_addr, int len)
 {
@@ -558,7 +560,6 @@ void ccci_cmpt_mem_dump(int md_id, void *start_addr, int len)
 		       *(curr_p + 12), *(curr_p + 13), *(curr_p + 14), *(curr_p + 15));
 	}
 }
-EXPORT_SYMBOL(ccci_cmpt_mem_dump);
 
 void ccci_dump_skb(struct sk_buff *skb)
 {

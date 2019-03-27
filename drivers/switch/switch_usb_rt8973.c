@@ -38,9 +38,8 @@
 
 #define RT8973_REG_MANUAL_SW	0X13
 
-#define RT8973_REGVAL_SW_CHG	0x6C
+#define RT8973_REGVAL_SW_CHG	0x6c
 #define RT8973_REGVAL_SW_USB	0x24
-#define RT8973_REGMASK_SW	0xFC
 
 #define RT8973_REGVAL_DEV_TYPE_SDP	(1 << 2)
 #define RT8973_REGVAL_DEV_TYPE_CDP	(1 << 5)
@@ -48,7 +47,7 @@
 struct rt8973_usb_switch_data {
 	struct switch_dev sdev;
 	struct i2c_client *iic;
-	struct device *dev;
+
 };
 
 static const char *const usb_states[] = {
@@ -81,27 +80,8 @@ static int rt8973_usb_switch_set_state(struct switch_dev *sdev, int state)
 
 	WARN_ON(state >= ARRAY_SIZE(usb_state_regvals));
 
-	dev_info(switch_data->dev, "%s: state = %d\n", __func__, state);
-
 	return i2c_smbus_write_byte_data(switch_data->iic,
 		RT8973_REG_MANUAL_SW, usb_state_regvals[state]);
-}
-
-static int rt8973_usb_switch_get_state(struct switch_dev *sdev, int *state)
-{
-	int ret = 0;
-	struct rt8973_usb_switch_data	*switch_data =
-		container_of(sdev, struct rt8973_usb_switch_data, sdev);
-
-	ret = i2c_smbus_read_byte_data(switch_data->iic, RT8973_REG_MANUAL_SW);
-	if (ret < 0)
-		return ret;
-	ret &= RT8973_REGMASK_SW;
-
-	*state = (ret == RT8973_REGVAL_SW_CHG) ? 0 : 1;
-	dev_info(switch_data->dev, "%s: state = %d\n", __func__, *state);
-
-	return 0;
 }
 
 static int rt8973_usb_switch_parse_dt(struct rt8973_usb_switch_data *switch_data)
@@ -122,27 +102,24 @@ static int rt8973_usb_switch_parse_dt(struct rt8973_usb_switch_data *switch_data
 static int rt8973_usb_switch_init(struct rt8973_usb_switch_data *switch_data)
 {
 	int ret;
-	bool is_stp_or_cdp = false;
+	bool is_std_or_cdp = false;
 
 	ret = i2c_smbus_read_byte_data(switch_data->iic, RT8973_REG_DEV_TYPE);
 	if (ret < 0)
 		return ret;
 
 	if (ret & (RT8973_REGVAL_DEV_TYPE_CDP | RT8973_REGVAL_DEV_TYPE_SDP)) {
-		is_stp_or_cdp = true;
-		dev_info(switch_data->dev, "%s: stp or dcp\n", __func__);
-	} else {
-		is_stp_or_cdp = false;
-		dev_info(switch_data->dev, "%s: others\n", __func__);
-	}
+		is_std_or_cdp = true;
+		switch_data->sdev.state = 1;
+	} else
+		is_std_or_cdp = false;
 
 	ret = i2c_smbus_write_byte_data(switch_data->iic, RT8973_REG_MANUAL_SW,
-		usb_state_regvals[is_stp_or_cdp ? 1 : 0]);
+		usb_state_regvals[is_std_or_cdp ? 1 : 0]);
 	if (ret < 0)
 		return ret;
 	ret = i2c_smbus_write_byte_data(switch_data->iic, RT8973_REG_CTRL,
 		RT8973_REGVAL_MANUAL_CTRL);
-	dev_info(switch_data->dev, "%s: init done\n", __func__);
 	return ret;
 }
 
@@ -157,10 +134,8 @@ static int rt8973_usbsw_probe(struct i2c_client *client,
 		return -ENOMEM;
 	switch_data->sdev.name = "usb_switch";
 	switch_data->sdev.set_state = rt8973_usb_switch_set_state;
-	switch_data->sdev.get_state = rt8973_usb_switch_get_state;
 	switch_data->sdev.print_state = rt8973_usb_switch_print_state;
 	switch_data->iic = client;
-	switch_data->dev = &client->dev;
 	i2c_set_clientdata(client, switch_data);
 	rt8973_usb_switch_parse_dt(switch_data);
 	ret = rt8973_usb_switch_init(switch_data);
@@ -171,7 +146,6 @@ static int rt8973_usbsw_probe(struct i2c_client *client,
 	if (ret < 0)
 		goto err_switch_dev_register;
 
-	dev_info(switch_data->dev, "%s\n", __func__);
 	return 0;
 err_switch_dev_register:
 	i2c_smbus_write_byte_data(client, 0x1b, 0x01);

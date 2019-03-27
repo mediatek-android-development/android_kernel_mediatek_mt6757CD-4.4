@@ -1,7 +1,0 @@
-#
-# Synaptics DSX touchscreen driver configuration
-#
-if TOUCHSCREEN_MTK_SYNAPTICS
-
-
-endif

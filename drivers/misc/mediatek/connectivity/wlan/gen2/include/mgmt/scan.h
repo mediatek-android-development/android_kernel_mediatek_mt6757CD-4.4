@@ -226,6 +226,10 @@ struct _BSS_DESC_T {
 	BOOLEAN fgIEWPA;
 	BOOLEAN fgIEOsen;
 
+#if CFG_SUPPORT_DETECT_ATHEROS_AP
+	BOOLEAN fgIsAtherosAP;
+#endif
+
 	/*! \brief RSN parameters selected for connection */
 	/*
 	 * ! \brief The Select score for final AP selection,
@@ -263,12 +267,11 @@ struct _BSS_DESC_T {
 	ULARGE_INTEGER u8TimeStamp;	/* Place u8TimeStamp before aucIEBuf[1] to force DW align */
 	UINT_8 aucRawBuf[CFG_RAW_BUFFER_SIZE];
 	UINT_8 aucIEBuf[CFG_IE_BUFFER_SIZE];
-
+	UINT_8 ucJoinFailureCount;
 	OS_SYSTIME rJoinFailTime;
 	struct AIS_BLACKLIST_ITEM *prBlack;
 	UINT_16 u2StaCnt;
 	UINT_16 u2AvaliableAC; /* Available Admission Capacity */
-	UINT_8 ucJoinFailureCount;
 	UINT_8 ucChnlUtilization;
 	UINT_8 ucSNR;
 	BOOLEAN fgSeenProbeResp;
@@ -276,11 +279,13 @@ struct _BSS_DESC_T {
 	BOOLEAN fgMultiAnttenaAndSTBC;
 	BOOLEAN fgDeauthLastTime;
 	UINT_32 u4UpdateIdx;
-	INT_8 cPowerLimit;
 #if CFG_SUPPORT_ROAMING_RETRY
 	BOOLEAN fgIsRoamFail;
 #endif
-
+	INT_8 cPowerLimit;
+#if CFG_SUPPORT_RSN_SCORE
+	BOOLEAN fgIsRSNSuitableBss;
+#endif
 };
 
 struct _ROAM_BSS_DESC_T {
@@ -352,6 +357,13 @@ typedef struct _NLO_PARAM_T {	/* Used by SCAN FSM */
 	UINT_8 ucMatchSSIDNum;
 	UINT_8 ucMatchSSIDLen[SCN_SSID_MATCH_MAX_NUM];
 	UINT_8 aucMatchSSID[SCN_SSID_MATCH_MAX_NUM][ELEM_MAX_LEN_SSID];
+
+#if CFG_SUPPORT_SCHED_SCN_SSID_SETS
+	/* SSID set*/
+	UINT_8 ucSSIDNum;
+	UINT_8 ucSSIDLen[CFG_SCAN_HIDDEN_SSID_MAX_NUM];
+	UINT_8 aucSSID[CFG_SCAN_HIDDEN_SSID_MAX_NUM][ELEM_MAX_LEN_SSID];
+#endif
 
 	UINT_8 aucCipherAlgo[SCN_SSID_MATCH_MAX_NUM];
 	UINT_16 au2AuthAlgo[SCN_SSID_MATCH_MAX_NUM];
@@ -519,11 +531,11 @@ typedef struct _MSG_SCN_SCAN_REQ_T {
 	UINT_8 ucSSIDLength;
 	UINT_8 aucSSID[PARAM_MAX_LEN_SSID];
 	UINT_16 u2ChannelDwellTime;	/* In TU. 1024us. */
-#if CFG_MULTI_SSID_SCAN
-	UINT_16 u2TimeoutValue; /* ms unit */
-#endif
+
+	UINT_16 u2TimeoutValue; /* ms unit */ /* MULTI SSID */
 	UINT_16 u2MinChannelDwellTime;	/* In TU. 1024us. */
 	UINT_8 aucBSSID[MAC_ADDR_LEN];
+
 	ENUM_SCAN_CHANNEL eScanChannel;
 	UINT_8 ucChannelListNum;
 	RF_CHANNEL_INFO_T arChnlInfoList[MAXIMUM_OPERATION_CHANNEL_LIST];
@@ -627,6 +639,9 @@ struct RM_BEACON_REPORT_PARAMS {
 
 struct RM_MEASURE_REPORT_ENTRY {
 	LINK_ENTRY_T rLinkEntry;
+	/* should greater than sizeof(struct RM_BCN_REPORT) +
+	** sizeof(IE_MEASUREMENT_REPORT_T) + RM_BCN_REPORT_SUB_ELEM_MAX_LENGTH
+	*/
 	UINT_8 aucMeasReport[260];
 };
 /*******************************************************************************
@@ -780,10 +795,7 @@ BOOLEAN scnQuerySparseChannel(IN P_ADAPTER_T prAdapter, P_ENUM_BAND_T prSparseBa
 /*----------------------------------------------------------------------------*/
 /* OID/IOCTL Handling                                                         */
 /*----------------------------------------------------------------------------*/
-BOOLEAN
-scnFsmSchedScanRequest(IN P_ADAPTER_T prAdapter,
-		       IN UINT_8 ucSsidNum,
-		       IN P_PARAM_SSID_T prSsid, IN UINT_32 u4IeLength, IN PUINT_8 pucIe, IN UINT_16 u2Interval);
+BOOLEAN scnFsmSchedScanRequest(IN P_ADAPTER_T prAdapter);
 
 BOOLEAN scnFsmSchedScanStopRequest(IN P_ADAPTER_T prAdapter);
 

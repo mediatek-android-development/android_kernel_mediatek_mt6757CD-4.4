@@ -574,6 +574,8 @@ static int mt8167_regs[] = {
 	[PWRAP_DCM_EN] =		0x144,
 	[PWRAP_DCM_DBC_PRD] =		0x148,
 	[PWRAP_SW_RST] =		0x168,
+	[PWRAP_OP_TYPE] =		0x16c,
+	[PWRAP_MSB_FIRST] =		0x170,
 };
 
 enum pmic_type {
@@ -676,7 +678,7 @@ static int pwrap_wait_for_state(struct pmic_wrapper *wrp,
 {
 	unsigned long timeout;
 
-	timeout = jiffies + usecs_to_jiffies(255);
+	timeout = jiffies + usecs_to_jiffies(10000);
 
 	do {
 		if (time_after(jiffies, timeout))
@@ -1012,10 +1014,16 @@ static int pwrap_init(struct pmic_wrapper *wrp)
 
 	if (wrp->rstc)
 		reset_control_reset(wrp->rstc);
+	else {
+		pwrap_writel(wrp, 1, PWRAP_SW_RST);
+		pwrap_writel(wrp, 0, PWRAP_SW_RST);
+	}
+
 	if (wrp->rstc_bridge)
 		reset_control_reset(wrp->rstc_bridge);
 
-	if (wrp->master->type == PWRAP_MT8173) {
+	if ((wrp->master->type == PWRAP_MT8173) ||
+		(wrp->master->type == PWRAP_MT8167)) {
 		/* Enable DCM */
 		pwrap_writel(wrp, 3, PWRAP_DCM_EN);
 		pwrap_writel(wrp, 0, PWRAP_DCM_DBC_PRD);
@@ -1139,6 +1147,7 @@ static const struct regmap_config pwrap_regmap_config = {
 	.reg_read = pwrap_regmap_read,
 	.reg_write = pwrap_regmap_write,
 	.max_register = 0xffff,
+	.fast_io = true,
 };
 
 static const struct pwrap_slv_type pmic_mt6323 = {
@@ -1159,6 +1168,9 @@ static const struct of_device_id of_slave_match_tbl[] = {
 		.compatible = "mediatek,mt6397",
 		.data = &pmic_mt6397,
 	}, {
+		.compatible = "mediatek,mt6392",
+		.data = &pmic_mt6323,
+	}, {
 		/* sentinel */
 	}
 };
@@ -1177,7 +1189,7 @@ static const struct pmic_wrapper_type pwrap_mt2701 = {
 	.init_soc_specific = pwrap_mt2701_init_soc_specific,
 };
 
-static struct pmic_wrapper_type pwrap_mt8135 = {
+static const struct pmic_wrapper_type pwrap_mt8135 = {
 	.regs = mt8135_regs,
 	.type = PWRAP_MT8135,
 	.arb_en_all = 0x1ff,
@@ -1190,7 +1202,7 @@ static struct pmic_wrapper_type pwrap_mt8135 = {
 	.init_soc_specific = pwrap_mt8135_init_soc_specific,
 };
 
-static struct pmic_wrapper_type pwrap_mt8173 = {
+static const struct pmic_wrapper_type pwrap_mt8173 = {
 	.regs = mt8173_regs,
 	.type = PWRAP_MT8173,
 	.arb_en_all = 0x3f,
@@ -1203,7 +1215,7 @@ static struct pmic_wrapper_type pwrap_mt8173 = {
 	.init_soc_specific = pwrap_mt8173_init_soc_specific,
 };
 
-static struct pmic_wrapper_type pwrap_mt8167 = {
+static const struct pmic_wrapper_type pwrap_mt8167 = {
 	.regs = mt8167_regs,
 	.type = PWRAP_MT8167,
 	.arb_en_all = 0xff,
@@ -1211,12 +1223,11 @@ static struct pmic_wrapper_type pwrap_mt8167 = {
 	.spi_w = PWRAP_MAN_CMD_SPI_WRITE,
 	.wdt_src = PWRAP_WDT_SRC_MASK_ALL,
 	.has_bridge = 0,
-	.slv_switch = 0,
-	.init_reg_clock = pwrap_mt8173_init_reg_clock,
-	.init_soc_specific = pwrap_mt8173_init_soc_specific,
+	.slv_switch = 1,
+	.init_reg_clock = pwrap_mt2701_init_reg_clock,
 };
 
-static struct of_device_id of_pwrap_match_tbl[] = {
+static const struct of_device_id of_pwrap_match_tbl[] = {
 	{
 		.compatible = "mediatek,mt2701-pwrap",
 		.data = &pwrap_mt2701,

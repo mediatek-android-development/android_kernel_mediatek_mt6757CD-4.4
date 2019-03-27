@@ -256,7 +256,6 @@ int primary_display_set_overlay_layer(struct primary_disp_input_config *input);
 int primary_display_is_alive(void);
 int primary_display_is_sleepd(void);
 int primary_display_wait_for_vsync(void *config);
-int primary_display_wait_for_vsync_timeout(int timeout);
 unsigned int primary_display_get_ticket(void);
 int primary_display_user_cmd(unsigned int cmd, unsigned long arg);
 int primary_display_trigger(int blocking, void *callback, int need_merge);

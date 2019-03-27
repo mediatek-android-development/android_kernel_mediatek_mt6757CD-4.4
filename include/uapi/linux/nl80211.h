@@ -820,6 +820,10 @@
  *	as an event to indicate changes for devices with wiphy-specific regdom
  *	management.
  *
+ * @NL80211_CMD_ABORT_SCAN: Stop an ongoing scan. Returns -ENOENT if a scan is
+ *	not running. The driver indicates the status of the scan through
+ *	cfg80211_scan_done().
+ *
  * @NL80211_CMD_MAX: highest used command number
  * @__NL80211_CMD_AFTER_LAST: internal use
  */
@@ -1005,6 +1009,8 @@ enum nl80211_commands {
 	NL80211_CMD_TDLS_CANCEL_CHANNEL_SWITCH,
 
 	NL80211_CMD_WIPHY_REG_CHANGE,
+
+	NL80211_CMD_ABORT_SCAN,
 
 	/* add new commands above here */
 
@@ -3610,12 +3616,10 @@ enum nl80211_band {
  * enum nl80211_ps_state - powersave state
  * @NL80211_PS_DISABLED: powersave is disabled
  * @NL80211_PS_ENABLED: powersave is enabled
- * @NL80211_PS_MAXINUM: smart powersave
  */
 enum nl80211_ps_state {
 	NL80211_PS_DISABLED,
 	NL80211_PS_ENABLED,
-	NL80211_PS_MAXINUM,       /* [yangqing] */
 };
 
 /**

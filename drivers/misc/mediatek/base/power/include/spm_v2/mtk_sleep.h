@@ -22,7 +22,7 @@
 
 extern int slp_set_wakesrc(u32 wakesrc, bool enable, bool ck26m_on);
 
-extern wake_reason_t slp_get_wake_reason(void);
+extern unsigned int slp_get_wake_reason(void);
 extern bool slp_will_infra_pdn(void);
 #if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 extern void slp_set_infra_on(bool infra_on);
@@ -35,8 +35,4 @@ extern void slp_start_auto_suspend_resume_timer(u32 sec);
 extern void slp_create_auto_suspend_resume_thread(void);
 
 extern void slp_module_init(void);
-#if defined(CONFIG_ARCH_MT6755)
-extern void subsys_if_on(void);
-extern void pll_if_on(void);
-#endif
 #endif

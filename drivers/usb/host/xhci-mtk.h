@@ -147,8 +147,6 @@ void xhci_mtk_drop_ep_quirk(struct usb_hcd *hcd, struct usb_device *udev,
 extern void mtk_xhci_wakelock_lock(void);
 extern void mtk_xhci_wakelock_unlock(void);
 extern void enable_ipsleep_wakeup(void);
-extern void usb_wakeup_deepidle_enable(struct usb_hcd *hcd);
-extern void usb_wakeup_deepidle_disable(struct usb_hcd *hcd);
 #else
 static inline int xhci_mtk_add_ep_quirk(struct usb_hcd *hcd,
 	struct usb_device *udev, struct usb_host_endpoint *ep)
@@ -176,12 +174,6 @@ enum xhci_mtk_sram_id {
 	XHCI_EPRX,
 	XHCI_DCBAA,
 	XHCI_ERST,
-	XHCI_AUDIO_INTR,
-	XHCI_AUDIO_FEEDBACK_TX,
-	XHCI_AUDIO_FEEDBACK_RX,
-	XHCI_AUDIO_INTR_DATA,
-	XHCI_AUDIO_FEEDBACK_TX_DATA,
-	XHCI_AUDIO_FEEDBACK_RX_DATA,
 	XHCI_SRAM_BLOCK_NUM
 };
 enum xhci_mtk_sram_state {
@@ -200,13 +192,9 @@ struct xhci_mtk_sram_block {
 enum usb_data_id {
 	USB_AUDIO_DATA_OUT_EP = 0,
 	USB_AUDIO_DATA_IN_EP,
-	USB_AUDIO_DATA_SYNC_EP_TX,
-	USB_AUDIO_DATA_SYNC_EP_RX,
-	USB_AUDIO_HID_INTERRUPT,
+	USB_AUDIO_DATA_SYNC_EP,
 	USB_AUDIO_DATA_BLOCK_NUM,
 };
-
-#define FEEDBACK_DATA_SIZE 64
 
 extern int mtk_audio_request_sram(dma_addr_t *phys_addr, unsigned char **virt_addr,
 	unsigned int length, void *user);

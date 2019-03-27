@@ -56,7 +56,7 @@
 
 #define CMDQ_INITIAL_CMD_BLOCK_SIZE     (PAGE_SIZE)
 #define CMDQ_INST_SIZE                  (2 * sizeof(uint32_t))	/* instruction is 64-bit */
-#define CMDQ_CMD_BUFFER_SIZE			(PAGE_SIZE)
+#define CMDQ_CMD_BUFFER_SIZE		(PAGE_SIZE - 32 * CMDQ_INST_SIZE)
 
 
 #define CMDQ_MAX_LOOP_COUNT             (1000000)
@@ -307,6 +307,7 @@ enum CMDQ_SEC_ADDR_METADATA_TYPE {
 	CMDQ_SAM_H_2_PA = 0,	/* sec handle to sec PA */
 	CMDQ_SAM_H_2_MVA = 1,	/* sec handle to sec MVA */
 	CMDQ_SAM_NMVA_2_MVA = 2,	/* map normal MVA to secure world */
+	CMDQ_SAM_DDP_REG_HDCP = 3,	/* DDP register needs to set opposite value when HDCP fail */
 };
 
 struct cmdqSecAddrMetadataStruct {
@@ -328,12 +329,20 @@ struct cmdqSecAddrMetadataStruct {
 	 *	A~B or B~D: size
 	 */
 
-	enum CMDQ_SEC_ADDR_METADATA_TYPE type;	/* [IN] addr handle type */
-	uint32_t baseHandle;	/* [IN]_h, secure address handle */
+	uint32_t type;		/* [IN] addr handle type */
+	uint64_t baseHandle;	/* [IN]_h, secure address handle */
 	uint32_t blockOffset;	/* [IN]_b, block offset from handle(PA) to current block(plane) */
-	uint32_t offset;		/* [IN]_b, buffser offset to secure handle */
-	uint32_t size;			/* buffer size */
-	uint32_t port;			/* hw port id (i.e. M4U port id) */
+	uint32_t offset;	/* [IN]_b, buffser offset to secure handle */
+	uint32_t size;		/* buffer size */
+	uint32_t port;		/* hw port id (i.e. M4U port id) */
+};
+
+/* tablet use */
+enum CMDQ_DISP_MODE {
+	CMDQ_DISP_NON_SUPPORTED_MODE = 0,
+	CMDQ_DISP_SINGLE_MODE = 1,
+	CMDQ_DISP_VIDEO_MODE = 2,
+	CMDQ_MDP_USER_MODE = 3,
 };
 
 struct cmdqSecDataStruct {
@@ -350,6 +359,15 @@ struct cmdqSecDataStruct {
 	/* [Reserved] This is for CMDQ driver usage itself. Not for client. */
 	int32_t waitCookie;	/* task index in thread's tasklist. -1 for not in tasklist. */
 	bool resetExecCnt;	/* reset HW thread in SWd */
+
+#ifdef CONFIG_MTK_CMDQ_TAB
+	/* tablet use */
+	enum CMDQ_DISP_MODE secMode;
+	/* for MDP to copy HDCP version from srcHandle to dstHandle */
+	/* will remove later */
+	uint32_t srcHandle;
+	uint32_t dstHandle;
+#endif
 };
 
 struct cmdq_v3_replace_struct {

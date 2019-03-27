@@ -108,10 +108,6 @@
  */
 #define FAST_RESPONSE_ATM					(1)
 #define THERMAL_INIT_VALUE (0xDA1)
-/*
-*	KPIH for profile
-*/
-#define KPIH_ATM_PROFILE (0)
 /*=============================================================
  * Chip related
  *=============================================================
@@ -128,9 +124,9 @@
 #define TS_TURN_ON       0xFFFFFFCF /* turn on TS_CON1[5:4] 2'b 00  11001111 -> 0xCF  ~(0x30)*/
 #define TS_TURN_OFF      0x00000030 /* turn off thermal*/
 /*chip dependent*/
-#define ADDRESS_INDEX_0  46  /*0x10206184*/
-#define ADDRESS_INDEX_1	 45  /*0x10206180*/
-#define ADDRESS_INDEX_2	 47  /*0x10206188*/
+#define ADDRESS_INDEX_0  46
+#define ADDRESS_INDEX_1	 45
+#define ADDRESS_INDEX_2	 47
 
 #define CLEAR_TEMP 26111
 
@@ -222,15 +218,15 @@ do {                                    \
  * Structures
  *=============================================================
  */
-typedef struct {
+struct thermal_sensor_t {
 	char ts_name[MAX_TS_NAME];
-	ts_e type;
-} thermal_sensor_t;
+	enum thermal_sensor type;
+};
 
-typedef struct {
-	thermal_sensor_t ts[TS_ENUM_MAX];
+struct bank_t {
+	struct thermal_sensor_t ts[TS_ENUM_MAX];
 	int ts_number;
-} bank_t;
+};
 
 #if (CONFIG_THERMAL_AEE_RR_REC == 1)
 enum thermal_state {
@@ -267,7 +263,7 @@ extern int tscpu_debug_log;
 extern const struct of_device_id mt_thermal_of_match[2];
 extern int tscpu_bank_ts[THERMAL_BANK_NUM][TS_ENUM_MAX];
 extern int tscpu_bank_ts_r[THERMAL_BANK_NUM][TS_ENUM_MAX]; /* raw data */
-extern bank_t tscpu_g_bank[THERMAL_BANK_NUM];
+extern struct bank_t tscpu_g_bank[THERMAL_BANK_NUM];
 extern int tscpu_polling_trip_temp1;
 extern int tscpu_polling_trip_temp2;
 extern int tscpu_polling_factor1;
@@ -283,10 +279,6 @@ extern int fast_polling_factor;
 extern int tscpu_cur_fp_factor;
 extern int tscpu_next_fp_factor;
 #endif
-
-extern int tscpu_fake_temp;
-extern int tscpu_fake_temp_enable;
-
 
 /*In common/thermal_zones/mtk_ts_cpu.c*/
 extern long long thermal_get_current_time_us(void);
@@ -364,7 +356,7 @@ extern void tscpu_update_tempinfo(void);
 void tscpu_set_GPIO_toggle_for_monitor(void);
 #endif
 extern void tscpu_thermal_tempADCPNP(int adc, int order);
-extern void tscpu_thermal_enable_all_periodoc_sensing_point(thermal_bank_name bank_num);
+extern void tscpu_thermal_enable_all_periodoc_sensing_point(enum thermal_bank_name bank_num);
 extern void tscpu_update_tempinfo(void);
 extern int tscpu_max_temperature(void);
 
@@ -373,10 +365,10 @@ extern int get_io_reg_base(void);
 extern void tscpu_config_all_tc_hw_protect(int temperature, int temperature2);
 extern void tscpu_reset_thermal(void);
 extern void tscpu_thermal_initial_all_bank(void);
-extern int tscpu_switch_bank(thermal_bank_name bank);
-extern void tscpu_thermal_read_bank_temp(thermal_bank_name bank, ts_e type, int order);
+extern int tscpu_switch_bank(enum thermal_bank_name bank);
+extern void tscpu_thermal_read_bank_temp(enum thermal_bank_name bank, enum thermal_sensor type, int order);
 extern void tscpu_thermal_cal_prepare(void);
-extern void tscpu_thermal_cal_prepare_2(U32 ret);
+extern void tscpu_thermal_cal_prepare_2(unsigned int ret);
 extern irqreturn_t tscpu_thermal_all_bank_interrupt_handler(int irq, void *dev_id);
 extern int tscpu_thermal_clock_on(void);
 extern int tscpu_thermal_clock_off(void);

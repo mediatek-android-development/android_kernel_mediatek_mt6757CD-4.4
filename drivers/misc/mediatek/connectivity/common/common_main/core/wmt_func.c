@@ -307,11 +307,6 @@ INT32 wmt_func_bt_on(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf)
 		ctrlPa2 = PALDO_OFF;
 		wmt_core_ctrl(WMT_CTRL_SOC_PALDO_CTRL, &ctrlPa1, &ctrlPa2);
 
-		/*do coredump when bt on fail */
-		wmt_core_set_coredump_state(DRV_STS_FUNC_ON);
-		ctrlPa1 = WMTDRV_TYPE_BT;
-		ctrlPa2 = 32;
-		wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &ctrlPa1, &ctrlPa2);
 		return -2;
 	}
 	osal_set_bit(WMT_BT_ON, &gBtWifiGpsState);
@@ -344,14 +339,8 @@ INT32 wmt_func_bt_off(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf)
 	if (iRet2)
 		WMT_ERR_FUNC("wmt-func: wmt_ctrl_soc_paldo_ctrl(bt_off) failed(%d)\n", iRet2);
 
-	if (iRet1 + iRet2) {
-		/*do coredump when bt off fail */
-		wmt_core_set_coredump_state(DRV_STS_FUNC_ON);
-		ctrlPa1 = WMTDRV_TYPE_BT;
-		ctrlPa2 = 32;
-		wmt_core_ctrl(WMT_CTRL_EVT_ERR_TRG_ASSERT, &ctrlPa1, &ctrlPa2);
+	if (iRet1 + iRet2)
 		return -1;
-	}
 
 	osal_clear_bit(WMT_BT_ON, &gBtWifiGpsState);
 	if ((!osal_test_bit(WMT_WIFI_ON, &gBtWifiGpsState)) && (osal_test_bit(WMT_GPS_ON, &gBtWifiGpsState))) {
@@ -423,7 +412,7 @@ INT32 wmt_func_gps_pre_ctrl(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf, ENUM_FUNC_S
 		/* TODO:[FixMe][George] error handling? */
 		return -2;
 	}
-	WMT_INFO_FUNC("ctrl GPS_SYNC_SET(%d) ok\n", funcStatus);
+	WMT_DBG_FUNC("ctrl GPS_SYNC_SET(%d) ok\n", funcStatus);
 
 	if ((pOps->ic_pin_ctrl == NULL) || (pOps->ic_pin_ctrl(WMT_IC_PIN_GSYNC, FUNC_ON ==
 					funcStatus ? WMT_IC_PIN_MUX : WMT_IC_PIN_GPIO, 1) < 0)) {
@@ -448,9 +437,9 @@ INT32 wmt_func_gps_pre_ctrl(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf, ENUM_FUNC_S
 
 		}
 	} else {
-		WMT_INFO_FUNC("set reg for GPS_SYNC function okay by chip ic_pin_ctrl\n");
+		WMT_DBG_FUNC("set reg for GPS_SYNC function okay by chip ic_pin_ctrl\n");
 	}
-	WMT_INFO_FUNC("ctrl combo chip gps sync function succeed\n");
+	WMT_DBG_FUNC("ctrl combo chip gps sync function succeed\n");
 	/* turn on GPS lna ctrl function */
 	if (pConf != NULL) {
 		if (pConf->wmt_gps_lna_enable == 0) {
@@ -466,7 +455,7 @@ INT32 wmt_func_gps_pre_ctrl(P_WMT_IC_OPS pOps, P_WMT_GEN_CONF pConf, ENUM_FUNC_S
 				/* TODO:[FixMe][Chaozhong] error handling? */
 				return -3;
 			}
-			WMT_INFO_FUNC("ctrl host gps lna function succeed\n");
+			WMT_DBG_FUNC("ctrl host gps lna function succeed\n");
 		} else {
 			WMT_INFO_FUNC("combo chip pin(%s) used for gps lna\n",
 				      pConf->wmt_gps_lna_pin == 0 ? "EEDI" : "EEDO");

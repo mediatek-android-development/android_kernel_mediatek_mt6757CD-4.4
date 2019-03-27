@@ -87,7 +87,7 @@ static DEFINE_MUTEX(afe_connection_mutex);
 /**
 * connection of register
 */
-const uint32 mConnectionReg[Soc_Aud_InterConnectionOutput_Num_Output] = {
+const unsigned int mConnectionReg[Soc_Aud_InterConnectionOutput_Num_Output] = {
 	AFE_CONN0, AFE_CONN1, AFE_CONN2, AFE_CONN3, AFE_CONN4,
 	AFE_CONN5, AFE_CONN6, AFE_CONN7, AFE_CONN8, AFE_CONN9,
 	AFE_CONN10, AFE_CONN11, AFE_CONN12, AFE_CONN13, AFE_CONN14,
@@ -103,9 +103,9 @@ const uint32 mConnectionReg[Soc_Aud_InterConnectionOutput_Num_Output] = {
 static char mConnectionState[Soc_Aud_InterConnectionInput_Num_Input]
 	[Soc_Aud_InterConnectionOutput_Num_Output] = { {0} };
 
-typedef bool (*connection_function)(uint32);
+typedef bool (*connection_function)(unsigned int);
 
-bool SetDl1ToI2s0(uint32 ConnectionState)
+bool SetDl1ToI2s0(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -114,7 +114,7 @@ bool SetDl1ToI2s0(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl1ToI2s1Dac(uint32 ConnectionState)
+bool SetDl1ToI2s1Dac(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O03);
@@ -123,7 +123,7 @@ bool SetDl1ToI2s1Dac(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2Adc2ToVulData2(uint32 ConnectionState)
+bool SetAdc2ToVulData2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I23,
 			Soc_Aud_InterConnectionOutput_O21);
@@ -132,7 +132,7 @@ bool SetI2s2Adc2ToVulData2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcToVul(uint32 ConnectionState)
+bool SetAdcToVul(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O09);
@@ -141,7 +141,7 @@ bool SetI2s2AdcToVul(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl1ToI2s1Dac2(uint32 ConnectionState)
+bool SetDl1ToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -150,7 +150,7 @@ bool SetDl1ToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl1ToAwb(uint32 ConnectionState)
+bool SetDl1ToAwb(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O05);
@@ -159,7 +159,7 @@ bool SetDl1ToAwb(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl2ToAwb(uint32 ConnectionState)
+bool SetDl2ToAwb(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
 			Soc_Aud_InterConnectionOutput_O05);
@@ -168,7 +168,7 @@ bool SetDl2ToAwb(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl1ToDaiBtOut(uint32 ConnectionState)
+bool SetDl1ToDaiBtOut(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O02);
@@ -177,7 +177,16 @@ bool SetDl1ToDaiBtOut(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem1InCh1ToI2s3(uint32 ConnectionState)
+bool SetDl2ToDaiBtOut(unsigned int ConnectionState)
+{
+	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
+			Soc_Aud_InterConnectionOutput_O02);
+	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I08,
+			Soc_Aud_InterConnectionOutput_O02);
+	return true;
+}
+
+bool SetModem1InCh1ToI2s3(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I09,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -186,7 +195,7 @@ bool SetModem1InCh1ToI2s3(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem2InCh1ToI2s3(uint32 ConnectionState)
+bool SetModem2InCh1ToI2s3(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I14,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -195,21 +204,21 @@ bool SetModem2InCh1ToI2s3(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s0Ch2ToModem1OutCh4(uint32 ConnectionState)
+bool SetI2s0Ch2ToModem1OutCh4(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I01,
 			Soc_Aud_InterConnectionOutput_O27);
 	return true;
 }
 
-bool SetI2s0Ch2ToModem2OutCh4(uint32 ConnectionState)
+bool SetI2s0Ch2ToModem2OutCh4(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I01,
 			Soc_Aud_InterConnectionOutput_O24);
 	return true;
 }
 
-bool SetDl2ToI2s1Dac(uint32 ConnectionState)
+bool SetDl2ToI2s1Dac(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
 			Soc_Aud_InterConnectionOutput_O03);
@@ -218,7 +227,7 @@ bool SetDl2ToI2s1Dac(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl2ToI2s1Dac2(uint32 ConnectionState)
+bool SetDl2ToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -227,7 +236,7 @@ bool SetDl2ToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl2ToVul(uint32 ConnectionState)
+bool SetDl2ToVul(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
 			Soc_Aud_InterConnectionOutput_O09);
@@ -236,7 +245,7 @@ bool SetDl2ToVul(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl2ToModem1Out(uint32 ConnectionState)
+bool SetDl2ToModem1Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
 			Soc_Aud_InterConnectionOutput_O07);
@@ -245,7 +254,7 @@ bool SetDl2ToModem1Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl2ToModem2Out(uint32 ConnectionState)
+bool SetDl2ToModem2Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
 			Soc_Aud_InterConnectionOutput_O17);
@@ -254,7 +263,7 @@ bool SetDl2ToModem2Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s0ToHwGain1Out(uint32 ConnectionState)
+bool SetI2s0ToHwGain1Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I00,
 			Soc_Aud_InterConnectionOutput_O13);
@@ -263,7 +272,7 @@ bool SetI2s0ToHwGain1Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetConnsysToHwGain1Out(uint32 ConnectionState)
+bool SetConnsysToHwGain1Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I25,
 			Soc_Aud_InterConnectionOutput_O13);
@@ -272,7 +281,7 @@ bool SetConnsysToHwGain1Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetConnsysToAwb(uint32 ConnectionState)
+bool SetConnsysToAwb(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I25,
 			Soc_Aud_InterConnectionOutput_O05);
@@ -281,7 +290,7 @@ bool SetConnsysToAwb(uint32 ConnectionState)
 	return true;
 }
 
-bool SetHwGain1InToI2s1Dac(uint32 ConnectionState)
+bool SetHwGain1InToI2s1Dac(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I10,
 			Soc_Aud_InterConnectionOutput_O03);
@@ -290,7 +299,7 @@ bool SetHwGain1InToI2s1Dac(uint32 ConnectionState)
 	return true;
 }
 
-bool SetHwGain1InToI2s1Dac2(uint32 ConnectionState)
+bool SetHwGain1InToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I10,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -299,7 +308,7 @@ bool SetHwGain1InToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetHwGain1InToI2s3(uint32 ConnectionState)
+bool SetHwGain1InToI2s3(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I10,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -308,7 +317,7 @@ bool SetHwGain1InToI2s3(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s0ToAwb(uint32 ConnectionState)
+bool SetI2s0ToAwb(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I00,
 			Soc_Aud_InterConnectionOutput_O05);
@@ -317,21 +326,21 @@ bool SetI2s0ToAwb(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem2InCh1ToModemDai(uint32 ConnectionState)
+bool SetModem2InCh1ToModemDai(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I14,
 			Soc_Aud_InterConnectionOutput_O12);
 	return true;
 }
 
-bool SetModem1InCh1ToModemDai(uint32 ConnectionState)
+bool SetModem1InCh1ToModemDai(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I09,
 			Soc_Aud_InterConnectionOutput_O12);
 	return true;
 }
 
-bool SetModem2InCh1ToI2s1Dac2(uint32 ConnectionState)
+bool SetModem2InCh1ToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I14,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -340,7 +349,7 @@ bool SetModem2InCh1ToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem2InCh2ToI2s1Dac2(uint32 ConnectionState)
+bool SetModem2InCh2ToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I21,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -349,7 +358,7 @@ bool SetModem2InCh2ToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem1InCh1ToI2s1Dac2(uint32 ConnectionState)
+bool SetModem1InCh1ToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I09,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -358,7 +367,7 @@ bool SetModem1InCh1ToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem1InCh2ToI2s1Dac2(uint32 ConnectionState)
+bool SetModem1InCh2ToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I22,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -367,21 +376,21 @@ bool SetModem1InCh2ToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl1Ch1ToModem1OutCh4(uint32 ConnectionState)
+bool SetDl1Ch1ToModem1OutCh4(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O27);
 	return true;
 }
 
-bool SetDl1Ch1ToModem2OutCh4(uint32 ConnectionState)
+bool SetDl1Ch1ToModem2OutCh4(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O24);
 	return true;
 }
 
-bool SetDl1ToHwGain1Out(uint32 ConnectionState)
+bool SetDl1ToHwGain1Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I15,
 			Soc_Aud_InterConnectionOutput_O13);
@@ -390,7 +399,7 @@ bool SetDl1ToHwGain1Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetMrgI2sInToHwGain1Out(uint32 ConnectionState)
+bool SetMrgI2sInToHwGain1Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I15,
 			Soc_Aud_InterConnectionOutput_O13);
@@ -399,7 +408,7 @@ bool SetMrgI2sInToHwGain1Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetMrgI2sInToAwb(uint32 ConnectionState)
+bool SetMrgI2sInToAwb(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I15,
 			Soc_Aud_InterConnectionOutput_O05);
@@ -408,7 +417,7 @@ bool SetMrgI2sInToAwb(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcToI2s3(uint32 ConnectionState)
+bool SetAdcToI2s3(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -417,7 +426,7 @@ bool SetI2s2AdcToI2s3(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcToI2s1Dac(uint32 ConnectionState)
+bool SetAdcToI2s1Dac(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O03);
@@ -426,7 +435,7 @@ bool SetI2s2AdcToI2s1Dac(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcToI2s1Dac2(uint32 ConnectionState)
+bool SetAdcToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -435,7 +444,7 @@ bool SetI2s2AdcToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcCh1ToI2s3(uint32 ConnectionState)
+bool SetAdcLchToI2s3(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -444,7 +453,7 @@ bool SetI2s2AdcCh1ToI2s3(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcCh1ToI2s1Dac(uint32 ConnectionState)
+bool SetAdcLchToI2s1Dac(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O03);
@@ -453,7 +462,7 @@ bool SetI2s2AdcCh1ToI2s1Dac(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcCh1ToI2s1Dac2(uint32 ConnectionState)
+bool SetAdcLchToI2s1Dac2(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O28);
@@ -462,7 +471,7 @@ bool SetI2s2AdcCh1ToI2s1Dac2(uint32 ConnectionState)
 	return true;
 }
 
-bool SetI2s2AdcToModem2Out(uint32 ConnectionState)
+bool SetAdcToModem2Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O17);
@@ -471,7 +480,7 @@ bool SetI2s2AdcToModem2Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem2InCh1ToI2s1Dac(uint32 ConnectionState)
+bool SetModem2InCh1ToI2s1Dac(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I14,
 			Soc_Aud_InterConnectionOutput_O03);
@@ -480,7 +489,7 @@ bool SetModem2InCh1ToI2s1Dac(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDaiBtInToModem2Out(uint32 ConnectionState)
+bool SetDaiBtInToModem2Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I02,
 			Soc_Aud_InterConnectionOutput_O17);
@@ -489,14 +498,14 @@ bool SetDaiBtInToModem2Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem2InCh1ToDaiBtOut(uint32 ConnectionState)
+bool SetModem2InCh1ToDaiBtOut(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I14,
 			Soc_Aud_InterConnectionOutput_O02);
 	return true;
 }
 
-bool SetI2s2AdcToModem1Out(uint32 ConnectionState)
+bool SetAdcToModem1Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
 			Soc_Aud_InterConnectionOutput_O07);
@@ -505,7 +514,7 @@ bool SetI2s2AdcToModem1Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem1InCh1ToI2s1Dac(uint32 ConnectionState)
+bool SetModem1InCh1ToI2s1Dac(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I09,
 			Soc_Aud_InterConnectionOutput_O03);
@@ -514,7 +523,7 @@ bool SetModem1InCh1ToI2s1Dac(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDaiBtInToModem1Out(uint32 ConnectionState)
+bool SetDaiBtInToModem1Out(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I02,
 			Soc_Aud_InterConnectionOutput_O07);
@@ -523,14 +532,14 @@ bool SetDaiBtInToModem1Out(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem1InCh1ToDaiBtOut(uint32 ConnectionState)
+bool SetModem1InCh1ToDaiBtOut(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I09,
 			Soc_Aud_InterConnectionOutput_O02);
 	return true;
 }
 
-bool SetModem2InCh1ToAwb(uint32 ConnectionState)
+bool SetModem2InCh1ToAwb(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I14,
 			Soc_Aud_InterConnectionOutput_O05);
@@ -539,7 +548,7 @@ bool SetModem2InCh1ToAwb(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem1InCh1ToAwb(uint32 ConnectionState)
+bool SetModem1InCh1ToAwb(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I09,
 			Soc_Aud_InterConnectionOutput_O05);
@@ -548,28 +557,28 @@ bool SetModem1InCh1ToAwb(uint32 ConnectionState)
 	return true;
 }
 
-bool SetModem2InCh1ToAwbCh1(uint32 ConnectionState)
+bool SetModem2InCh1ToAwbCh1(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I14,
 			Soc_Aud_InterConnectionOutput_O05);
 	return true;
 }
 
-bool SetModem1InCh1ToAwbCh1(uint32 ConnectionState)
+bool SetModem1InCh1ToAwbCh1(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I09,
 			Soc_Aud_InterConnectionOutput_O05);
 	return true;
 }
 
-bool SetDaiBtInToMemDai(uint32 ConnectionState)
+bool SetDaiBtInToMemDai(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I02,
 			Soc_Aud_InterConnectionOutput_O11);
 	return true;
 }
 
-bool SetI2s0ToVul(uint32 ConnectionState)
+bool SetI2s0ToVul(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I00,
 			Soc_Aud_InterConnectionOutput_O09);
@@ -578,7 +587,7 @@ bool SetI2s0ToVul(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl1ToMrgI2sOut(uint32 ConnectionState)
+bool SetDl1ToMrgI2sOut(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I05,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -587,7 +596,7 @@ bool SetDl1ToMrgI2sOut(uint32 ConnectionState)
 	return true;
 }
 
-bool SetDl2ToI2s3(uint32 ConnectionState)
+bool SetDl2ToI2s3(unsigned int ConnectionState)
 {
 	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I07,
 			Soc_Aud_InterConnectionOutput_O00);
@@ -596,23 +605,33 @@ bool SetDl2ToI2s3(uint32 ConnectionState)
 	return true;
 }
 
-typedef struct connection_link_t {
-	uint32 input;
-	uint32 output;
-	connection_function connectionFunction;
-} connection_link_t;
+bool SetAdcToVulData2(unsigned int ConnectionState)
+{
+	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I03,
+			Soc_Aud_InterConnectionOutput_O21);
+	SetConnectionState(ConnectionState, Soc_Aud_InterConnectionInput_I04,
+			Soc_Aud_InterConnectionOutput_O22);
+	return true;
+}
 
-static const connection_link_t mConnectionLink[] = {
+struct connection_link_t {
+	unsigned int input;
+	unsigned int output;
+	connection_function connectionFunction;
+};
+
+static const struct connection_link_t mConnectionLink[] = {
 	{Soc_Aud_AFE_IO_Block_MEM_DL1, Soc_Aud_AFE_IO_Block_I2S3, SetDl1ToI2s0},
 	{Soc_Aud_AFE_IO_Block_MEM_DL1, Soc_Aud_AFE_IO_Block_I2S1_DAC, SetDl1ToI2s1Dac},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC_2, Soc_Aud_AFE_IO_Block_MEM_VUL_DATA2, SetI2s2Adc2ToVulData2},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC, Soc_Aud_AFE_IO_Block_MEM_VUL, SetI2s2AdcToVul},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL2, Soc_Aud_AFE_IO_Block_MEM_VUL_DATA2, SetAdc2ToVulData2},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL, Soc_Aud_AFE_IO_Block_MEM_VUL, SetAdcToVul},
 	{Soc_Aud_AFE_IO_Block_MEM_DL1, Soc_Aud_AFE_IO_Block_I2S1_DAC_2, SetDl1ToI2s1Dac2},
 	{Soc_Aud_AFE_IO_Block_MEM_DL1, Soc_Aud_AFE_IO_Block_MEM_AWB, SetDl1ToAwb},
 	{Soc_Aud_AFE_IO_Block_MEM_DL2, Soc_Aud_AFE_IO_Block_MEM_AWB, SetDl2ToAwb},
 	{Soc_Aud_AFE_IO_Block_MEM_DL2, Soc_Aud_AFE_IO_Block_MODEM_PCM_1_O, SetDl2ToModem1Out},
 	{Soc_Aud_AFE_IO_Block_MEM_DL2, Soc_Aud_AFE_IO_Block_MODEM_PCM_2_O, SetDl2ToModem2Out},
 	{Soc_Aud_AFE_IO_Block_MEM_DL1, Soc_Aud_AFE_IO_Block_DAI_BT_OUT, SetDl1ToDaiBtOut},
+	{Soc_Aud_AFE_IO_Block_MEM_DL2, Soc_Aud_AFE_IO_Block_DAI_BT_OUT, SetDl2ToDaiBtOut},
 	{Soc_Aud_AFE_IO_Block_MODEM_PCM_1_I_CH1, Soc_Aud_AFE_IO_Block_I2S3, SetModem1InCh1ToI2s3},
 	{Soc_Aud_AFE_IO_Block_MODEM_PCM_2_I_CH1, Soc_Aud_AFE_IO_Block_I2S3, SetModem2InCh1ToI2s3},
 	{Soc_Aud_AFE_IO_Block_I2S0_CH2, Soc_Aud_AFE_IO_Block_MODEM_PCM_1_O_CH4, SetI2s0Ch2ToModem1OutCh4},
@@ -638,17 +657,17 @@ static const connection_link_t mConnectionLink[] = {
 	{Soc_Aud_AFE_IO_Block_MEM_DL1, Soc_Aud_AFE_IO_Block_HW_GAIN1_OUT, SetDl1ToHwGain1Out},
 	{Soc_Aud_AFE_IO_Block_MRG_I2S_IN, Soc_Aud_AFE_IO_Block_HW_GAIN1_OUT, SetMrgI2sInToHwGain1Out},
 	{Soc_Aud_AFE_IO_Block_MRG_I2S_IN, Soc_Aud_AFE_IO_Block_MEM_AWB, SetMrgI2sInToAwb},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC, Soc_Aud_AFE_IO_Block_I2S3, SetI2s2AdcToI2s3},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC, Soc_Aud_AFE_IO_Block_I2S1_DAC, SetI2s2AdcToI2s1Dac},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC, Soc_Aud_AFE_IO_Block_I2S1_DAC_2, SetI2s2AdcToI2s1Dac2},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC_CH1, Soc_Aud_AFE_IO_Block_I2S3, SetI2s2AdcCh1ToI2s3},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC_CH1, Soc_Aud_AFE_IO_Block_I2S1_DAC, SetI2s2AdcCh1ToI2s1Dac},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC_CH1, Soc_Aud_AFE_IO_Block_I2S1_DAC_2, SetI2s2AdcCh1ToI2s1Dac2},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC, Soc_Aud_AFE_IO_Block_MODEM_PCM_2_O, SetI2s2AdcToModem2Out},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL, Soc_Aud_AFE_IO_Block_I2S3, SetAdcToI2s3},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL, Soc_Aud_AFE_IO_Block_I2S1_DAC, SetAdcToI2s1Dac},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL, Soc_Aud_AFE_IO_Block_I2S1_DAC_2, SetAdcToI2s1Dac2},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL_LCH, Soc_Aud_AFE_IO_Block_I2S3, SetAdcLchToI2s3},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL_LCH, Soc_Aud_AFE_IO_Block_I2S1_DAC, SetAdcLchToI2s1Dac},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL_LCH, Soc_Aud_AFE_IO_Block_I2S1_DAC_2, SetAdcLchToI2s1Dac2},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL, Soc_Aud_AFE_IO_Block_MODEM_PCM_2_O, SetAdcToModem2Out},
 	{Soc_Aud_AFE_IO_Block_MODEM_PCM_2_I_CH1, Soc_Aud_AFE_IO_Block_I2S1_DAC, SetModem2InCh1ToI2s1Dac},
 	{Soc_Aud_AFE_IO_Block_DAI_BT_IN, Soc_Aud_AFE_IO_Block_MODEM_PCM_2_O, SetDaiBtInToModem2Out},
 	{Soc_Aud_AFE_IO_Block_MODEM_PCM_2_I_CH1, Soc_Aud_AFE_IO_Block_DAI_BT_OUT, SetModem2InCh1ToDaiBtOut},
-	{Soc_Aud_AFE_IO_Block_I2S2_ADC, Soc_Aud_AFE_IO_Block_MODEM_PCM_1_O, SetI2s2AdcToModem1Out},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL, Soc_Aud_AFE_IO_Block_MODEM_PCM_1_O, SetAdcToModem1Out},
 	{Soc_Aud_AFE_IO_Block_MODEM_PCM_1_I_CH1, Soc_Aud_AFE_IO_Block_I2S1_DAC, SetModem1InCh1ToI2s1Dac},
 	{Soc_Aud_AFE_IO_Block_DAI_BT_IN, Soc_Aud_AFE_IO_Block_MODEM_PCM_1_O, SetDaiBtInToModem1Out},
 	{Soc_Aud_AFE_IO_Block_MODEM_PCM_1_I_CH1, Soc_Aud_AFE_IO_Block_DAI_BT_OUT, SetModem1InCh1ToDaiBtOut},
@@ -659,7 +678,8 @@ static const connection_link_t mConnectionLink[] = {
 	{Soc_Aud_AFE_IO_Block_DAI_BT_IN, Soc_Aud_AFE_IO_Block_MEM_DAI, SetDaiBtInToMemDai},
 	{Soc_Aud_AFE_IO_Block_I2S0, Soc_Aud_AFE_IO_Block_MEM_VUL, SetI2s0ToVul},
 	{Soc_Aud_AFE_IO_Block_MEM_DL1, Soc_Aud_AFE_IO_Block_MRG_I2S_OUT, SetDl1ToMrgI2sOut},
-	{Soc_Aud_AFE_IO_Block_MEM_DL2, Soc_Aud_AFE_IO_Block_I2S3, SetDl2ToI2s3}
+	{Soc_Aud_AFE_IO_Block_MEM_DL2, Soc_Aud_AFE_IO_Block_I2S3, SetDl2ToI2s3},
+	{Soc_Aud_AFE_IO_Block_ADDA_UL, Soc_Aud_AFE_IO_Block_MEM_VUL_DATA2, SetAdcToVulData2},
 };
 
 static const int CONNECTION_LINK_NUM = ARRAY_SIZE(mConnectionLink);
@@ -673,7 +693,7 @@ static bool CheckBitsandReg(short regaddr, char bits)
 	return true;
 }
 
-uint32 GetConnectionShiftReg(uint32 Output)
+unsigned int GetConnectionShiftReg(unsigned int Output)
 {
 	if (Soc_Aud_InterConnectionOutput_O32 > Output)
 		return AFE_CONN_RS;
@@ -681,7 +701,7 @@ uint32 GetConnectionShiftReg(uint32 Output)
 		return AFE_CONN_RS1;
 }
 
-uint32 GetConnectionShiftOffset(uint32 Output)
+unsigned int GetConnectionShiftOffset(unsigned int Output)
 {
 	if (Soc_Aud_InterConnectionOutput_O32 > Output)
 		return Output;
@@ -689,7 +709,7 @@ uint32 GetConnectionShiftOffset(uint32 Output)
 		return (Output - Soc_Aud_InterConnectionOutput_O32);
 }
 
-bool SetConnectionState(uint32 ConnectionState, uint32 Input, uint32 Output)
+bool SetConnectionState(unsigned int ConnectionState, unsigned int Input, unsigned int Output)
 {
 	/*
 	  * printk("SetinputConnection ConnectionState = %d
@@ -735,8 +755,8 @@ bool SetConnectionState(uint32 ConnectionState, uint32 Input, uint32 Output)
 	case Soc_Aud_InterCon_ConnectionShift:
 	{
 		/* printk("nConnectionState = %d\n", ConnectionState); */
-		uint32 shiftReg = GetConnectionShiftReg(Output);
-		uint32 shiftOffset = GetConnectionShiftOffset(Output);
+		unsigned int shiftReg = GetConnectionShiftReg(Output);
+		unsigned int shiftOffset = GetConnectionShiftOffset(Output);
 
 		if (CheckBitsandReg(shiftReg, Input)) {
 			Afe_Set_Reg(shiftReg, 1 << shiftOffset, 1 << shiftOffset);
@@ -753,7 +773,7 @@ bool SetConnectionState(uint32 ConnectionState, uint32 Input, uint32 Output)
 }
 EXPORT_SYMBOL(SetConnectionState);
 
-connection_function GetConnectionFunction(uint32 Aud_block_In, uint32 Aud_block_Out)
+connection_function GetConnectionFunction(unsigned int Aud_block_In, unsigned int Aud_block_Out)
 {
 	connection_function connectionFunction = 0;
 	int i = 0;
@@ -767,7 +787,7 @@ connection_function GetConnectionFunction(uint32 Aud_block_In, uint32 Aud_block_
 	return connectionFunction;
 }
 
-bool SetIntfConnectionState(uint32 ConnectionState, uint32 Aud_block_In, uint32 Aud_block_Out)
+bool SetIntfConnectionState(unsigned int ConnectionState, unsigned int Aud_block_In, unsigned int Aud_block_Out)
 {
 	bool ret = false;
 	connection_function connectionFunction = GetConnectionFunction(Aud_block_In, Aud_block_Out);
@@ -780,7 +800,7 @@ bool SetIntfConnectionState(uint32 ConnectionState, uint32 Aud_block_In, uint32 
 }
 EXPORT_SYMBOL(SetIntfConnectionState);
 
-bool SetIntfConnectionFormat(uint32 ConnectionFormat, uint32 Aud_block)
+bool SetIntfConnectionFormat(unsigned int ConnectionFormat, unsigned int Aud_block)
 {
 	switch (Aud_block) {
 	case Soc_Aud_AFE_IO_Block_I2S3:

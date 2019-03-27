@@ -87,6 +87,20 @@ struct bio {
 
 	unsigned short		bi_vcnt;	/* how many bio_vec's */
 
+#ifdef CONFIG_MTK_HW_FDE
+	/*
+	 * MTK PATH:
+	 *
+	 * Indicating this bio request needs encryption or decryption by
+	 * HW FDE (Full Disk Encryption) engine.
+	 *
+	 * Set by DM Crypt.
+	 * Quried by HW FDE engine driver, e.g., eMMC/UFS.
+	 */
+	unsigned int		bi_hw_fde;
+	unsigned int		bi_key_idx;
+#endif
+
 	/*
 	 * Everything starting with bi_max_vecs will be preserved by bio_reset()
 	 */
@@ -189,6 +203,10 @@ enum rq_flag_bits {
 	__REQ_HASHED,		/* on IO scheduler merge hash */
 	__REQ_MQ_INFLIGHT,	/* track inflight for MQ */
 	__REQ_NO_TIMEOUT,	/* requests may never expire */
+#ifdef MTK_UFS_HQA
+	__REQ_POWER_LOSS,	/* MTK patch for SPOH */
+#endif
+	__REQ_DEV_STARTED,	/* MTK patch: submitted to storage device */
 	__REQ_NR_BITS,		/* stops here */
 };
 
@@ -243,6 +261,10 @@ enum rq_flag_bits {
 #define REQ_HASHED		(1ULL << __REQ_HASHED)
 #define REQ_MQ_INFLIGHT		(1ULL << __REQ_MQ_INFLIGHT)
 #define REQ_NO_TIMEOUT		(1ULL << __REQ_NO_TIMEOUT)
+#ifdef MTK_UFS_HQA
+#define REQ_POWER_LOSS		(1ULL << __REQ_POWER_LOSS)  /* MTK patch for SPOH */
+#endif
+#define REQ_DEV_STARTED		(1ULL << __REQ_DEV_STARTED) /* MTK patch: submitted to storage device */
 
 typedef unsigned int blk_qc_t;
 #define BLK_QC_T_NONE	-1U

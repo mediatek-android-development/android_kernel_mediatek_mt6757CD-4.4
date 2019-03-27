@@ -62,60 +62,6 @@ static const unsigned int tacc_mant[] = {
 		__res & __mask;						\
 	})
 
-/* [fengyunliang start] Add hwinfo node at /sys/kernel/emmc_info */
-static int mmc_hw_info_inited = 0;
-static char saved_mmc_productname[8];
-static int saved_mmc_fwrev = 0;
-
-#define DRIVER_VERSION_EMMC "1.0.0"
-
-struct emmc_hw_info {
-	char *prod_name;
-	char *type;
-	char *vendor;
-	char *memory;
-	char *storage;
-};
-
-static struct emmc_hw_info emmc_hw_info_list[] = {
-	{"3H6CMB", "KM3H6001CM_B515", "Samsung", "6G", "64G"},
-	{"DX18MB", "KMDX10018M_B420", "Samsung", "3G", "32G"},
-	{"DH6DMB", "KMDH6001DM_B422", "Samsung", "4G", "64G"},
-
-	//must be the last one
-	{"000000", "Unknown", "Unknown", "Unknown", "Unknown"}
-	};
-
-static ssize_t emmc_info_show(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int ret;
-	int index;
-
-	for(index = 0; index < ARRAY_SIZE(emmc_hw_info_list) - 1; index++) {
-		if(!strcmp(emmc_hw_info_list[index].prod_name, saved_mmc_productname)) {
-			break;
-		}
-	}
-
-	ret = snprintf(buf, PAGE_SIZE,
-		"type:\t%s\n"
-		"vendor:\t%s\n"
-		"memory:\t%s\n"
-		"storage:\t%s\n"
-		"firmware_version:\t%d\n"
-		"driver_version:\t%s\n",
-		emmc_hw_info_list[index].type,
-		emmc_hw_info_list[index].vendor,
-		emmc_hw_info_list[index].memory,
-		emmc_hw_info_list[index].storage,
-		saved_mmc_fwrev,
-		DRIVER_VERSION_EMMC);
-
-	return ret;
-}
-static DEVICE_ATTR(emmc_info, S_IRUGO, emmc_info_show, NULL );
-/* [fengyunliang end] */
-
 /*
  * Given the decoded CSD structure, decode the raw CID to our CID structure.
  */
@@ -167,17 +113,6 @@ static int mmc_decode_cid(struct mmc_card *card)
 			mmc_hostname(card->host), card->csd.mmca_vsn);
 		return -EINVAL;
 	}
-
-	/* [fengyunliang start] Add hwinfo node at /sys/kernel/emmc_info */
-	if(!mmc_hw_info_inited) {
-		mmc_hw_info_inited = 1;
-		memcpy(saved_mmc_productname, card->cid.prod_name, 8);
-		saved_mmc_fwrev = card->cid.fwrev;
-		if (sysfs_create_file(kernel_kobj, &dev_attr_emmc_info.attr)) {
-			pr_err("EMCP :create emmc_hw_info fail\n");
-		}
-	}
-	/* [fengyunliang end] */
 
 	return 0;
 }
@@ -692,6 +627,12 @@ static int mmc_decode_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		card->ext_csd.ffu_capable =
 			(ext_csd[EXT_CSD_SUPPORTED_MODE] & 0x1) &&
 			!(ext_csd[EXT_CSD_FW_CONFIG] & 0x1);
+
+		card->ext_csd.pre_eol_info = ext_csd[EXT_CSD_PRE_EOL_INFO];
+		card->ext_csd.device_life_time_est_typ_a =
+			ext_csd[EXT_CSD_DEVICE_LIFE_TIME_EST_TYP_A];
+		card->ext_csd.device_life_time_est_typ_b =
+			ext_csd[EXT_CSD_DEVICE_LIFE_TIME_EST_TYP_B];
 	}
 
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
@@ -841,6 +782,11 @@ MMC_DEV_ATTR(manfid, "0x%06x\n", card->cid.manfid);
 MMC_DEV_ATTR(name, "%s\n", card->cid.prod_name);
 MMC_DEV_ATTR(oemid, "0x%04x\n", card->cid.oemid);
 MMC_DEV_ATTR(prv, "0x%x\n", card->cid.prv);
+MMC_DEV_ATTR(rev, "0x%x\n", card->ext_csd.rev);
+MMC_DEV_ATTR(pre_eol_info, "%02x\n", card->ext_csd.pre_eol_info);
+MMC_DEV_ATTR(life_time, "0x%02x 0x%02x\n",
+	card->ext_csd.device_life_time_est_typ_a,
+	card->ext_csd.device_life_time_est_typ_b);
 MMC_DEV_ATTR(serial, "0x%08x\n", card->cid.serial);
 MMC_DEV_ATTR(enhanced_area_offset, "%llu\n",
 		card->ext_csd.enhanced_area_offset);
@@ -878,6 +824,9 @@ static struct attribute *mmc_std_attrs[] = {
 	&dev_attr_name.attr,
 	&dev_attr_oemid.attr,
 	&dev_attr_prv.attr,
+	&dev_attr_rev.attr,
+	&dev_attr_pre_eol_info.attr,
+	&dev_attr_life_time.attr,
 	&dev_attr_serial.attr,
 	&dev_attr_enhanced_area_offset.attr,
 	&dev_attr_enhanced_area_size.attr,
@@ -1722,10 +1671,10 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		err = mmc_select_hs400(card);
 		if (err)
 			goto free_card;
-	} else if (mmc_card_hs(card)) {
+	} else {
 		/* Select the desired bus width optionally */
 		err = mmc_select_bus_width(card);
-		if (!IS_ERR_VALUE(err)) {
+		if (!IS_ERR_VALUE(err) && mmc_card_hs(card)) {
 			err = mmc_select_hs_ddr(card);
 			if (err)
 				goto free_card;
@@ -1748,7 +1697,7 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			if (err && err != -EBADMSG)
 				goto free_card;
 			if (err) {
-				pr_warn("%s: Enabling AutoBKOPS failed\n",
+				pr_notice("%s: Enabling AutoBKOPS failed\n",
 					mmc_hostname(card->host));
 				card->ext_csd.auto_bkops_en = 0;
 				err = 0;

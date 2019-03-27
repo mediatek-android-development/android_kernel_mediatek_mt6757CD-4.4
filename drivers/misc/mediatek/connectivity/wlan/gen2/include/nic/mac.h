@@ -733,7 +733,6 @@
 #define ELEM_ID_FAST_TRANSITION                     55  /* Fast Bss Transition for 802.11 R */
 #define ELEM_ID_TIMEOUT_INTERVAL                    56	/* 802.11w SA Timeout interval */
 #define ELEM_ID_RESOURCE_INFO_CONTAINER             57  /* Resource Information Container for 802.11 R */
-#define ELEM_ID_SUP_OPERATING_CLASS                 59	/* Supported Operating Classes */
 #define ELEM_ID_SUP_OPERATING_CLASS					59	/* Supported Operating Classes */
 #define ELEM_ID_CH_ESW_ANNOUNCEMENT                 60	/* Channel switch announcement */
 #define ELEM_ID_HT_OP                               61	/* HT Operation */
@@ -814,7 +813,7 @@
 #define ELEM_RM_TYPE_FRAME_REQ                      6
 #define ELEM_RM_TYPE_STA_STATISTICS_REQ             7
 #define ELEM_RM_TYPE_LCI_REQ                        8
-#define ELEM_RM_TYPE_TSM_REQ                        9
+#define ELEM_RM_TYPE_TSM_REQ                         9
 #define ELEM_RM_TYPE_MEASURE_PAUSE_REQ              255
 
 /* 7.3.2.22 Measurement Report element */
@@ -827,7 +826,7 @@
 #define ELEM_RM_TYPE_FRAME_REPORT                   6
 #define ELEM_RM_TYPE_STA_STATISTICS_REPORT          7
 #define ELEM_RM_TYPE_LCI_REPORT                     8
-#define ELEM_RM_TYPE_TSM_REPORT                     9
+#define ELEM_RM_TYPE_TSM_REPORT                      9
 /*Auto Channel Selection*/
 #if CFG_AUTO_CHANNEL_SEL_SUPPORT
 #define ELEM_RM_TYPE_ACS_CHN			    1
@@ -1158,13 +1157,13 @@
 /* 802.11-2012, 8.5.7 Radio Measurement action fields, table 8-206 */
 #define RM_ACTION_NEIGHBOR_REQUEST					4
 #define RM_ACTION_REIGHBOR_RESPONSE					5
-
 #define RM_ACTION_RM_REQUEST                        0
 #define RM_ACTION_RM_REPORT                         1
 #define RM_ACTION_LM_REQUEST                        2
 #define RM_ACTION_LM_REPORT                         3
 #define RM_ACTION_NEIGHBOR_REQUEST                  4
 #define RM_ACTION_REIGHBOR_RESPONSE                 5
+
 /*******************************************************************************
 *                             D A T A   T Y P E S
 ********************************************************************************
@@ -2580,7 +2579,6 @@ struct __KAL_ATTRIB_PACKED__ WMM_ACTION_TSPEC_FRAME {
 	UINT_8		ucStatusCode;
 	UINT_8		aucInfoElem[1];
 };
-
 /*******************************************************************************
 *                            P U B L I C   D A T A
 ********************************************************************************

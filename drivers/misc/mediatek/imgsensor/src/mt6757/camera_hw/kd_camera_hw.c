@@ -27,14 +27,12 @@
 #include "kd_imgsensor_define.h"
 #include "kd_camera_feature.h"
 #include "kd_camera_hw.h"
-#include "mach/gpio_const.h"
-#include "mt-plat/mtk_gpio.h"
 /******************************************************************************
  * Debug configuration
  ******************************************************************************/
 #define PFX "[kd_camera_hw]"
 
-#define DEBUG_CAMERA_HW_K
+/* #define DEBUG_CAMERA_HW_K */
 #ifdef DEBUG_CAMERA_HW_K
 #define PK_DBG(fmt, arg...)			pr_debug(PFX fmt, ##arg)
 #define PK_ERR(fmt, arg...)         pr_err(fmt, ##arg)
@@ -114,7 +112,7 @@ PowerCust PowerCustList = {
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_High},	/* for SUB_AVDD; */
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_Low},	/* for SUB_DVDD; */
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_High},	/* for SUB_DOVDD; */
-		{GPIO_SUPPORTED, GPIO_MODE_GPIO, Vol_High},	/* for MAIN2_AVDD; */
+		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_High},	/* for MAIN2_AVDD; */
 		{GPIO_SUPPORTED, GPIO_MODE_GPIO, Vol_High},	/* for MAIN2_DVDD; */
 		{GPIO_UNSUPPORTED, GPIO_MODE_GPIO, Vol_High},	/* for MAIN2_DOVDD; */
 		/* {GPIO_SUPPORTED, GPIO_MODE_GPIO, Vol_Low}, */
@@ -155,6 +153,18 @@ PowerUp PowerOnList = {
 			},
 		},
 #endif
+#if defined(IMX376_MIPI_RAW)
+	{
+		SENSOR_DRVNAME_IMX376_MIPI_RAW,
+		{
+			{SensorMCLK, Vol_High, 0},
+			{AVDD, Vol_2800, 1},
+			{DOVDD, Vol_1800, 1},
+			{DVDD, Vol_1200, 5},
+			{RST, Vol_High, 2}
+		},
+	},
+#endif
 #if defined(S5K3P8SP_MIPI_RAW)
 		{SENSOR_DRVNAME_S5K3P8SP_MIPI_RAW,
 			{
@@ -188,12 +198,15 @@ PowerUp PowerOnList = {
 #if defined(S5K3M3_MIPI_RAW)
 		{SENSOR_DRVNAME_S5K3M3_MIPI_RAW,
 			{
-				{AVDD, Vol_2800, 0},
-				{DVDD, Vol_1050, 0},
+				{SensorMCLK, Vol_High, 0},
+				{PDN, Vol_Low, 0},
+				{RST, Vol_Low, 0},
 				{DOVDD, Vol_1800, 0},
-				{RST, Vol_Low, 12},
-				{SensorMCLK, Vol_High, 10},
-				{RST, Vol_High, 8}
+				{AVDD, Vol_2800, 0},
+				{DVDD, Vol_1000, 0},
+				{AFVDD, Vol_2800, 1},
+				{PDN, Vol_High, 0},
+				{RST, Vol_High, 2},
 			},
 		},
 #endif
@@ -204,21 +217,6 @@ PowerUp PowerOnList = {
 				{DOVDD, Vol_1800, 0},
 				{AVDD, Vol_2800, 0},
 				{DVDD, Vol_1200, 0},
-				{AFVDD, Vol_2800, 5},
-				{PDN, Vol_Low, 4},
-				{PDN, Vol_High, 0},
-				{RST, Vol_Low, 1},
-				{RST, Vol_High, 0},
-			},
-		},
-#endif
-#if defined(S5K3P8SN_MIPI_RAW)
-		{SENSOR_DRVNAME_S5K3P8SN_MIPI_RAW,
-			{
-				{SensorMCLK, Vol_High, 0},
-				{DOVDD, Vol_1800, 0},
-				{AVDD, Vol_2800, 0},
-				{DVDD, Vol_1050, 0},
 				{AFVDD, Vol_2800, 5},
 				{PDN, Vol_Low, 4},
 				{PDN, Vol_High, 0},
@@ -275,13 +273,15 @@ PowerUp PowerOnList = {
 #if defined(IMX258_MIPI_RAW)
 		{SENSOR_DRVNAME_IMX258_MIPI_RAW,
 			{
+				{SensorMCLK, Vol_High, 0},
+				{PDN, Vol_Low, 0},
+				{RST, Vol_Low, 0},
+				{DOVDD, Vol_1800, 0},
 				{AVDD, Vol_2800, 0},
 				{DVDD, Vol_1200, 0},
-				{AFVDD, Vol_2800, 0},
-				{DOVDD, Vol_1800, 10},
-				{RST, Vol_Low, 12},
-				{SensorMCLK, Vol_High, 6},
-				{RST, Vol_High, 12}
+				{AFVDD, Vol_2800, 1},
+				{PDN, Vol_High, 0},
+				{RST, Vol_High, 0}
 			},
 		},
 #endif
@@ -554,26 +554,19 @@ struct pinctrl_state *cam_mipi_switch_en_h;	/* for mipi switch enable */
 struct pinctrl_state *cam_mipi_switch_en_l;
 struct pinctrl_state *cam_mipi_switch_sel_h;	/* for mipi switch select */
 struct pinctrl_state *cam_mipi_switch_sel_l;
-struct pinctrl_state *mcam_clk;					/* for clk*/
-struct pinctrl_state *vtcam_clk;
-
 int has_mipi_switch;
 
 int mtkcam_gpio_init(struct platform_device *pdev)
 {
 	int ret = 0;
 
-	struct pinctrl *camctrl_default = NULL;
-	// J7 max doesn't support MIPI switch
-	has_mipi_switch = 0;
+	has_mipi_switch = 1;
 
 	camctrl = devm_pinctrl_get(&pdev->dev);
 	if (IS_ERR(camctrl)) {
 		dev_err(&pdev->dev, "Cannot find camera pinctrl!");
 		ret = PTR_ERR(camctrl);
 	}
-
-#if 0 // J7 max doesn't have this PND for main cam
 	/*Cam0 Power/Rst Ping initialization */
 	cam0_pnd_h = pinctrl_lookup_state(camctrl, "cam0_pnd1");
 	if (IS_ERR(cam0_pnd_h)) {
@@ -586,7 +579,7 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		ret = PTR_ERR(cam0_pnd_l);
 		PK_ERR("%s : pinctrl err, cam0_pnd_l\n", __func__);
 	}
-#endif
+
 
 	cam0_rst_h = pinctrl_lookup_state(camctrl, "cam0_rst1");
 	if (IS_ERR(cam0_rst_h)) {
@@ -600,7 +593,6 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		PK_ERR("%s : pinctrl err, cam0_rst_l\n", __func__);
 	}
 
-#if 0 // J7 max doesn't have this PND for sub cam
 	/*Cam1 Power/Rst Ping initialization */
 	cam1_pnd_h = pinctrl_lookup_state(camctrl, "cam1_pnd1");
 	if (IS_ERR(cam1_pnd_h)) {
@@ -613,7 +605,7 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		ret = PTR_ERR(cam1_pnd_l);
 		PK_ERR("%s : pinctrl err, cam1_pnd_l\n", __func__);
 	}
-#endif
+
 
 	cam1_rst_h = pinctrl_lookup_state(camctrl, "cam1_rst1");
 	if (IS_ERR(cam1_rst_h)) {
@@ -627,8 +619,6 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		ret = PTR_ERR(cam1_rst_l);
 		PK_ERR("%s : pinctrl err, cam1_rst_l\n", __func__);
 	}
-
-#if 0 // J7 max doesn't have this pins for stereo cam
 	/*Cam2 Power/Rst Ping initialization */
 	cam2_pnd_h = pinctrl_lookup_state(camctrl, "cam2_pnd1");
 	if (IS_ERR(cam2_pnd_h)) {
@@ -655,9 +645,7 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		ret = PTR_ERR(cam2_rst_l);
 		PK_ERR("%s : pinctrl err, cam2_rst_l\n", __func__);
 	}
-#endif
 
-#if 0 // J7 max doesn't have this power pins
 	/*externel LDO enable */
 	/*GPIO 253 */
 	cam_ldo_vcama_h = pinctrl_lookup_state(camctrl, "cam_ldo_vcama_1");
@@ -731,9 +719,7 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		ret = PTR_ERR(cam_ldo_main2_vcamd_l);
 		PK_DBG("%s : pinctrl err, cam_ldo_main2_vcamd_l\n", __func__);
 	}
-#endif
 
-#if 0 // J7 max doesn't have this mipi switch
 	cam_mipi_switch_en_h = pinctrl_lookup_state(camctrl, "cam_mipi_switch_en_1");
 	if (IS_ERR(cam_mipi_switch_en_h)) {
 		has_mipi_switch = 0;
@@ -760,31 +746,6 @@ int mtkcam_gpio_init(struct platform_device *pdev)
 		ret = PTR_ERR(cam_mipi_switch_sel_l);
 		PK_DBG("%s : pinctrl err, cam_mipi_switch_sel_l\n", __func__);
 	}
-#endif
-	mcam_clk = pinctrl_lookup_state(camctrl, "mcam_clk");	
-	if (IS_ERR(mcam_clk)) {
-		ret = PTR_ERR(mcam_clk);
-		PK_ERR("%s : pinctrl err, mcam_clk\n", __func__);
-	}
-	
-	
-	vtcam_clk = pinctrl_lookup_state(camctrl, "vtcam_clk");
-	if (IS_ERR(vtcam_clk)) {
-		ret = PTR_ERR(vtcam_clk);
-		PK_ERR("%s : pinctrl err, vtcam_clk\n", __func__);
-	}
-
-	camctrl_default = devm_pinctrl_get_select_default(&pdev->dev);
-	if (IS_ERR(camctrl_default)) {
-		if (PTR_ERR(camctrl_default) == -EPROBE_DEFER)
-			return -EPROBE_DEFER;
-		pr_debug("%s : device pinctrl for default error\n", __func__);
-	}
-
-	if (camctrl != camctrl_default) {
-		pr_err("ERROR CAM default setting error: expect:%p, actual:%p", camctrl, camctrl_default);
-	}
-
 	return ret;
 }
 
@@ -792,9 +753,7 @@ int mtkcam_gpio_set(int PinIdx, int PwrType, int Val)
 {
 	int ret = 0;
 	/* static signed int mAVDD_usercounter = 0; */
-#if 0 // to prevent build error
 	static signed int mDVDD_usercounter;
-#endif
 
 	if (IS_ERR(camctrl))
 		return -1;
@@ -818,7 +777,6 @@ int mtkcam_gpio_set(int PinIdx, int PwrType, int Val)
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, RST\n", __func__,
 				       PinIdx, Val);
 		} else {
-#if 0 // J7 max doesn't have this pins for stereo cam
 			if (Val == 0 && !IS_ERR(cam2_rst_l))
 				pinctrl_select_state(camctrl, cam2_rst_l);
 			else if (Val == 1 && !IS_ERR(cam2_rst_h))
@@ -826,11 +784,9 @@ int mtkcam_gpio_set(int PinIdx, int PwrType, int Val)
 			else
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, RST\n", __func__,
 				       PinIdx, Val);
-#endif
 		}
 		break;
 	case PDN:
-#if 0 // J7 max doesn't have this PND
 		if (PinIdx == 0) {
 			if (Val == 0 && !IS_ERR(cam0_pnd_l))
 				pinctrl_select_state(camctrl, cam0_pnd_l);
@@ -856,40 +812,27 @@ int mtkcam_gpio_set(int PinIdx, int PwrType, int Val)
 				PK_ERR("%s : pinctrl err, PinIdx %d, Val %d, PDN\n", __func__,
 				       PinIdx, Val);
 		}
-#endif
 		break;
 	case MAIN2_DVDD:
 	case SUB_AVDD:
 	case MAIN2_AVDD:
-#if 0 // J7 max doesn't have this power pins
 		/*SUB_DVDD & SUB_AVDD MAIN2_AVDD use same cotrol GPIO */
 		PK_DBG("mDVDD_usercounter(%d)\n", mDVDD_usercounter);
-		if (Val == 0 && !IS_ERR(cam_ldo_main2_vcamd_l)) {
+		if (Val == 0 && !IS_ERR(cam_ldo_vcamd_l)) {
 			mDVDD_usercounter--;
 			if (mDVDD_usercounter <= 0) {
 				if (mDVDD_usercounter < 0)
 					PK_ERR("Please check AVDD pin control\n");
 
 				mDVDD_usercounter = 0;
-				pinctrl_select_state(camctrl, cam_ldo_main2_vcamd_l);
+				pinctrl_select_state(camctrl, cam_ldo_vcamd_l);
 			}
 
-		} else if (Val == 1 && !IS_ERR(cam_ldo_main2_vcamd_h)) {
+		} else if (Val == 1 && !IS_ERR(cam_ldo_vcamd_h)) {
 			mDVDD_usercounter++;
-			pinctrl_select_state(camctrl, cam_ldo_main2_vcamd_h);
+			pinctrl_select_state(camctrl, cam_ldo_vcamd_h);
 		}
-#endif
 		break;
-	case SensorMCLK:
-		if (PinIdx == 0) {
-			if (!IS_ERR(mcam_clk))
-				pinctrl_select_state(camctrl, mcam_clk);
-		}
-		if (PinIdx == 1) {
-			if (!IS_ERR(vtcam_clk))
-				pinctrl_select_state(camctrl, vtcam_clk);
-		}
-		break;		
 	case DVDD:
 	case DOVDD:
 	case AFVDD:
@@ -1013,16 +956,14 @@ BOOL hwpoweron(PowerInformation pwInfo, char *mode_name)
 		}
 	} else if (pwInfo.PowerType == AFVDD) {
 		/* PK_INFO("[CAMERA SENSOR] Skip AFVDD setting\n"); */
-		if (pinSetIdx != 2) {	/*	MAIN2_AFVDD, same control with MAIN2_AVDD/DVDD	*/
-			if (PowerCustList.PowerCustInfo[CUST_AFVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
-				if (_hwPowerOn(pwInfo.PowerType, pwInfo.Voltage) != TRUE) {
-					PK_ERR("[CAMERA SENSOR] Fail to enable af power\n");
-					return FALSE;
-				}
-			} else {
-				if (mtkcam_gpio_set(pinSetIdx, AFVDD, PowerCustList.PowerCustInfo[CUST_AFVDD].Voltage))
-					PK_ERR("[CAMERA CUST_AFVDD] set gpio failed!!\n");
+		if (PowerCustList.PowerCustInfo[CUST_AFVDD].Gpio_Pin == GPIO_UNSUPPORTED) {
+			if (_hwPowerOn(pwInfo.PowerType, pwInfo.Voltage) != TRUE) {
+				PK_ERR("[CAMERA SENSOR] Fail to enable af power\n");
+				return FALSE;
 			}
+		} else {
+			if (mtkcam_gpio_set(pinSetIdx, AFVDD, PowerCustList.PowerCustInfo[CUST_AFVDD].Voltage))
+				PK_ERR("[CAMERA CUST_AFVDD] set gpio failed!!\n");
 		}
 	} else if (pwInfo.PowerType == PDN) {
 		/* PK_INFO("hwPowerOn: PDN %d\n", pwInfo.Voltage); */
@@ -1045,9 +986,6 @@ BOOL hwpoweron(PowerInformation pwInfo, char *mode_name)
 		}
 
 	} else if (pwInfo.PowerType == SensorMCLK) {
-		if (mtkcam_gpio_set(pinSetIdx, SensorMCLK, 0))
-			PK_ERR("[CAMERA SENSOR] set gpio failed!!\n");
-
 		if (pinSetIdx == 0) {
 			/* PK_INFO("Sensor MCLK1 On"); */
 			ISP_MCLK1_EN(TRUE);
@@ -1110,6 +1048,8 @@ BOOL hwpowerdown(PowerInformation pwInfo, char *mode_name)
 				}
 			}
 		}
+
+
 	} else if (pwInfo.PowerType == DVDD) {
 		if (pinSetIdx == 2) {
 			if (PowerCustList.PowerCustInfo[CUST_MAIN2_DVDD].Gpio_Pin ==
@@ -1190,29 +1130,13 @@ BOOL hwpowerdown(PowerInformation pwInfo, char *mode_name)
 		} else {
 			if (mtkcam_gpio_set(pinSetIdx, RST, pinSet[pinSetIdx][IDX_PS_CMRST + IDX_PS_OFF]))
 				PK_ERR("[CAMERA SENSOR] set gpio failed!!\n");
-			if (pwInfo.Delay > 0)
-				mdelay(pwInfo.Delay);
 		}
 
 	} else if (pwInfo.PowerType == SensorMCLK) {
-		if (pinSetIdx == 0) {
+		if (pinSetIdx == 0)
 			ISP_MCLK1_EN(FALSE);
-			if(mt_set_gpio_mode(GPIO161,GPIO_MODE_00))
-				PK_DBG("[CAMERA SENSOR] set gpio mode failed!! \n");
-			if(mt_set_gpio_dir(GPIO161,GPIO_DIR_OUT))
-				PK_DBG("[CAMERA SENSOR] set gpio dir failed!! \n");
-			if(mt_set_gpio_out(GPIO161,GPIO_OUT_ZERO))
-				PK_DBG("[CAMERA SENSOR] set gpio failed!! \n");
-		}
-		else if (pinSetIdx == 1) {
+		else if (pinSetIdx == 1)
 			ISP_MCLK2_EN(FALSE);
-			 if(mt_set_gpio_mode(GPIO109,GPIO_MODE_00))
-                PK_DBG("[CAMERA SENSOR] set gpio mode failed!! \n");
-            if(mt_set_gpio_dir(GPIO109,GPIO_DIR_OUT))
-                PK_DBG("[CAMERA SENSOR] set gpio dir failed!! \n");
-            if(mt_set_gpio_out(GPIO109,GPIO_OUT_ZERO))
-                PK_DBG("[CAMERA SENSOR] set gpio failed!! \n");
-		}
 		else if (pinSetIdx == 2)
 			ISP_MCLK2_EN(FALSE);
 		else
@@ -1227,31 +1151,9 @@ BOOL hwpowerdown(PowerInformation pwInfo, char *mode_name)
 int kdCISModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM SensorIdx, char *currSensorName, BOOL On,
 		       char *mode_name)
 {
+
 	int pwListIdx, pwIdx;
 	BOOL sensorInPowerList = KAL_FALSE;
-#if defined(CONFIG_MTK_IMGSENSOR_MAIN) || defined(CONFIG_MTK_IMGSENSOR_SUB) || defined(CONFIG_MTK_IMGSENSOR_MAIN2)
-#define STRINGIZE(sensorName)       #sensorName
-#define SENSOR_NAME(stringizedName) STRINGIZE(stringizedName)
-	char *pSensorNameConfig;
-#ifdef CONFIG_MTK_IMGSENSOR_MAIN
-	pSensorNameConfig = SENSOR_NAME(CONFIG_MTK_IMGSENSOR_MAIN);
-	if (SensorIdx == DUAL_CAMERA_MAIN_SENSOR
-	    && strncmp(currSensorName, ++pSensorNameConfig, sizeof(SENSOR_NAME(CONFIG_MTK_IMGSENSOR_MAIN)) - 3))
-		goto _kdCISModulePowerOn_exit_;
-#endif
-#ifdef CONFIG_MTK_IMGSENSOR_SUB
-	pSensorNameConfig = SENSOR_NAME(CONFIG_MTK_IMGSENSOR_SUB);
-	if (SensorIdx == DUAL_CAMERA_SUB_SENSOR
-	    && strncmp(currSensorName, ++pSensorNameConfig, sizeof(SENSOR_NAME(CONFIG_MTK_IMGSENSOR_SUB)) - 3))
-		goto _kdCISModulePowerOn_exit_;
-#endif
-#ifdef CONFIG_MTK_IMGSENSOR_MAIN2
-	pSensorNameConfig = SENSOR_NAME(CONFIG_MTK_IMGSENSOR_MAIN2);
-	if (SensorIdx == DUAL_CAMERA_MAIN_2_SENSOR
-	    && strncmp(currSensorName, ++pSensorNameConfig, sizeof(SENSOR_NAME(CONFIG_MTK_IMGSENSOR_MAIN2)) - 3))
-		goto _kdCISModulePowerOn_exit_;
-#endif
-#endif
 
 	if (SensorIdx == DUAL_CAMERA_MAIN_SENSOR)
 		pinSetIdx = 0;
@@ -1260,6 +1162,24 @@ int kdCISModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM SensorIdx, char *currSenso
 	else if (SensorIdx == DUAL_CAMERA_MAIN_2_SENSOR)
 		pinSetIdx = 2;
 
+	if (currSensorName && (strcmp(currSensorName, SENSOR_DRVNAME_OV5670_MIPI_RAW) == 0)) {
+		if (pinSetIdx == 1)
+			goto _kdCISModulePowerOn_exit_;
+	}
+
+	if (currSensorName && (strcmp(currSensorName, SENSOR_DRVNAME_IMX258_MIPI_RAW) == 0)) {
+		if (pinSetIdx == 1)
+			goto _kdCISModulePowerOn_exit_;
+	}
+	if (currSensorName && (strcmp(currSensorName, SENSOR_DRVNAME_IMX258_MIPI_MONO) == 0)) {
+		if (pinSetIdx == 1)
+			goto _kdCISModulePowerOn_exit_;
+	}
+	if (currSensorName && (strcmp(currSensorName, SENSOR_DRVNAME_IMX258_MIPI_RAW) == 0)) {
+		if (pinSetIdx == 2)
+			goto _kdCISModulePowerOn_exit_;
+	}
+
 	/* power ON */
 	if (On) {
 		PK_INFO("PowerOn:SensorName=%s, pinSetIdx=%d, sensorIdx:%d\n", currSensorName,
@@ -1267,12 +1187,12 @@ int kdCISModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM SensorIdx, char *currSenso
 		/* MIPI SWITCH */
 		if (has_mipi_switch) {
 			if (SensorIdx == DUAL_CAMERA_SUB_SENSOR) {
-				pinctrl_select_state(camctrl, cam_mipi_switch_en_h);
-				pinctrl_select_state(camctrl, cam_mipi_switch_sel_l);
+				pinctrl_select_state(camctrl, cam_mipi_switch_en_l);
+				pinctrl_select_state(camctrl, cam_mipi_switch_sel_h);
 
 			} else if (SensorIdx == DUAL_CAMERA_MAIN_2_SENSOR) {
-				pinctrl_select_state(camctrl, cam_mipi_switch_en_h);
-				pinctrl_select_state(camctrl, cam_mipi_switch_sel_h);
+				pinctrl_select_state(camctrl, cam_mipi_switch_en_l);
+				pinctrl_select_state(camctrl, cam_mipi_switch_sel_l);
 			}
 		}
 
@@ -1463,7 +1383,7 @@ int kdCISModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM SensorIdx, char *currSenso
 		if (has_mipi_switch) {
 			if ((SensorIdx == DUAL_CAMERA_SUB_SENSOR)
 			    || (SensorIdx == DUAL_CAMERA_MAIN_2_SENSOR)) {
-				pinctrl_select_state(camctrl, cam_mipi_switch_en_l);
+				pinctrl_select_state(camctrl, cam_mipi_switch_en_h);
 			}
 		}
 
@@ -1483,15 +1403,7 @@ int kdCISModulePowerOn(CAMERA_DUAL_CAMERA_SENSOR_ENUM SensorIdx, char *currSenso
 						PK_DBG("pwIdx=%d\n", pwIdx);
 					} else if (hwpowerdown(PowerOnList.PowerSeq[pwListIdx].
 							       PowerInfo[pwIdx], mode_name) == FALSE) {
-					    PK_ERR("PowerOFF:pinSetIdx=%d, sensorIdx:%d, PowerType:%d fail!\n", pinSetIdx, SensorIdx,
-                            PowerOnList.PowerSeq[pwListIdx].PowerInfo[pwIdx].PowerType);
-					    if(pwIdx > 0)
-                        {
-                            PK_ERR("PowerOFF: need to turn off another power current index(%d)\n", pwIdx);
-                        }else
-                        {
 						goto _kdCISModulePowerOn_exit_;
-                        }
 					} else if ((pwIdx > 0) &&
 						   (PowerOnList.PowerSeq[pwListIdx].PowerInfo[pwIdx - 1].Delay > 0)) {
 						mdelay(PowerOnList.PowerSeq[pwListIdx].PowerInfo[pwIdx - 1].Delay);

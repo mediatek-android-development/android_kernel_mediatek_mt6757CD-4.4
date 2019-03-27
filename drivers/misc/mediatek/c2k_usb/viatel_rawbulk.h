@@ -172,11 +172,6 @@ int rawbulk_push_upstream_buffer(int transfer_id, const void *buffer, unsigned i
 int rawbulk_transfer_statistics(int transfer_id, char *buf);
 int rawbulk_transfer_state(int transfer_id);
 
-extern int modem_dtr_set(int on, int low_latency);
-extern int modem_dcd_state(void);
-extern int sdio_buffer_push(int port_num, const unsigned char *buf, int count);
-extern int sdio_rawbulk_intercept(int port_num, unsigned int inception);
-
 /* debug mechanism */
 extern unsigned int c2k_usb_dbg_level;	/* refer to rawbulk_transfer.c */
 static inline int c2k_dbg_level(unsigned level)
@@ -196,19 +191,19 @@ static inline int c2k_dbg_level(unsigned level)
 #define C2K_USB_DBG_ON
 #ifdef C2K_USB_DBG_ON
 #define C2K_ERR(format, args...) do {if (c2k_dbg_level(C2K_LOG_ERR)) \
-	pr_warn("C2K_USB_ERR,<%s %d>, " format, __func__, __LINE__, ## args);  } \
+	pr_notice("C2K_USB_ERR,<%s %d>, " format, __func__, __LINE__, ## args);  } \
 while (0)
 #define C2K_WARN(format, args...) do {if (c2k_dbg_level(C2K_LOG_WARN)) \
-	pr_warn("C2K_USB_WARN,<%s %d>, " format, __func__, __LINE__, ## args);  } \
+	pr_notice("C2K_USB_WARN,<%s %d>, " format, __func__, __LINE__, ## args);  } \
 while (0)
 #define C2K_NOTE(format, args...) do {if (c2k_dbg_level(C2K_LOG_NOTICE)) \
-	pr_warn("C2K_USB_NOTE,<%s %d>, " format, __func__, __LINE__, ## args);  } \
+	pr_notice("C2K_USB_NOTE,<%s %d>, " format, __func__, __LINE__, ## args);  } \
 while (0)
 #define C2K_INFO(format, args...) do {if (c2k_dbg_level(C2K_LOG_INFO)) \
-	pr_warn("C2K_USB_INFO,<%s %d>, " format, __func__, __LINE__, ## args);  } \
+	pr_notice("C2K_USB_INFO,<%s %d>, " format, __func__, __LINE__, ## args);  } \
 while (0)
 #define C2K_DBG(format, args...) do {if (c2k_dbg_level(C2K_LOG_DBG)) \
-	pr_warn("C2K_USB_DBG,<%s %d>, " format, __func__, __LINE__, ## args);  } \
+	pr_notice("C2K_USB_DBG,<%s %d>, " format, __func__, __LINE__, ## args);  } \
 while (0)
 #else
 #define C2K_ERR(format, args...) do {} while (0)
@@ -223,12 +218,33 @@ extern unsigned int upstream_cnt[_MAX_TID];
 extern unsigned int total_drop[_MAX_TID];
 extern unsigned int alloc_fail[_MAX_TID];
 extern unsigned int total_tran[_MAX_TID];
-extern unsigned long volatile jiffies;
 
 
 #ifdef C2K_USB_UT
 extern int delay_set;
 extern int ut_err;
+static inline int modem_dtr_set(int on, int low_latency)
+{
+	return 0;
+}
+
+static inline int modem_dcd_state(void)
+{
+	return 0;
+}
+
+static inline int ccci_c2k_buffer_push(int port_num, void *buf, int count)
+{
+	return 0;
+}
+
+static inline int ccci_c2k_rawbulk_intercept(int port_num, unsigned int inception)
+{
+	return 0;
+}
+#else
+extern int modem_dtr_set(int on, int low_latency);
+extern int modem_dcd_state(void);
 #endif
 
 extern int rawbulk_bind_config(struct usb_configuration *c, int transfer_id);

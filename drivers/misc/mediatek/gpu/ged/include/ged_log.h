@@ -50,18 +50,6 @@ int ged_log_buf_get_early(const char* pszName, GED_LOG_BUF_HANDLE *callback_set_
 
 GED_ERROR ged_log_buf_print(GED_LOG_BUF_HANDLE hLogBuf, const char *fmt, ...) GED_LOG_BUF_FORMAT_PRINTF(2,3);
 
-enum
-{
-    /* bit 0~7 reserved for internal used */
-    GED_RESVERED                = 0xFF,
-
-    /* log with a prefix kernel time */
-    GED_LOG_ATTR_TIME           = 0x100,
-
-    /* log with a prefix user time, pid, tid */
-    GED_LOG_ATTR_TIME_TPT       = 0x200,
-};
-
 GED_ERROR ged_log_buf_print2(GED_LOG_BUF_HANDLE hLogBuf, int i32LogAttrs, const char *fmt, ...) GED_LOG_BUF_FORMAT_PRINTF(3,4);
 
 GED_ERROR ged_log_system_init(void);
@@ -76,12 +64,8 @@ void ged_log_trace_end(void);
 
 void ged_log_trace_counter(char *name, int count);
 
-#ifdef GED_DEBUG_IOCTL_LOCK
-extern GED_LOG_BUF_HANDLE ghLogBuf_ged_ioctl_log;
-#define GED_DEBUG_IOCTL_LOCK_LOG(fmt, ...) \
-	ged_log_buf_print2(ghLogBuf_ged_ioctl_log, GED_LOG_ATTR_TIME_TPT, fmt, ##__VA_ARGS__)
-#else
-#define GED_DEBUG_IOCTL_LOCK_LOG(...)
-#endif
+void ged_log_perf_trace_counter(char *name, long long count, int pid, unsigned long frameID);
+
+void ged_log_dump(GED_LOG_BUF_HANDLE hLogBuf);
 
 #endif

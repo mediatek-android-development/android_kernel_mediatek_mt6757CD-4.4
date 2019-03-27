@@ -411,7 +411,7 @@ static int rt5081_set_usbsw_state(struct rt5081_pmu_charger_data *chg_data,
 
 	if (chg_data->usb_switch)
 		switch_set_state(chg_data->usb_switch, state);
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 	else {
 		if (state == RT5081_USBSW_CHG)
 			Charger_Detect_Init();
@@ -1865,7 +1865,7 @@ static int rt5081_set_pep20_current_pattern(struct mtk_charger_info *mchr_info,
 static int rt5081_set_pep20_efficiency_table(struct mtk_charger_info *mchr_info, void *data)
 {
 	int ret = 0;
-	pep20_profile_t *profile = (pep20_profile_t *)data;
+	struct _pep20_profile *profile = (struct _pep20_profile *)data;
 
 	profile[0].vchr = 8000;
 	profile[1].vchr = 8000;

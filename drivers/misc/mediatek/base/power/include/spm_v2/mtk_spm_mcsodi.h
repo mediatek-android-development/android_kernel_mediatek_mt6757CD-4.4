@@ -22,8 +22,8 @@
 
 
 #define MCSODI_TAG     "[MS] "
-#define ms_err(fmt, args...)	pr_err(MCSODI_TAG fmt, ##args)
-#define ms_warn(fmt, args...)	pr_warn(MCSODI_TAG fmt, ##args)
+#define ms_err(fmt, args...)	pr_info(MCSODI_TAG fmt, ##args)
+#define ms_warn(fmt, args...)	pr_info(MCSODI_TAG fmt, ##args)
 #define ms_debug(fmt, args...)	pr_debug(MCSODI_TAG fmt, ##args)
 
 #define WAKE_SRC_FOR_MCSODI \
@@ -83,3 +83,4 @@ static inline void spm_mcsodi_aee_init(void)
 
 
 #endif /* __MT_SPM_MCSODI_H_ */
+

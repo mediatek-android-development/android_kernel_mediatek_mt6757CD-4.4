@@ -323,7 +323,7 @@ static void process_dbg_opt(const char *opt)
 		}
 
 		if (level) {
-			disp_pwm_id_t pwm_id = DISP_PWM0;
+			enum disp_pwm_id_t pwm_id = DISP_PWM0;
 
 			if (opt[3] == '1')
 				pwm_id = DISP_PWM1;
@@ -380,7 +380,6 @@ static void process_dbg_opt(const char *opt)
 		disp_color_dbg_log_level(debug_level);
 
 		sprintf(buf, "color_dbg_en = 0x%x\n", debug_level);
-#if 0 /* FIXME: tmp comment */
 	} else if (strncmp(opt, "corr_dbg:", 9) == 0) {
 		char *p = (char *)opt + 9;
 
@@ -391,7 +390,6 @@ static void process_dbg_opt(const char *opt)
 		}
 
 		sprintf(buf, "corr_dbg_en = 0x%x\n", corr_dbg_en);
-#endif
 	} else if (strncmp(opt, "aal_test:", 9) == 0) {
 		aal_test(opt + 9, buf);
 	} else if (strncmp(opt, "pwm_test:", 9) == 0) {
@@ -515,9 +513,9 @@ static void process_dbg_opt(const char *opt)
 
 		DSI_set_cmdq_V2(DISP_MODULE_DSI0, NULL, cmd, para_cnt, para, 1);
 
-		DISPMSG("set_dsi_cmd cmd=0x%x\n", cmd);
+		DISPCHECK("set_dsi_cmd cmd=0x%x\n", cmd);
 		for (i = 0; i < para_cnt; i++)
-			DISPMSG("para[%d] = 0x%x\n", i, para[i]);
+			DISPCHECK("para[%d] = 0x%x\n", i, para[i]);
 
 	} else if (strncmp(opt, "dsi_read:", 9) == 0) {
 		int cmd;
@@ -537,7 +535,7 @@ static void process_dbg_opt(const char *opt)
 
 		for (i = 0; i < size; i++)
 			tmp += snprintf(buf + tmp, buf_size_left - tmp, "para[%d]=0x%x,", i, para[i]);
-		DISPMSG("%s\n", buf);
+		DISPCHECK("%s\n", buf);
 	} else {
 		dbg_buf[0] = '\0';
 		goto Error;

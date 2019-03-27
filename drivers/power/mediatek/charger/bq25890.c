@@ -402,12 +402,12 @@ unsigned int bq25890_read_interface(unsigned char RegNum, unsigned char *val, un
 
 	ret = bq25890_read_byte(RegNum, &bq25890_reg);
 
-	pr_debug_ratelimited("[bq25890_read_interface] Reg[%x]=0x%x\n", RegNum, bq25890_reg);
+	chr_debug("[bq25890_read_interface] Reg[%x]=0x%x\n", RegNum, bq25890_reg);
 
 	bq25890_reg &= (MASK << SHIFT);
 	*val = (bq25890_reg >> SHIFT);
 
-	pr_debug_ratelimited("[bq25890_read_interface] val=0x%x\n", *val);
+	chr_debug("[bq25890_read_interface] val=0x%x\n", *val);
 
 	return ret;
 }
@@ -428,7 +428,7 @@ unsigned int bq25890_config_interface(unsigned char RegNum, unsigned char val, u
 
 	ret = bq25890_write_byte(RegNum, bq25890_reg);
 	mutex_unlock(&bq25890_access_lock);
-	pr_debug_ratelimited("[bq25890_config_interface] write Reg[%x]=0x%x from 0x%x\n", RegNum,
+	chr_debug("[bq25890_config_interface] write Reg[%x]=0x%x from 0x%x\n", RegNum,
 		    bq25890_reg, bq25890_reg_ori);
 
 	/* Check */
@@ -1202,7 +1202,7 @@ static int bq25890_get_charger_type(struct bq25890_info *info)
 
 	pg_stat = bq25890_get_pg_state();
 	vbus_stat = bq25890_get_vbus_state();
-	pr_err("vbus_stat: 0x%x, pg_stat:0x%x\n", vbus_stat, pg_stat);
+	pr_notice("vbus_stat: 0x%x, pg_stat:0x%x\n", vbus_stat, pg_stat);
 
 	switch (vbus_stat) {
 	case 0: /* No input */
@@ -1236,7 +1236,7 @@ static int bq25890_set_charger_type(struct bq25890_info *info)
 	int ret = 0;
 	union power_supply_propval propval;
 
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 	if (info->chg_type == STANDARD_HOST ||
 	    info->chg_type == CHARGING_HOST)
 		Charger_Detect_Release();
@@ -1249,14 +1249,14 @@ static int bq25890_set_charger_type(struct bq25890_info *info)
 	ret = power_supply_set_property(info->psy,
 		POWER_SUPPLY_PROP_ONLINE, &propval);
 	if (ret < 0)
-		pr_err("%s: inform power supply online failed, ret = %d\n",
+		pr_notice("%s: inform power supply online failed, ret = %d\n",
 			__func__, ret);
 
 	propval.intval = info->chg_type;
 	ret = power_supply_set_property(info->psy,
 		POWER_SUPPLY_PROP_CHARGE_TYPE, &propval);
 	if (ret < 0)
-		pr_err("%s: inform power supply type failed, ret = %d\n",
+		pr_notice("%s: inform power supply type failed, ret = %d\n",
 			__func__, ret);
 
 	return ret;
@@ -1822,7 +1822,7 @@ static int bq25890_dump_register(struct charger_device *chg_dev)
 	bq25890_ADC_start(1);
 	for (i = 0; i < bq25890_REG_NUM; i++) {
 		bq25890_read_byte(i, &bq25890_reg[i]);
-		pr_debug("[bq25890 reg@][0x%x]=0x%x ", i, bq25890_reg[i]);
+		chr_debug("[bq25890 reg@][0x%x]=0x%x ", i, bq25890_reg[i]);
 	}
 	bq25890_ADC_start(1);
 	iinlim = bq25890_get_iinlim();
@@ -1866,7 +1866,7 @@ static irqreturn_t bq25890_irq_handler(int irq, void *data)
 	if (pg_stat) {
 		info->chg_type = bq25890_get_charger_type(info);
 	} else {
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 		Charger_Detect_Init();
 #endif
 		info->chg_type = CHARGER_UNKNOWN;
@@ -1925,17 +1925,17 @@ static int bq25890_parse_dt(struct bq25890_info *info, struct device *dev)
 
 	if (of_property_read_string(np, "charger_name", &info->chg_dev_name) < 0) {
 		info->chg_dev_name = "primary_chg";
-		pr_err("%s: no charger name\n", __func__);
+		pr_warn("%s: no charger name\n", __func__);
 	}
 
 	if (of_property_read_string(np, "alias_name", &(info->chg_props.alias_name)) < 0) {
 		info->chg_props.alias_name = "bq25890";
-		pr_err("%s: no alias name\n", __func__);
+		pr_warn("%s: no alias name\n", __func__);
 	}
 
 	if (of_property_read_string(np, "eint_name", &info->eint_name) < 0) {
 		info->eint_name = "chr_stat";
-		pr_err("%s: no eint name\n", __func__);
+		pr_warn("%s: no eint name\n", __func__);
 	}
 
 	return 0;
@@ -2037,7 +2037,7 @@ static int bq25890_driver_probe(struct i2c_client *client, const struct i2c_devi
 	info->chg_dev = charger_device_register(info->chg_dev_name,
 		&client->dev, info, &bq25890_chg_ops, &info->chg_props);
 	if (IS_ERR_OR_NULL(info->chg_dev)) {
-		pr_err("%s: register charger device  failed\n", __func__);
+		pr_err("%s: register charger device failed\n", __func__);
 		ret = PTR_ERR(info->chg_dev);
 		return ret;
 	}
@@ -2054,7 +2054,7 @@ static int bq25890_driver_probe(struct i2c_client *client, const struct i2c_devi
 
 	/* Force charger type detection */
 
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 	Charger_Detect_Init();
 #endif
 	msleep(50);

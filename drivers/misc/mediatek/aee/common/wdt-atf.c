@@ -34,13 +34,14 @@
 #include <asm/memory.h>
 #include <asm/traps.h>
 #include <linux/compiler.h>
+#include <linux/reboot.h>
 /* #include <mach/fiq_smp_call.h> */
 #ifdef CONFIG_MTK_WATCHDOG
 #include <mach/wd_api.h>
 #include <ext_wd_drv.h>
 #endif
 #include "aee-common.h"
-#include <mach/mtk_secure_api.h>
+#include <mt-plat/mtk_secure_api.h>
 #ifdef CONFIG_MTK_EIC_HISTORY_DUMP
 #include <linux/irqchip/mtk-eic.h>
 #endif
@@ -58,16 +59,16 @@
 #define MAX_EXCEPTION_FRAME	16
 #define PRINTK_BUFFER_SIZE	512
 
-/* NR_CPUS may not eaqual to real cpu numbers, alloc buffer at initialization */
-static char *wdt_percpu_log_buf[NR_CPUS];
-static int wdt_percpu_log_length[NR_CPUS];
+/* AEE_MTK_CPU_NUMS may not eaqual to real cpu numbers, alloc buffer at initialization */
+static char *wdt_percpu_log_buf[AEE_MTK_CPU_NUMS];
+static int wdt_percpu_log_length[AEE_MTK_CPU_NUMS];
 static char wdt_log_buf[WDT_LOG_DEFAULT_SIZE];
-static int wdt_percpu_preempt_cnt[NR_CPUS];
-static unsigned long wdt_percpu_stackframe[NR_CPUS][MAX_EXCEPTION_FRAME];
+static int wdt_percpu_preempt_cnt[AEE_MTK_CPU_NUMS];
+static unsigned long wdt_percpu_stackframe[AEE_MTK_CPU_NUMS][MAX_EXCEPTION_FRAME];
 static int wdt_log_length;
 static atomic_t wdt_enter_fiq;
 static char printk_buf[PRINTK_BUFFER_SIZE];
-static char str_buf[NR_CPUS][PRINTK_BUFFER_SIZE];
+static char str_buf[AEE_MTK_CPU_NUMS][PRINTK_BUFFER_SIZE];
 
 #ifndef CONFIG_MTK_RAM_CONSOLE
 __weak void aee_sram_fiq_save_bin(const char *msg, size_t len)
@@ -97,19 +98,23 @@ struct stacks_buffer {
 	unsigned long top;
 	unsigned long bottom;
 };
-static struct stacks_buffer stacks_buffer_bin[NR_CPUS];
+static struct stacks_buffer stacks_buffer_bin[AEE_MTK_CPU_NUMS];
 
 struct regs_buffer {
 	struct pt_regs regs;
 	int real_len;
+	struct task_struct *tsk;
 };
-static struct regs_buffer regs_buffer_bin[NR_CPUS];
+static struct regs_buffer regs_buffer_bin[AEE_MTK_CPU_NUMS];
 
 
 int in_fiq_handler(void)
 {
 	return atomic_read(&wdt_enter_fiq);
 }
+
+/* debug EMI */
+__weak void dump_emi_outstanding(void) {}
 
 void aee_wdt_dump_info(void)
 {
@@ -122,7 +127,7 @@ void aee_wdt_dump_info(void)
 	aee_rr_rec_fiq_step(AEE_FIQ_STEP_KE_WDT_INFO);
 #endif
 	if (wdt_log_length == 0) {
-		LOGE("\n No log for WDT\n");
+		pr_notice("\n No log for WDT\n");
 #ifdef CONFIG_MTK_SCHED_MONITOR
 		mt_dump_sched_traces();
 #endif
@@ -132,12 +137,11 @@ void aee_wdt_dump_info(void)
 #ifdef CONFIG_MTK_RAM_CONSOLE
 	aee_rr_rec_fiq_step(AEE_FIQ_STEP_KE_WDT_PERCPU);
 #endif
-	LOGE("==========================================\n");
-	for (cpu = 0; cpu < NR_CPUS; cpu++) {
+	pr_info("==========================================\n");
+	for (cpu = 0; cpu < AEE_MTK_CPU_NUMS; cpu++) {
 		if ((wdt_percpu_log_buf[cpu]) && (wdt_percpu_log_length[cpu])) {
 			log_buf_ptr = wdt_percpu_log_buf[cpu];
 			while (wdt_percpu_log_length[cpu] > 0) {
-				/* LOGE( "==> wdt_percpu_log_buf[%d], length=%d ", cpu, wdt_percpu_log_length[cpu]); */
 				if (wdt_percpu_log_length[cpu] > (PRINTK_BUFFER_SIZE - 1)) {
 					i = PRINTK_BUFFER_SIZE - 1;
 					printk_buf[PRINTK_BUFFER_SIZE - 1] = 0;
@@ -146,28 +150,28 @@ void aee_wdt_dump_info(void)
 					printk_buf[i] = 0;
 				}
 				memcpy(printk_buf, log_buf_ptr, i);
-				LOGE("%s", printk_buf);
+				pr_info("%s", printk_buf);
 				log_buf_ptr += i;
 				wdt_percpu_log_length[cpu] -= i;
 			}
 
-			LOGE("Backtrace : ");
+			pr_info("Backtrace : ");
 			for (i = 0; i < MAX_EXCEPTION_FRAME; i++) {
 				if (wdt_percpu_stackframe[cpu][i] == 0)
 					break;
 #ifdef CONFIG_ARM64
-				LOGE("%016lx, ", wdt_percpu_stackframe[cpu][i]);
+				pr_info("%016lx, ", wdt_percpu_stackframe[cpu][i]);
 #else
-				LOGE("%08lx, ", wdt_percpu_stackframe[cpu][i]);
+				pr_info("%08lx, ", wdt_percpu_stackframe[cpu][i]);
 #endif
 			}
-			LOGE("\n==========================================\n");
+			pr_info("\n==========================================\n");
 		}
 	}
 #ifdef CONFIG_MTK_RAM_CONSOLE
 	aee_rr_rec_fiq_step(AEE_FIQ_STEP_KE_WDT_LOG);
 #endif
-	/* LOGE( "==> wdt_log_length=%d ", wdt_log_length); */
+	/* pr_info( "==> wdt_log_length=%d ", wdt_log_length); */
 	/* printk temporary buffer only 1024,  */
 	log_buf_ptr = wdt_log_buf;
 	while (wdt_log_length > 0) {
@@ -179,7 +183,7 @@ void aee_wdt_dump_info(void)
 			printk_buf[i] = 0;
 		}
 		memcpy(printk_buf, log_buf_ptr, i);
-		LOGE("%s", printk_buf);
+		pr_info("%s", printk_buf);
 		log_buf_ptr += i;
 		wdt_log_length -= i;
 	}
@@ -190,9 +194,9 @@ void aee_wdt_dump_info(void)
 
 	for_each_process(task) {
 		if (task->state == 0) {
-			LOGE("PID: %d, name: %s\n", task->pid, task->comm);
+			pr_notice("PID: %d, name: %s\n", task->pid, task->comm);
 			show_stack(task, NULL);
-			LOGE("\n");
+			pr_notice("\n");
 		}
 	}
 #ifdef CONFIG_MTK_EIC_HISTORY_DUMP
@@ -283,12 +287,12 @@ static void aee_wdt_dump_stack_bin(unsigned int cpu, unsigned long bottom, unsig
 		aee_wdt_percpu_printf(cpu, "%s bottom unaligned %08lx\n", __func__, bottom);
 		return;
 	}
-	if (!((bottom >= (PAGE_OFFSET + THREAD_SIZE)) && virt_addr_valid(bottom))) {
+	if (!((bottom >= (PAGE_OFFSET + THREAD_SIZE)) && mrdump_virt_addr_valid(bottom))) {
 		aee_wdt_percpu_printf(cpu, "%s bottom out of kernel addr space %08lx\n", __func__,
 				      bottom);
 		return;
 	}
-	if (!((top >= (PAGE_OFFSET + THREAD_SIZE)) && virt_addr_valid(bottom))) {
+	if (!((top >= (PAGE_OFFSET + THREAD_SIZE)) && mrdump_virt_addr_valid(bottom))) {
 		aee_wdt_percpu_printf(cpu, "%s top out of kernel addr space %08lx\n", __func__,
 				      top);
 		return;
@@ -324,7 +328,7 @@ static void aee_wdt_dump_backtrace(unsigned int cpu, struct pt_regs *regs)
 	struct pt_regs *excp_regs;
 
 	bottom = regs->reg_sp;
-	if (!virt_addr_valid(bottom)) {
+	if (!mrdump_virt_addr_valid(bottom)) {
 		aee_wdt_percpu_printf(cpu, "invalid sp[%lx]\n", bottom);
 		return;
 	}
@@ -336,29 +340,39 @@ static void aee_wdt_dump_backtrace(unsigned int cpu, struct pt_regs *regs)
 	for (i = 1; i < MAX_EXCEPTION_FRAME; i++) {
 		fp = cur_frame.fp;
 		if ((fp < bottom) || (fp >= (high + THREAD_SIZE))) {
-			/* aee_wdt_percpu_printf(cpu, "i=%d, fp=%lx, bottom=%lx\n", i, fp, bottom); */
+			aee_wdt_percpu_printf(cpu, "i=%d, fp=%lx, bottom=%lx\n", i, fp, bottom);
 			break;
 		}
+#ifdef CONFIG_ARM64
+		if (unwind_frame(current, &cur_frame) < 0) {
+			aee_wdt_percpu_printf(cpu, "unwind_frame < 0\n");
+			break;
+		}
+#else
 		if (unwind_frame(&cur_frame) < 0) {
 			aee_wdt_percpu_printf(cpu, "unwind_frame < 0\n");
 			break;
 		}
-		if (!((cur_frame.pc >= (PAGE_OFFSET + THREAD_SIZE))
-		      && virt_addr_valid(cur_frame.pc))) {
-			aee_wdt_percpu_printf(cpu, "virt_addr_valid fail\n");
+#endif
+		if (!mrdump_virt_addr_valid(cur_frame.pc)) {
+			aee_wdt_percpu_printf(cpu, "i=%d, mrdump_virt_addr_valid fail\n", i);
 			break;
 		}
 		if (in_exception_text(cur_frame.pc)) {
 #ifdef CONFIG_ARM64
 			/* work around for unknown reason do_mem_abort stack abnormal */
 			excp_regs = (void *)(cur_frame.fp + 0x10 + 0xa0);
-			unwind_frame(&cur_frame);	/* skip do_mem_abort & el1_da */
+			if (unwind_frame(current, &cur_frame) < 0) {	/* skip do_mem_abort & el1_da */
+				aee_wdt_percpu_printf(cpu, "in_exception_text unwind_frame < 0\n");
+			}
 #else
 			excp_regs = (void *)(cur_frame.fp + 4);
 #endif
 			cur_frame.pc = excp_regs->reg_pc;
 		}
-		wdt_percpu_stackframe[cpu][i] = cur_frame.pc;
+
+		/* pc -4: bug fixed for add2line */
+		wdt_percpu_stackframe[cpu][i] = cur_frame.pc - 4;
 	}
 }
 
@@ -416,7 +430,7 @@ static void aee_save_reg_stack_sram(int cpu)
 		memset(str_buf[cpu], 0, sizeof(str_buf[cpu]));
 	}
 
-	mrdump_mini_per_cpu_regs(cpu, &regs_buffer_bin[cpu].regs);
+	mrdump_mini_per_cpu_regs(cpu, &regs_buffer_bin[cpu].regs, regs_buffer_bin[cpu].tsk);
 }
 
 void aee_wdt_irq_info(void)
@@ -455,6 +469,7 @@ void aee_wdt_atf_info(unsigned int cpu, struct pt_regs *regs)
 		aee_wdt_dump_stack_bin(cpu, regs->reg_sp, regs->reg_sp + WDT_SAVE_STACK_SIZE);
 		aee_wdt_dump_backtrace(cpu, regs);
 	}
+	regs_buffer_bin[cpu].tsk = current;
 	if (atomic_xchg(&wdt_enter_fiq, 1) != 0) {
 #ifdef CONFIG_MTK_RAM_CONSOLE
 		aee_rr_rec_fiq_step(AEE_FIQ_STEP_WDT_FIQ_LOOP);
@@ -512,7 +527,7 @@ void aee_wdt_atf_info(unsigned int cpu, struct pt_regs *regs)
 #ifdef CONFIG_MTK_RAM_CONSOLE
 		aee_rr_rec_fiq_step(AEE_FIQ_STEP_WDT_IRQ_STACK);
 #endif
-		for (cpu = 0; cpu < NR_CPUS; cpu++)
+		for (cpu = 0; cpu < AEE_MTK_CPU_NUMS; cpu++)
 			aee_save_reg_stack_sram(cpu);
 		aee_sram_fiq_log("\n\n");
 	} else {
@@ -526,12 +541,27 @@ void aee_wdt_atf_info(unsigned int cpu, struct pt_regs *regs)
 	mt_aee_dump_sched_traces();
 #endif
 
+#ifdef CONFIG_SCHED_DEBUG
+	sysrq_sched_debug_show_at_AEE();
+#endif
+
 	/* avoid lock prove to dump_stack in __debug_locks_off() */
 	xchg(&debug_locks, 0);
 #ifdef CONFIG_MTK_RAM_CONSOLE
 	aee_rr_rec_fiq_step(AEE_FIQ_STEP_WDT_IRQ_DONE);
 #endif
-	BUG();
+
+	dump_emi_outstanding();
+
+#ifdef CONFIG_MTK_WATCHDOG
+	if ((mtk_rgu_status_is_sysrst() || mtk_rgu_status_is_eintrst())) {
+		aee_sram_fiq_log("\nreboot by MRDUMP_KEY\n");
+		__mrdump_create_oops_dump(AEE_REBOOT_MODE_MRDUMP_KEY, regs, "MRDUMP_KEY");
+	} else
+#endif
+		__mrdump_create_oops_dump(AEE_REBOOT_MODE_WDT, regs, "WDT/HWT");
+
+	emergency_restart();
 }
 
 void notrace aee_wdt_atf_entry(void)
@@ -542,10 +572,18 @@ void notrace aee_wdt_atf_entry(void)
 	void *regs;
 	struct pt_regs pregs;
 	int cpu = get_HW_cpuid();
-
 #ifdef CONFIG_MTK_RAM_CONSOLE
+#ifdef CONFIG_MTK_WATCHDOG
+	if (mtk_rgu_status_is_sysrst() || mtk_rgu_status_is_eintrst())
+		aee_rr_rec_exp_type(4);
+	else
+		aee_rr_rec_exp_type(1);
+#else
 	aee_rr_rec_exp_type(1);
 #endif
+#endif
+	__disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2();
+
 	if (atf_aee_debug_virt_addr) {
 		regs = (void *)(atf_aee_debug_virt_addr + (cpu * sizeof(struct atf_aee_regs)));
 
@@ -602,12 +640,12 @@ static int __init aee_wdt_init(void)
 	atomic_set(&wdt_enter_fiq, 0);
 	atomic_set(&aee_wdt_zap_lock, 1);
 
-	for (i = 0; i < NR_CPUS; i++) {
+	for (i = 0; i < AEE_MTK_CPU_NUMS; i++) {
 		wdt_percpu_log_buf[i] = kzalloc(WDT_PERCPU_LOG_SIZE, GFP_KERNEL);
-		if (wdt_percpu_log_buf[i] == NULL)
-			LOGE("\n aee_common_init : kmalloc fail\n");
 		wdt_percpu_log_length[i] = 0;
 		wdt_percpu_preempt_cnt[i] = 0;
+		if (wdt_percpu_log_buf[i] == NULL)
+			pr_notice("\n aee_common_init : kmalloc fail\n");
 	}
 	memset(wdt_log_buf, 0, sizeof(wdt_log_buf));
 	memset(regs_buffer_bin, 0, sizeof(regs_buffer_bin));
@@ -627,14 +665,14 @@ static int __init aee_wdt_init(void)
 						mt_secure_call(MTK_SIP_KERNEL_WDT,
 							(u32) &aee_wdt_atf_entry, 0, 0));
 #endif
-	LOGD("\n MTK_SIP_KERNEL_WDT - 0x%p\n", &aee_wdt_atf_entry);
+	pr_notice("\n MTK_SIP_KERNEL_WDT - 0x%p\n", &aee_wdt_atf_entry);
 
 	if ((atf_aee_debug_phy_addr == 0) || (atf_aee_debug_phy_addr == 0xFFFFFFFF)) {
-		LOGE("\n invalid atf_aee_debug_phy_addr\n");
+		pr_notice("\n invalid atf_aee_debug_phy_addr\n");
 	} else {
 		/* use the last 16KB in ATF log buffer */
 		atf_aee_debug_virt_addr = ioremap(atf_aee_debug_phy_addr, ATF_AEE_DEBUG_BUF_LENGTH);
-		LOGD("\n atf_aee_debug_virt_addr = 0x%p\n", atf_aee_debug_virt_addr);
+		pr_notice("\n atf_aee_debug_virt_addr = 0x%p\n", atf_aee_debug_virt_addr);
 		if (atf_aee_debug_virt_addr)
 			memset_io(atf_aee_debug_virt_addr, 0, ATF_AEE_DEBUG_BUF_LENGTH);
 	}

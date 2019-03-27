@@ -48,8 +48,7 @@ enum {
 	FG_SUSPEND = 2,
 	FG_RESUME = 4,
 	FG_CHARGER = 8,
-	FG_INIT = 16,
-	FG_ZCV_INT = 32
+	FG_INIT = 16
 };
 
 enum {
@@ -252,8 +251,6 @@ struct battery_meter_custom_data {
 	int apsleep_battery_voltage_compensate;
 
 	int bat_task_period;
-	int zcv_int_enable;
-
 
 };
 
@@ -328,8 +325,6 @@ typedef enum {
 	FG_DAEMON_CMD_SET_HWSOC,
 	FG_DAEMON_CMD_SET_VBATSOC,
 	FG_DAEMON_CMD_SET_CAR_TUNE_VALUE,
-	FG_DAEMON_CMD_GET_ZCV_INT_HW_OCV,
-	FG_DAEMON_CMD_PRINT_LOG,
 
 	FG_DAEMON_CMD_FROM_USER_NUMBER
 } FG_DAEMON_CTRL_CMD_FROM_USER;
@@ -393,6 +388,7 @@ extern signed int battery_meter_get_battery_nPercent_UI_SOC(void);	/* tracking p
 
 extern signed int battery_meter_get_tempR(signed int dwVolt);
 extern signed int battery_meter_get_tempV(void);
+extern signed int battery_meter_get_QMAX25(void);
 extern signed int battery_meter_get_VSense(void);/* isense voltage */
 extern void battery_meter_smooth_uisoc2(void);
 extern int wakeup_fg_algo(int flow_state);
@@ -424,8 +420,5 @@ extern void mt_battery_set_init_vol(int);
 #if (CONFIG_MTK_GAUGE_VERSION == 20)
 unsigned int get_cv_voltage(void);
 #endif
-extern void battery_meter_set_fg_int(void);
-
-extern signed int battery_meter_meta_tool_cali_car_tune(int meta_current);
 
 #endif /* #ifndef _BATTERY_METER_H */

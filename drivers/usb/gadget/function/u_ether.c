@@ -25,6 +25,11 @@
 #include "u_ether.h"
 #include "usb_boost.h"
 
+#ifdef CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT
+#include "mtk_gadget.h"
+#endif
+
+
 /*
  * This component encapsulates the Ethernet link glue needed to provide
  * one (!) network link through the USB gadget stack, normally "usb0".
@@ -55,51 +60,6 @@
 
 static struct workqueue_struct	*uether_wq;
 static struct workqueue_struct	*uether_wq1;
-
-
-struct eth_dev {
-	/* lock is held while accessing port_usb
-	 */
-	spinlock_t		lock;
-	struct gether		*port_usb;
-
-	struct net_device	*net;
-	struct usb_gadget	*gadget;
-
-	spinlock_t		req_lock;	/* guard {tx}_reqs */
-	spinlock_t		reqrx_lock;	/* guard {rx}_reqs */
-	struct list_head	tx_reqs, rx_reqs;
-	unsigned		tx_qlen;
-/* Minimum number of TX USB request queued to UDC */
-#define TX_REQ_THRESHOLD	5
-	int			no_tx_req_used;
-	int			tx_skb_hold_count;
-	u32			tx_req_bufsize;
-
-	struct sk_buff_head	rx_frames;
-
-	unsigned		qmult;
-
-	unsigned		header_len;
-	unsigned		ul_max_pkts_per_xfer;
-	unsigned		dl_max_pkts_per_xfer;
-	uint32_t		dl_max_xfer_size;
-	struct sk_buff		*(*wrap)(struct gether *, struct sk_buff *skb);
-	int			(*unwrap)(struct gether *,
-						struct sk_buff *skb,
-						struct sk_buff_head *list);
-
-	struct work_struct	work;
-	struct work_struct	rx_work;
-	struct work_struct	rx_work1;
-
-	unsigned long		todo;
-#define	WORK_RX_MEMORY		0
-
-	bool			zlp;
-	u8			host_mac[ETH_ALEN];
-	u8			dev_mac[ETH_ALEN];
-};
 
 /*-------------------------------------------------------------------------*/
 
@@ -473,11 +433,25 @@ static int alloc_requests(struct eth_dev *dev, struct gether *link, unsigned n)
 	return status;
 }
 
-static void rx_fill(struct eth_dev *dev, gfp_t gfp_flags)
+void rx_fill(struct eth_dev *dev, gfp_t gfp_flags)
 {
 	struct usb_request	*req;
 	unsigned long		flags;
 	int			req_cnt = 0;
+
+#ifdef CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT
+	static DEFINE_RATELIMIT_STATE(ratelimit1, 1 * HZ, 2);
+
+	int direct_state = rndis_get_direct_tethering_state(&dev->port_usb->func);
+
+	if (__ratelimit(&ratelimit1))
+		pr_info("%s (%d)\n", __func__, direct_state);
+	if (direct_state == DIRECT_STATE_ACTIVATING ||
+		direct_state == DIRECT_STATE_ACTIVATED ||
+		direct_state == DIRECT_STATE_DEACTIVATING) {
+		return;
+	}
+#endif
 
 	/* fill unused rxq slots with some skb */
 	spin_lock_irqsave(&dev->reqrx_lock, flags);
@@ -690,11 +664,11 @@ static void tx_complete(struct usb_ep *ep, struct usb_request *req)
 		spin_unlock(&dev->req_lock);
 		dev_kfree_skb_any(skb);
 	}
-
+	atomic_dec(&dev->tx_qlen);
 	if (netif_carrier_ok(dev->net)) {
 		spin_lock(&dev->req_lock);
 		if (dev->no_tx_req_used < tx_wakeup_threshold)
-		netif_wake_queue(dev->net);
+			netif_wake_queue(dev->net);
 		spin_unlock(&dev->req_lock);
 	}
 
@@ -763,6 +737,21 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	static unsigned int okCnt, busyCnt;
 	static DEFINE_RATELIMIT_STATE(ratelimit1, 1 * HZ, 2);
 	static DEFINE_RATELIMIT_STATE(ratelimit2, 1 * HZ, 2);
+
+#ifdef CONFIG_MTK_MD_DIRECT_TETHERING_SUPPORT
+	static DEFINE_RATELIMIT_STATE(ratelimit3, 1 * HZ, 2);
+	int direct_state = rndis_get_direct_tethering_state(&dev->port_usb->func);
+
+	if (__ratelimit(&ratelimit3))
+		pr_info("%s (%d)\n", __func__, direct_state);
+
+	if (direct_state == DIRECT_STATE_ACTIVATING ||
+		direct_state == DIRECT_STATE_ACTIVATED ||
+		direct_state == DIRECT_STATE_DEACTIVATING) {
+		dev_kfree_skb_any(skb);
+		return NETDEV_TX_OK;
+	}
+#endif
 
 	spin_lock_irqsave(&dev->lock, flags);
 	if (dev->port_usb) {
@@ -935,18 +924,12 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	req->length = length;
 
 	/* throttle high/super speed IRQ rate back slightly */
-	if (gadget_is_dualspeed(dev->gadget) &&
-			 (dev->gadget->speed == USB_SPEED_HIGH)) {
-		dev->tx_qlen++;
-		if (dev->tx_qlen == (dev->qmult/2)) {
-			req->no_interrupt = 0;
-			dev->tx_qlen = 0;
-		} else {
-			req->no_interrupt = 1;
-		}
-	} else {
-		req->no_interrupt = 0;
-	}
+	if (gadget_is_dualspeed(dev->gadget))
+		req->no_interrupt = (((dev->gadget->speed == USB_SPEED_HIGH ||
+				       dev->gadget->speed == USB_SPEED_SUPER)) &&
+					!list_empty(&dev->tx_reqs))
+			? ((atomic_read(&dev->tx_qlen) % dev->qmult) != 0)
+			: 0;
 
 	retval = usb_ep_queue(in, req, GFP_ATOMIC);
 	switch (retval) {
@@ -956,6 +939,7 @@ static netdev_tx_t eth_start_xmit(struct sk_buff *skb,
 	case 0:
 		rndis_test_tx_usb_out++;
 		net->trans_start = jiffies;
+		atomic_inc(&dev->tx_qlen);
 	}
 
 	if (retval) {
@@ -986,7 +970,7 @@ static void eth_start(struct eth_dev *dev, gfp_t gfp_flags)
 	rx_fill(dev, gfp_flags);
 
 	/* and open the tx floodgates */
-	dev->tx_qlen = 0;
+	atomic_set(&dev->tx_qlen, 0);
 	netif_wake_queue(dev->net);
 }
 
@@ -1014,6 +998,7 @@ static int eth_stop(struct net_device *net)
 	unsigned long	flags;
 
 	U_ETHER_DBG("\n");
+	pr_info("%s, START !!!!\n", __func__);
 	netif_stop_queue(net);
 
 	DBG(dev, "stop stats: rx/tx %ld/%ld, errs %ld/%ld\n",
@@ -1053,6 +1038,7 @@ static int eth_stop(struct net_device *net)
 		}
 	}
 	spin_unlock_irqrestore(&dev->lock, flags);
+	pr_info("%s, END !!!!\n", __func__);
 
 	return 0;
 }
@@ -1140,6 +1126,7 @@ struct eth_dev *gether_setup_name(struct usb_gadget *g,
 	struct eth_dev		*dev;
 	struct net_device	*net;
 	int			status;
+	static unsigned char a[6] = {0x06, 0x16, 0x26, 0x36, 0x46, 0x56};
 
 	net = alloc_etherdev(sizeof *dev);
 	if (!net)
@@ -1162,13 +1149,23 @@ struct eth_dev *gether_setup_name(struct usb_gadget *g,
 	dev->qmult = qmult;
 	snprintf(net->name, sizeof(net->name), "%s%%d", netname);
 
+#if 0
+	if (get_ether_addr(dev_addr, net->dev_addr))
+		dev_warn(&g->dev, "using random %s ethernet address\n", "self");
+
+	if (get_ether_addr(host_addr, dev->host_mac))
+		dev_warn(&g->dev, "using random %s ethernet address\n", "host");
+#else
 	if (get_ether_addr(dev_addr, net->dev_addr))
 		dev_warn(&g->dev,
 			"using random %s ethernet address\n", "self");
 
-	if (get_ether_addr(host_addr, dev->host_mac))
-		dev_warn(&g->dev,
-			"using random %s ethernet address\n", "host");
+	ether_addr_copy(dev->host_mac, a);
+	pr_debug("%s, tjrndis1: %x:%x:%x:%x:%x:%x\n", __func__,
+		   dev->host_mac[0], dev->host_mac[1],
+		   dev->host_mac[2], dev->host_mac[3],
+		   dev->host_mac[4], dev->host_mac[5]);
+#endif
 
 	if (ethaddr)
 		memcpy(ethaddr, dev->host_mac, ETH_ALEN);

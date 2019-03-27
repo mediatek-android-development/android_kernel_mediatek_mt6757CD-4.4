@@ -24,17 +24,19 @@
 #include <linux/uaccess.h>
 #include <linux/io.h>
 
+#include "mtk_power_gs_internal.h"
+
 #define REMAP_SIZE_MASK     0xFFF
 
 extern bool is_already_snap_shot;
 
-typedef enum {
+enum {
 	MODE_NORMAL,
 	MODE_COMPARE,
 	MODE_APPLY,
 	MODE_COLOR,
 	MODE_DIFF,
-} print_mode;
+};
 
 struct golden_setting {
 	unsigned int addr;
@@ -51,7 +53,7 @@ struct snapshot {
 struct golden {
 	unsigned int is_golden_log;
 
-	print_mode mode;
+	unsigned int mode;
 
 	char func[64];
 	unsigned int line;
@@ -73,17 +75,44 @@ struct golden {
 #endif
 };
 
+struct phys_to_virt_table {
+	void __iomem *virt_base;
+	unsigned int phys_base;
+};
+
+struct base_remap {
+	unsigned int table_pos;
+	unsigned int table_size;
+	struct phys_to_virt_table *table;
+};
+
+struct pmic_manual_dump {
+	unsigned int array_pos;
+	unsigned int array_size;
+	unsigned int *addr_array;
+};
+
 unsigned int golden_read_reg(unsigned int addr);
 int snapshot_golden_setting(const char *func, const unsigned int line);
+void mt_power_gs_pmic_manual_dump(void);
 void mt_power_gs_compare(char *scenario, char *pmic_name,
 			 const unsigned int *pmic_gs, unsigned int pmic_gs_len);
 unsigned int _golden_read_reg(unsigned int addr);
 void _golden_write_reg(unsigned int addr, unsigned int mask, unsigned int reg_val);
 int _snapshot_golden_setting(struct golden *g, const char *func, const unsigned int line);
-void mt_power_gs_suspend_compare(void);
-void mt_power_gs_dpidle_compare(void);
+void mt_power_gs_suspend_compare(unsigned int dump_flag);
+void mt_power_gs_dpidle_compare(unsigned int dump_flag);
+void mt_power_gs_sodi_compare(unsigned int dump_flag);
 void mt_power_gs_sp_dump(void);
 
+bool _is_exist_in_phys_to_virt_table(unsigned int phys_base);
+void __iomem *_get_virt_base_from_table(unsigned int phys_base);
+unsigned int mt_power_gs_base_remap_init(char *scenario, char *pmic_name,
+			 const unsigned int *pmic_gs, unsigned int pmic_gs_len);
+void mt_power_gs_internal_init(void);
+void mt_power_gs_table_init(void);
+
 extern struct golden _golden;
+extern bool slp_chk_golden_diff_mode;
 
 #endif

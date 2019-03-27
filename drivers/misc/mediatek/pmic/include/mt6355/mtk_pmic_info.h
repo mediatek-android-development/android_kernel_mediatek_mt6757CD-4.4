@@ -21,6 +21,12 @@
 #define PMIC6355_E2_CID_CODE    0x5520
 #define PMIC6355_E3_CID_CODE    0x5530
 
+#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
+#define IPIMB
+#endif
+
+extern unsigned int pmic_ipi_test_code(void);
+
 /*
  * Debugfs
  */
@@ -35,9 +41,13 @@ extern unsigned int gPMICDbgLvl;
 
 #define PMICLOG(fmt, arg...) do { \
 	if (gPMICDbgLvl >= PMIC_LOG_DBG) \
-		pr_err(PMICTAG "%s: " fmt, __func__, ##arg); \
+		pr_notice(PMICTAG "%s: " fmt, __func__, ##arg); \
 } while (0)
 
 
+/* MT6355 Export API */
+extern unsigned int pmic_scp_set_vcore(unsigned int);
+extern unsigned int pmic_scp_set_vsram_vcore(unsigned int);
+extern unsigned int enable_vsram_vcore_hw_tracking(unsigned int en);
 
 #endif				/* _MT_PMIC_INFO_H_ */

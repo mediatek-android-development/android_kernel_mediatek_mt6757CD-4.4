@@ -649,11 +649,13 @@ typedef enum _ENUM_NO_NEED_WATIT_DROP_REASON_T {
 	PACKET_DROP_BY_DRIVER,
 	PACKET_DROP_BY_INDEPENDENT_PKT
 } ENUM_NO_NEED_WATIT_DROP_REASON_T, *P_ENUM_NO_NEED_WATIT_DROP_REASON_T;
+
 typedef struct _NO_NEED_WAIT_PKT_T {
 	QUE_ENTRY_T rQueEntry;
 	UINT_16 u2SSN;
 	ENUM_NO_NEED_WATIT_DROP_REASON_T eDropReason;
 } NO_NEED_WAIT_PKT_T, *P_NO_NEED_WAIT_PKT_T;
+
 typedef struct _EVENT_PACKET_DROP_BY_FW_T {
 	UINT_16 u2Length;
 	UINT_16 u2Reserved1;	/* Must be filled with 0x0001 (EVENT Packet) */
@@ -902,13 +904,20 @@ VOID qmDelRxBaEntry(IN P_ADAPTER_T prAdapter, IN UINT_8 ucStaRecIdx, IN UINT_8 u
 
 #if CFG_RX_BA_REORDERING_ENHANCEMENT
 VOID qmInsertNoNeedWaitPkt(IN P_SW_RFB_T prSwRfb, IN ENUM_NO_NEED_WATIT_DROP_REASON_T eDropReason);
+
 VOID qmHandleEventDropByFW(IN P_ADAPTER_T prAdapter, IN P_WIFI_EVENT_T prEvent);
+
 VOID qmHandleNoNeedWaitPktList(IN P_RX_BA_ENTRY_T prReorderQueParm);
+
 P_NO_NEED_WAIT_PKT_T qmSearchNoNeedWaitPktBySSN(IN P_RX_BA_ENTRY_T prReorderQueParm, IN UINT_32 u2SSN);
+
 BOOLEAN qmIsIndependentPkt(IN P_SW_RFB_T prSwRfb);
+
 VOID qmRemoveAllNoNeedWaitPkt(IN P_RX_BA_ENTRY_T prReorderQueParm);
+
 VOID qmDumpNoNeedWaitPkt(IN P_RX_BA_ENTRY_T prReorderQueParm);
 #endif
+
 VOID mqmProcessAssocRsp(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb, IN PUINT_8 pucIE, IN UINT_16 u2IELength);
 
 VOID mqmProcessBcn(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb, IN PUINT_8 pucIE, IN UINT_16 u2IELength);

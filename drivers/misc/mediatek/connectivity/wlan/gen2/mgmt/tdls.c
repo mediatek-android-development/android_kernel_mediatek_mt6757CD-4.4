@@ -1,54 +1,13 @@
-/******************************************************************************
- *
- * This file is provided under a dual license.  When you use or
- * distribute this software, you may choose to be licensed under
- * version 2 of the GNU General Public License ("GPLv2 License")
- * or BSD License.
- *
- * GPLv2 License
- *
- * Copyright(C) 2016 MediaTek Inc.
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of version 2 of the GNU General Public License as
- * published by the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but
- * WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
- * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
- *
- * BSD LICENSE
- *
- * Copyright(C) 2016 MediaTek Inc. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- *  * Neither the name of the copyright holder nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- *****************************************************************************/
+/*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
 
 /*******************************************************************************
  *						C O M P I L E R	 F L A G S
@@ -1635,7 +1594,7 @@ static void TdlsCmdTestTxTdlsFrame(P_GLUE_INFO_T prGlueInfo, UINT_8 *prInBuf, UI
 {
 	PARAM_CUSTOM_TDLS_CMD_STRUCT_T rCmd;
 	UINT32 u4Subcmd;
-	UINT_32 u4BufLen;
+	UINT_32 u4BufLen = 0;
 
 	/* parse sub-command */
 	u4Subcmd = CmdStringDecParse(prInBuf, &prInBuf, &u4InBufLen);
@@ -3414,6 +3373,100 @@ TdlsSetupConf(ADAPTER_T *prAdapter, VOID *pvSetBuffer, UINT_32 u4SetBufferLen, U
 	return TDLS_STATUS_SUCCESS;
 }
 
+TDLS_STATUS
+TdlsexEnableDisableLink(ADAPTER_T *prAdapter,
+			PUINT_8 pucPeerMacAddr,
+			BOOLEAN fgEnable,
+			ENUM_NETWORK_TYPE_INDEX_T eNetworkType)
+{
+
+	STA_RECORD_T *prStaRec;
+	TDLS_LINK_HIS_OTHERS_T rHisOthers;
+	UINT_32 u4BufLen;	/* no use */
+	GLUE_INFO_T *prGlueInfo;
+	BSS_INFO_T *prBssInfo;
+
+	if (!prAdapter || !prAdapter->prGlueInfo)
+		return TDLS_STATUS_FAILURE;
+
+	prStaRec = cnmGetStaRecByAddress(prAdapter, (UINT_8)eNetworkType, pucPeerMacAddr);
+
+	if (prStaRec == NULL) {
+		DBGLOG(TDLS, ERROR, "Cannot find the peer! %pM\n", pucPeerMacAddr);
+		return TDLS_STATUS_FAILURE;
+	}
+
+	prGlueInfo = (GLUE_INFO_T *) prAdapter->prGlueInfo;
+
+	DBGLOG(TDLS, INFO, "STA_INDEX: %d, %s\n", prStaRec->ucIndex,
+	      fgEnable ? "NL80211_TDLS_ENABLE_LINK" : "NL80211_TDLS_DISABLE_LINK");
+
+	if (fgEnable) {
+		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_3);
+
+		/* update key information after cnmStaRecChangeState(STA_STATE_3) */
+		prStaRec->fgTdlsInSecurityMode = FALSE;
+
+		if (prStaRec->rTdlsKeyTemp.u4Length <= 0)
+			DBGLOG(TDLS, INFO, "Empty Key, key length = 0\n");
+		else {
+			DBGLOG_MEM8(TDLS, TRACE,  prStaRec->rTdlsKeyTemp.aucKeyMaterial,
+						prStaRec->rTdlsKeyTemp.u4KeyLength);
+
+			/*
+			 * reminder the function that we are CIPHER_SUITE_CCMP,
+			 * do not change cipher type to CIPHER_SUITE_WEP128
+			 */
+			eNetworkType == NETWORK_TYPE_AIS_INDEX ?
+				_wlanoidSetAddKey(prAdapter, &prStaRec->rTdlsKeyTemp,
+					  prStaRec->rTdlsKeyTemp.u4Length, FALSE, CIPHER_SUITE_CCMP, &u4BufLen) :
+				_wlanoidSetAddP2PTDLSKey(prAdapter, &prStaRec->rTdlsKeyTemp,
+						prStaRec->rTdlsKeyTemp.u4Length, &u4BufLen);
+
+			/* clear the temp key */
+			prStaRec->fgTdlsInSecurityMode = TRUE;
+			kalMemZero(&prStaRec->rTdlsKeyTemp, sizeof(prStaRec->rTdlsKeyTemp));
+		}
+
+		/* check if we need to disable channel switch function */
+		prBssInfo = &(prAdapter->rWifiVar.arBssInfo[prStaRec->ucNetTypeIndex]);
+		if (prBssInfo->fgTdlsIsChSwProhibited == TRUE) {
+			TDLS_CMD_CORE_T rCmd;
+
+			kalMemZero(&rCmd, sizeof(TDLS_CMD_CORE_T));
+			rCmd.Content.rCmdChSwConf.ucNetTypeIndex = prStaRec->ucNetTypeIndex;
+			rCmd.Content.rCmdChSwConf.fgIsChSwEnabled = FALSE;
+			kalMemCopy(rCmd.aucPeerMac, prStaRec->aucMacAddr, 6);
+			TdlsChSwConf(prAdapter, &rCmd, 0, 0);
+
+			DBGLOG(TDLS, INFO, "<tdls_cfg> %s: disable channel switch\n", __func__);
+		}
+
+		TDLS_LINK_INCREASE(prGlueInfo);
+
+		/* record link */
+		if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11N)
+			rHisOthers.fgIsHt = TRUE;
+		else
+			rHisOthers.fgIsHt = FALSE;
+
+		TdlsLinkHistoryRecord(prAdapter->prGlueInfo, FALSE,
+				      prStaRec->aucMacAddr, !prStaRec->flgTdlsIsInitiator, 0, &rHisOthers);
+
+		return TDLS_STATUS_SUCCESS;
+	}
+
+	/* Disable TDLS link */
+	prGlueInfo->i4TdlsLastTx = -1;
+	prGlueInfo->eTdlsStatus = MTK_TDLS_LINK_DISABLE;
+	cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
+	cnmStaRecFree(prAdapter, prStaRec, TRUE);	/* release to other TDLS peers */
+
+	TDLS_LINK_DECREASE(prGlueInfo);
+
+	return TDLS_STATUS_SUCCESS;
+}
+
 /*----------------------------------------------------------------------------*/
 /*! \brief  This routine is called to configure UAPSD parameters.
 *
@@ -3644,28 +3697,56 @@ static void TdlsEventTearDown(GLUE_INFO_T *prGlueInfo, UINT8 *prInBuf, UINT32 u4
 /*----------------------------------------------------------------------------*/
 static void TdlsEventTxDone(GLUE_INFO_T *prGlueInfo, UINT8 *prInBuf, UINT32 u4InBufLen)
 {
-	/* UINT32 u4FmeIdx; */
 	UINT8 *pucFmeHdr;
 	UINT8 ucErrStatus;
+	UINT32 u4HeaderLen;
+	TDLS_FRAME_HEADER_T *prTdlsHdr;
+	WLAN_MAC_HEADER_QOS_T *prQosHdr;
 
 	ucErrStatus = *(UINT32 *) prInBuf;
 
+	/* frame hearder including Qos MAC and LLC header */
 	pucFmeHdr = prInBuf + 4;	/* skip ucErrStatus */
 
-	if (ucErrStatus == 0)
-		DBGLOG(TDLS, INFO, "<tdls_evt> %s: OK to tx a TDLS action\n", __func__);
-	else
-		DBGLOG(TDLS, INFO, "<tdls_evt> %s: fail to tx a TDLS action (err=0x%x)\n", __func__, ucErrStatus);
-	#if 0
-	/* dump TX packet content from wlan header */
-	for (u4FmeIdx = 0; u4FmeIdx < (u4InBufLen - 4); u4FmeIdx++) {
-		if ((u4FmeIdx % 16) == 0)
-			DBGLOG(TDLS, TRACE, "\n");
+	u4HeaderLen = sizeof(WLAN_MAC_HEADER_QOS_T) + sizeof(LLC_SNAP_HEADER_T);
 
-		DBGLOG(TDLS, TRACE, "%02x ", *pucFmeHdr++);
+	/* dumpMemory8(pucFmeHdr, u4InBufLen - 4); */
+	DBGLOG_MEM8(TDLS, TRACE, pucFmeHdr, u4InBufLen - 4);
+
+	if (u4InBufLen - 4 < u4HeaderLen) {
+		DBGLOG(TDLS, WARN, "Invalid Tdls frame length\n");
+		return;
 	}
-	DBGLOG(TDLS, TRACE, "\n\n");
-	#endif
+
+	prTdlsHdr = (TDLS_FRAME_HEADER_T *)(pucFmeHdr + u4HeaderLen);
+
+	if (prTdlsHdr->ucPayLoadType != TDLS_FRM_PAYLOAD_TYPE ||
+		prTdlsHdr->ucCategory != TDLS_FRM_CATEGORY) {
+		DBGLOG(TDLS, WARN, "Invalid frame type:category 0x%x:0x%x\n",
+		       prTdlsHdr->ucPayLoadType, prTdlsHdr->ucCategory);
+		return;
+	}
+
+	if (ucErrStatus == 0)
+		DBGLOG(TDLS, INFO, "OK to tx a TDLS action: %d\n", prTdlsHdr->ucAction);
+	else
+		DBGLOG(TDLS, INFO, "Failed to tx a TDLS action: %d (err=0x%x)\n",
+			ucErrStatus, prTdlsHdr->ucAction);
+	/*
+	 * from DS = 0
+	 * to DS = 1
+	 * addr1 = BSSID
+	 * addr2 = TA = SA
+	 * addr3 = DA
+	 */
+	/* enable link and set key only when confirm TX done successfully */
+	if (prTdlsHdr->ucAction == TDLS_FRM_ACTION_CONFIRM && !ucErrStatus) {
+		prQosHdr = (WLAN_MAC_HEADER_QOS_T *)pucFmeHdr;
+		TdlsexEnableDisableLink(prGlueInfo->prAdapter,
+				prQosHdr->aucAddr3,
+				TRUE,
+				prGlueInfo->eTdlsNetworkType);
+	}
 }
 
 /*******************************************************************************
@@ -4189,13 +4270,29 @@ TDLS_STATUS TdlsexKeyHandle(ADAPTER_T *prAdapter, PARAM_KEY_T *prNewKey, ENUM_NE
 	 * backup the key information and set key when link is enabled
 	 */
 	prStaRec = cnmGetStaRecByAddress(prAdapter, eNetworkType, prNewKey->arBSSID);
+	/*
+	 * supplicant will add key when rx TDLS setup response:
+	 *
+	 * wpa_supplicant: nl80211: Drv Event 81 (NL80211_CMD_TDLS_OPER) received for p2p0
+	 * wpa_supplicant: nl80211: TDLS setup request for peer 02:08:22:88:b3:fb
+	 * wpa_supplicant: TDLS: Sending TDLS Setup Request / TPK Handshake Message 1 (peer 02:08:22:88:b3:fb)
+	 * wpa_supplicant: TDLS: Received TDLS Setup Response / TPK M2 (Peer 02:08:22:88:b3:fb)
+	 * wpa_supplicant: TDLS: Sending TDLS Setup Confirm / TPK Handshake Message 3
+	 * wpa_supplicant: TDLS: Received TDLS Setup Response / TPK M2 (Peer 02:08:22:88:b3:fb)
+	 * wpa_supplicant: TDLS: Sending TDLS Setup Confirm / TPK Handshake Message 3
+	 * wpa_supplicant: nl80211: Drv Event 81 (NL80211_CMD_TDLS_OPER) received for p2p0
+	 * wpa_supplicant: nl80211: TDLS teardown request for peer 02:08:22:88:b3:fb
+	 * wpa_supplicant: TDLS: TDLS Teardown for 02:08:22:88:b3:fb
+	 *
+	 * tear down is needed as every TPK is differ due the different NONCE
+	 */
 	if ((prStaRec != NULL) && IS_TDLS_STA(prStaRec)) {
-		DBGLOG(TDLS, INFO, "<tdls> %s: [%pM] queue key (len=%d) until link is enabled\n",
-				     __func__, prNewKey->arBSSID, (UINT32) prNewKey->u4KeyLength);
+		DBGLOG(TDLS, INFO, "[%pM] queue key (len=%d) until link is enabled\n",
+			prNewKey->arBSSID, (UINT32) prNewKey->u4KeyLength);
 
 		if (prStaRec->ucStaState == STA_STATE_3) {
-			DBGLOG(TDLS, INFO, "<tdls> %s: [%pM] tear down the link due to STA_STATE_3\n",
-					     __func__, prNewKey->arBSSID);
+			DBGLOG(TDLS, INFO, "[%pM] tear down the link due to STA_STATE_3\n",
+				prNewKey->arBSSID);
 
 			/* re-key */
 			TdlsLinkHistoryRecord(prAdapter->prGlueInfo, TRUE,
@@ -4268,6 +4365,271 @@ BOOLEAN TdlsexIsAnyPeerInPowerSave(ADAPTER_T *prAdapter)
 	return FALSE;
 }
 
+static struct ksta_info *
+MTKTdlsGetSta(P_GLUE_INFO_T prGlueInfo, const u8 *prSta)
+{
+	struct ksta_info *s;
+
+	s = prGlueInfo->prStaHash[STA_HASH(prSta)];
+	while (s && memcmp(s->aucAddr, prSta, 6))
+		s = s->pNext;
+	return s;
+}
+
+static void
+MTKTdlsStaHashAdd(P_GLUE_INFO_T prGlueInfo, struct ksta_info *prSta)
+{
+	prSta->pNext = prGlueInfo->prStaHash[STA_HASH(prSta->aucAddr)];
+	prGlueInfo->prStaHash[STA_HASH(prSta->aucAddr)] = prSta;
+}
+
+struct ksta_info *
+MTKTdlsStaAdd(P_GLUE_INFO_T prGlueInfo, const u8 *prAddr)
+{
+	struct ksta_info *prSta;
+
+	prSta = kzalloc(sizeof(struct ksta_info), GFP_ATOMIC);
+	if (prSta == NULL) {
+		DBGLOG(TDLS, INFO, "Alloc ksta failed\n");
+		return NULL;
+	}
+
+	/* initialize STA info data */
+	/* memcpy(sta->ucAddr, addr, ETH_ALEN); */
+	ether_addr_copy(prSta->aucAddr, prAddr);
+	MTKTdlsStaHashAdd(prGlueInfo, prSta);
+
+	return prSta;
+}
+
+void
+MTKTdlsCreateTarget(P_GLUE_INFO_T prGlueInfo, const u8 *prAddr, CHAR *prReason)
+{
+	struct ksta_info *prTdlsPeer;
+
+	prTdlsPeer = MTKTdlsGetSta(prGlueInfo, prAddr);
+
+	if (!prTdlsPeer)
+		prTdlsPeer = MTKTdlsStaAdd(prGlueInfo, prAddr);
+	if (!prTdlsPeer)
+		return;
+
+	DBGLOG(TDLS, INFO, "Create TDLS peer[%pM] due to %s\n",
+	       prTdlsPeer->aucAddr, prReason);
+	prGlueInfo->prStaHash[STA_HASH_SIZE] = prTdlsPeer;
+}
+
+void
+MTKTdlsApStaForEach(P_GLUE_INFO_T prGlueInfo, enum sta_op eOp, void *prArg, void **pprOut)
+{
+	int i4HashPos;
+	struct ksta_info *p, *r;
+	int i4Max_tp = 0;
+
+	KAL_SPIN_LOCK_DECLARATION();
+
+	KAL_ACQUIRE_SPIN_LOCK(prGlueInfo->prAdapter, SPIN_LOCK_STA_REC);
+
+	for (i4HashPos = 0; i4HashPos < STA_HASH_SIZE; i4HashPos++) {
+		r = prGlueInfo->prStaHash[i4HashPos];
+		while (r) {
+			p = r;
+			r = r->pNext;
+			switch (eOp) {
+			case STA_OP_FREE:
+				DBGLOG(TDLS, TRACE, "freeing sta %pM\n", p->aucAddr);
+				kfree(p);
+				if (!r)
+					prGlueInfo->prStaHash[i4HashPos] = NULL;
+				break;
+			case STA_OP_RESET:
+				DBGLOG(TDLS, TRACE, "Reset default\n");
+				p->ulTxBytes = 0;
+				p->ulRxBytes = 0;
+				p->u4Throughput = 0;
+				prGlueInfo->ulLastUpdate = jiffies;
+				break;
+			case STA_OP_GET_MAX_TP:
+				p->u4Throughput = (p->ulTxBytes * HZ) / SAMPLING_UT;
+
+				DBGLOG(TDLS, TRACE, "STA: %pM, TP: %d Bytes/s\n",
+					p->aucAddr, p->u4Throughput);
+
+				/*
+				 * exclude:
+				 * BSSID, as we are direct link with BSSID
+				 * broadcast / multicast
+				 */
+				if (p->u4Throughput >= i4Max_tp &&
+					kalMemCmp(p->aucAddr, prArg, ETH_ALEN) &&
+					IS_UCAST_MAC_ADDR(p->aucAddr)) {
+					DBGLOG(TDLS, TRACE, "MAX TP: %d\n", p->u4Throughput);
+					*pprOut = p;
+					i4Max_tp = p->u4Throughput;
+				}
+				break;
+			case STA_OP_UPDATE_TX:
+			default:
+				break;
+			}
+		}
+	}
+	KAL_RELEASE_SPIN_LOCK(prGlueInfo->prAdapter, SPIN_LOCK_STA_REC);
+}
+
+VOID
+MTKTdlsApStaUpdateTxRxStatus(P_GLUE_INFO_T prGlueInfo, unsigned long tx_bytes, unsigned long rx_bytes, const u8 *prAddr)
+{
+	struct ksta_info *sta;
+
+	KAL_SPIN_LOCK_DECLARATION();
+
+	KAL_ACQUIRE_SPIN_LOCK(prGlueInfo->prAdapter, SPIN_LOCK_STA_REC);
+
+	sta = MTKTdlsGetSta(prGlueInfo, prAddr);
+
+	if (!sta)
+		sta = MTKTdlsStaAdd(prGlueInfo, prAddr);
+
+	if (!sta) {
+		KAL_RELEASE_SPIN_LOCK(prGlueInfo->prAdapter, SPIN_LOCK_STA_REC);
+		DBGLOG(TDLS, INFO, "Add sta info failed\n");
+		return;
+	}
+
+	if (tx_bytes)
+		sta->ulTxBytes += tx_bytes;
+	else
+		sta->ulRxBytes += rx_bytes;
+
+	KAL_RELEASE_SPIN_LOCK(prGlueInfo->prAdapter, SPIN_LOCK_STA_REC);
+
+	DBGLOG(TDLS, TRACE, "sta[%pM] %s bytes: %ld\n", prAddr,
+	       tx_bytes ? "Tx" : "Rx",
+	       tx_bytes ? tx_bytes : rx_bytes);
+}
+
+/* check if it is OK for auto tdls setup over P2P */
+BOOLEAN MTKTdlsEnvP2P(P_ADAPTER_T prAdapter)
+{
+	P_BSS_INFO_T prBssInfo;
+
+	if (!prAdapter || !prAdapter->fgIsP2PRegistered)
+		return FALSE;
+
+	prBssInfo = &prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX];
+
+	return (prBssInfo->eConnectionState == PARAM_MEDIA_STATE_CONNECTED &&
+		prBssInfo->eCurrentOPMode == OP_MODE_INFRASTRUCTURE) ? TRUE : FALSE;
+}
+
+VOID
+MTKTdlsSetup(P_GLUE_INFO_T prGlueInfo, struct ksta_info *prSta)
+{
+	DBGLOG(TDLS, INFO, "Build up tdls link with %pM\n", prSta->aucAddr);
+	cfg80211_tdls_oper_request(prGlueInfo->prP2PInfo->prDevHandler,
+				   prSta->aucAddr, NL80211_TDLS_SETUP, 0, GFP_ATOMIC);
+	prSta->eTdlsStatus = MTK_TDLS_SETUP_INPROCESS;
+	prSta->eTdlsRole = MTK_TDLS_ROLE_INITOR;
+	/* the last sta hash used as target station */
+	prGlueInfo->prStaHash[STA_HASH_SIZE] = prSta;
+	/* start TDLS status monitor */
+	cnmTimerStartTimer(prGlueInfo->prAdapter,
+			   &(prGlueInfo->prAdapter->rTdlsStateTimer),
+			   SEC_TO_MSEC(TDLS_SETUP_TIMEOUT));
+}
+
+VOID
+MTKTdlsTearDown(P_GLUE_INFO_T prGlueInfo, struct ksta_info *prSta, CHAR *reason)
+{
+	DBGLOG(TDLS, INFO, "TDLS teardown due to %s\n", reason);
+
+	if (kalStrCmp(reason, "Disable Link"))
+		cfg80211_tdls_oper_request(prGlueInfo->prP2PInfo->prDevHandler,
+				prSta->aucAddr, NL80211_TDLS_TEARDOWN, 0, GFP_ATOMIC);
+
+	prGlueInfo->prStaHash[STA_HASH_SIZE] = NULL;
+	prGlueInfo->i4TdlsLastRx = -1;
+	MTKTdlsApStaForEach(prGlueInfo, STA_OP_FREE, NULL, NULL);
+
+	cnmTimerStopTimer(prGlueInfo->prAdapter, &(prGlueInfo->prAdapter->rTdlsStateTimer));
+}
+
+INT_32
+MTKAutoTdlsP2P(P_GLUE_INFO_T prGlueInfo, P_NATIVE_PACKET prPacket)
+{
+	UINT_32 u4PacketLen;
+	PUINT_8 pucData = NULL;
+	P_BSS_INFO_T prBssInfo = NULL;
+	struct ksta_info *target_sta = NULL;
+	struct sk_buff *prSkb = (struct sk_buff *)prPacket;
+
+	if (!prSkb || !prGlueInfo)
+		return -1;
+
+	u4PacketLen = prSkb->len;
+
+	if (u4PacketLen < ETH_HLEN)
+		return -1;
+
+	prBssInfo = &(prGlueInfo->prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX]);
+
+	pucData = prSkb->data;
+
+	DBGLOG(TDLS, TRACE, "jiffies: %ld, timeout: %ld\n",
+		jiffies, prGlueInfo->ulLastUpdate + SAMPLING_UT);
+
+	if (time_before(jiffies, prGlueInfo->ulLastUpdate + SAMPLING_UT)) {
+		MTKTdlsApStaUpdateTxRxStatus(prGlueInfo, u4PacketLen, 0, pucData);
+		return 0;
+	}
+
+	if (!prGlueInfo->prStaHash[STA_HASH_SIZE]) {
+		MTKTdlsApStaForEach(prGlueInfo, STA_OP_GET_MAX_TP,
+				   prBssInfo->aucBSSID,
+				   (void **)&target_sta);
+
+		if (target_sta && target_sta->u4Throughput > TDLS_SETUP_THD) {
+			switch (target_sta->eTdlsStatus) {
+			case MTK_TDLS_NOT_SETUP:
+				MTKTdlsSetup(prGlueInfo, target_sta);
+				return 1;
+			case MTK_TDLS_SETUP_INPROCESS:
+				DBGLOG(TDLS, INFO, "TDLS setup in Process\n");
+				return 2;
+			default:
+				DBGLOG(TDLS, INFO, "TDLS setup state %d\n",
+					target_sta->eTdlsStatus);
+				return 3;
+			}
+		}
+		/* update one shot to avoid no sta available in sta list */
+		MTKTdlsApStaUpdateTxRxStatus(prGlueInfo, u4PacketLen, 0, pucData);
+		goto reset;
+	}
+
+	/* already has a tdls link */
+	target_sta = prGlueInfo->prStaHash[STA_HASH_SIZE];
+
+	if (target_sta->eTdlsRole == MTK_TDLS_ROLE_RESPONDER)
+		return 6;
+
+	target_sta->u4Throughput = (target_sta->ulTxBytes * HZ) / SAMPLING_UT;
+
+	if (target_sta->u4Throughput < TDLS_TEARDOWN_THD) {
+		switch (target_sta->eTdlsStatus) {
+		case MTK_TDLS_LINK_ENABLE:
+			MTKTdlsTearDown(prGlueInfo, target_sta, "Low Tx Throughput");
+		default:
+			return 4;
+		}
+	}
+reset:
+	MTKTdlsApStaForEach(prGlueInfo, STA_OP_RESET, NULL, NULL);
+	return 5;
+}
+
+
 /*----------------------------------------------------------------------------*/
 /*!
 * \brief This routine is called to enable or disable a TDLS link.
@@ -4286,9 +4648,8 @@ TDLS_STATUS TdlsexLinkCtrl(ADAPTER_T *prAdapter, VOID *pvSetBuffer, UINT_32 u4Se
 {
 	GLUE_INFO_T *prGlueInfo;
 	TDLS_CMD_LINK_T *prCmd;
-	BSS_INFO_T *prBssInfo;
 	STA_RECORD_T *prStaRec;
-	TDLS_LINK_HIS_OTHERS_T rHisOthers;
+	struct ksta_info *prKsta;
 
 	/* sanity check */
 	if ((prAdapter == NULL) || (pvSetBuffer == NULL) || (pu4SetInfoLen == NULL)) {
@@ -4300,76 +4661,6 @@ TDLS_STATUS TdlsexLinkCtrl(ADAPTER_T *prAdapter, VOID *pvSetBuffer, UINT_32 u4Se
 	prGlueInfo = (GLUE_INFO_T *) prAdapter->prGlueInfo;
 	*pu4SetInfoLen = sizeof(TDLS_CMD_LINK_T);
 	prCmd = (TDLS_CMD_LINK_T *) pvSetBuffer;
-
-	/* search old entry */
-	prStaRec = cnmGetStaRecByAddress(prAdapter, (UINT_8) prCmd->eNetworkType, prCmd->aucPeerMac);
-	if (prStaRec == NULL) {
-		DBGLOG(TDLS, ERROR, "<tdls_cfg> %s: cannot find the peer! %pM\n",
-				     __func__, prCmd->aucPeerMac);
-		return TDLS_STATUS_FAILURE;
-	}
-
-	if (prCmd->fgIsEnabled == TRUE) {
-		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_3);
-		DBGLOG(TDLS, INFO, "<tdls_cfg> %s: NL80211_TDLS_ENABLE_LINK\n", __func__);
-
-		/* update key information after cnmStaRecChangeState(STA_STATE_3) */
-		prStaRec->fgTdlsInSecurityMode = FALSE;
-
-		if (prStaRec->rTdlsKeyTemp.u4Length > 0) {
-			UINT_32 u4BufLen;	/* no use */
-
-			DBGLOG(TDLS, INFO, "<tdls_cfg> %s: key len=%d:%d\n",
-					    __func__, (UINT32) prStaRec->rTdlsKeyTemp.u4Length,
-					    (UINT32) prStaRec->rTdlsKeyTemp.u4KeyLength);
-
-			/*
-			 * reminder the function that we are CIPHER_SUITE_CCMP,
-			 * do not change cipher type to CIPHER_SUITE_WEP128
-			 */
-			prCmd->eNetworkType == NETWORK_TYPE_AIS_INDEX ?
-				_wlanoidSetAddKey(prAdapter, &prStaRec->rTdlsKeyTemp,
-					  prStaRec->rTdlsKeyTemp.u4Length, FALSE, CIPHER_SUITE_CCMP, &u4BufLen) :
-				_wlanoidSetAddP2PTDLSKey(prAdapter, &prStaRec->rTdlsKeyTemp,
-						prStaRec->rTdlsKeyTemp.u4Length, &u4BufLen);
-
-			/* clear the temp key */
-			prStaRec->fgTdlsInSecurityMode = TRUE;
-			kalMemZero(&prStaRec->rTdlsKeyTemp, sizeof(prStaRec->rTdlsKeyTemp));
-		}
-
-		/* check if we need to disable channel switch function */
-		prBssInfo = &(prAdapter->rWifiVar.arBssInfo[prStaRec->ucNetTypeIndex]);
-		if (prBssInfo->fgTdlsIsChSwProhibited == TRUE) {
-			TDLS_CMD_CORE_T rCmd;
-
-			kalMemZero(&rCmd, sizeof(TDLS_CMD_CORE_T));
-			rCmd.Content.rCmdChSwConf.ucNetTypeIndex = prStaRec->ucNetTypeIndex;
-			rCmd.Content.rCmdChSwConf.fgIsChSwEnabled = FALSE;
-			kalMemCopy(rCmd.aucPeerMac, prStaRec->aucMacAddr, 6);
-			TdlsChSwConf(prAdapter, &rCmd, 0, 0);
-
-			DBGLOG(TDLS, INFO, "<tdls_cfg> %s: disable channel switch\n", __func__);
-		}
-
-		TDLS_LINK_INCREASE(prGlueInfo);
-
-		/* record link */
-		if (prStaRec->ucDesiredPhyTypeSet & PHY_TYPE_SET_802_11N)
-			rHisOthers.fgIsHt = TRUE;
-		else
-			rHisOthers.fgIsHt = FALSE;
-
-		TdlsLinkHistoryRecord(prAdapter->prGlueInfo, FALSE,
-				      prStaRec->aucMacAddr, !prStaRec->flgTdlsIsInitiator, 0, &rHisOthers);
-	} else {
-		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
-		cnmStaRecFree(prAdapter, prStaRec, TRUE);	/* release to other TDLS peers */
-		DBGLOG(TDLS, INFO, "<tdls_cfg> %s: NL80211_TDLS_DISABLE_LINK\n", __func__);
-
-		TDLS_LINK_DECREASE(prGlueInfo);
-/* while(1); //sample debug */
-	}
 
 	/* work-around link count */
 	if ((TDLS_LINK_COUNT(prGlueInfo) < 0) || (TDLS_LINK_COUNT(prGlueInfo) > 1)) {
@@ -4404,6 +4695,63 @@ TDLS_STATUS TdlsexLinkCtrl(ADAPTER_T *prAdapter, VOID *pvSetBuffer, UINT_32 u4Se
 		}
 	}
 
+	/* for auto tdls */
+	prKsta = MTKTdlsGetSta(prGlueInfo, prCmd->aucPeerMac);
+
+	if (!prKsta)
+		prKsta = MTKTdlsStaAdd(prGlueInfo, prCmd->aucPeerMac);
+	if (!prKsta)
+		goto ret;
+
+	if (prCmd->fgIsEnabled) {
+		prGlueInfo->prStaHash[STA_HASH_SIZE] = prKsta;
+
+		prKsta->eTdlsStatus = MTK_TDLS_LINK_ENABLE;
+		/*
+		 * special case:
+		 * both tdls station want setup link at
+		 * the same time.
+		 * higher MAC addr driver will free sta and no role
+		 * specified until enable link
+		 */
+		DBGLOG(TDLS, INFO, "Enable Link, LastRx:Role %d:%d\n",
+		      prGlueInfo->i4TdlsLastRx, prKsta->eTdlsRole);
+
+		switch (prGlueInfo->i4TdlsLastRx) {
+			/* Initor */
+		case TDLS_FRM_ACTION_SETUP_RSP:
+			if (prKsta->eTdlsRole == MTK_TDLS_ROLE_IDLE) {
+				cnmTimerStartTimer(prGlueInfo->prAdapter,
+						   &(prGlueInfo->prAdapter->rTdlsStateTimer),
+						   SEC_TO_MSEC(TDLS_MONITOR_UT));
+				prKsta->eTdlsRole = MTK_TDLS_ROLE_INITOR;
+			}
+			break;
+		case TDLS_FRM_ACTION_CONFIRM:
+			/* Responder */
+			/* go through */
+		default:
+			prKsta->eTdlsRole = MTK_TDLS_ROLE_RESPONDER;
+
+			/*
+			 * Supplicant will enable link after RX TDLS Confirm as responder
+			 * It is very OK to enable link and install key when as responder
+			 */
+			if (TdlsexEnableDisableLink(prAdapter, prCmd->aucPeerMac,
+				prCmd->fgIsEnabled, prCmd->eNetworkType)) {
+				return TDLS_STATUS_FAILURE;
+			}
+			cnmTimerStartTimer(prGlueInfo->prAdapter,
+					   &(prGlueInfo->prAdapter->rTdlsStateTimer),
+					   SEC_TO_MSEC(TDLS_MONITOR_UT));
+			break;
+		}
+	} else {
+		MTKTdlsTearDown(prAdapter->prGlueInfo, prKsta, "Disable Link");
+		TdlsexEnableDisableLink(prAdapter, prCmd->aucPeerMac,
+		    prCmd->fgIsEnabled, prCmd->eNetworkType);
+	}
+ret:
 	/* display TDLS link history */
 	TdlsInfoDisplay(prAdapter, NULL, 0, NULL);
 
@@ -4731,8 +5079,8 @@ TDLS_STATUS TdlsexPeerAdd(ADAPTER_T *prAdapter, VOID *pvSetBuffer, UINT_32 u4Set
 	/* update time */
 	GET_CURRENT_SYSTIME(&prStaRec->rTdlsSetupStartTime);
 
-	DBGLOG(TDLS, INFO, "<tdls_cmd> %s: create a peer [%pM], network index %d\n",
-			    __func__, (prStaRec->aucMacAddr), prStaRec->ucNetTypeIndex);
+	DBGLOG(TDLS, INFO, "create a peer [%pM], sta rec: %d network index %d\n",
+			prStaRec->aucMacAddr, prStaRec->ucIndex, prStaRec->ucNetTypeIndex);
 
 	return TDLS_STATUS_SUCCESS;
 }
@@ -4760,7 +5108,7 @@ TDLS_STATUS TdlsexPeerUpdate(ADAPTER_T *prAdapter, VOID *pvSetBuffer, UINT_32 u4
 	IE_HT_CAP_T *prHtCap;
 
 	/* sanity check */
-	DBGLOG(TDLS, INFO, "<tdls_cmd> %s\n", __func__);
+	DBGLOG(TDLS, TRACE, "<tdls_cmd> %s\n", __func__);
 
 	if ((prAdapter == NULL) || (pvSetBuffer == NULL) || (pu4SetInfoLen == NULL)) {
 		DBGLOG(TDLS, ERROR, "<tdls_cmd> %s: sanity fail!\n", __func__);
@@ -4887,8 +5235,8 @@ TDLS_STATUS TdlsexPeerUpdate(ADAPTER_T *prAdapter, VOID *pvSetBuffer, UINT_32 u4
 
 	/* cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_3); */
 
-	DBGLOG(TDLS, INFO, "<tdls_cmd> %s: update a peer [%pM]\n",
-			    __func__, (prStaRec->aucMacAddr));
+	DBGLOG(TDLS, INFO, "<tdls_cmd> %s: update a peer [%pM], index: %d\n",
+			    __func__, (prStaRec->aucMacAddr), prStaRec->ucIndex);
 
 	return TDLS_STATUS_SUCCESS;
 }
@@ -4909,25 +5257,13 @@ BOOLEAN TdlsexRxFrameDrop(GLUE_INFO_T *prGlueInfo, struct sk_buff *skb)
 	ADAPTER_T *prAdapter;
 	UINT8 ucActionId;
 	UINT_8 *pPkt;
+	struct ksta_info *prTdlsPeer;
 
 	pPkt = skb->data;
 
 	/* sanity check */
 	if ((pPkt == NULL) || (*(pPkt + 12) != 0x89) || (*(pPkt + 13) != 0x0d))
 		return FALSE;	/* not TDLS data frame htons(0x890d) */
-
-#if 0				/* supplicant handles this check */
-	if (prStaRec == NULL)
-		return FALSE;	/* shall not be here */
-
-	DBGLOG(TDLS, INFO,
-	       "<tdls_fme> %s: Rcv a TDLS action frame (id=%d) %d %d\n",
-		__func__, *(pPkt + 13 + 4), prStaRec->fgTdlsIsProhibited, fgIsPtiTimeoutSkip);
-
-	/* check if TDLS Prohibited bit is set in AP's beacon */
-	if (prStaRec->fgTdlsIsProhibited == TRUE)
-		return TRUE;
-#endif
 
 	ucActionId = *(pPkt + 12 + 2 + 2);	/* skip dst, src MAC, type, payload type, category */
 
@@ -4938,13 +5274,12 @@ BOOLEAN TdlsexRxFrameDrop(GLUE_INFO_T *prGlueInfo, struct sk_buff *skb)
 	}
 
 	prAdapter = prGlueInfo->prAdapter;
-	DBGLOG(TDLS, INFO,
-	       "<tdls_fme> %s: Rcv a TDLS action frame %d (%u)\n",
-		__func__, ucActionId, (UINT32) prAdapter->rRxCtrl.rFreeSwRfbList.u4NumElem);
+	DBGLOG(TDLS, INFO, "Rcv a TDLS peer [%pM] action frame %d (%u)\n", pPkt + 6,
+	       ucActionId, (UINT32) prAdapter->rRxCtrl.rFreeSwRfbList.u4NumElem);
 
 	if (ucActionId == TDLS_FRM_ACTION_TEARDOWN) {
-		DBGLOG(TDLS, WARN, "<tdls_fme> %s: Rcv a TDLS tear down frame reason: %d, will DISABLE link\n",
-				__func__, *(pPkt + 13 + 4));	/* reason code */
+		DBGLOG(TDLS, WARN, "Rcv a TDLS tear down frame reason: %d, will DISABLE link\n",
+		       *(pPkt + 13 + 4));	/* reason code */
 
 		/* record disconnect history */
 		TdlsLinkHistoryRecord(prGlueInfo, TRUE, pPkt + 6, FALSE, *(pPkt + 13 + 4), NULL);
@@ -4965,16 +5300,52 @@ BOOLEAN TdlsexRxFrameDrop(GLUE_INFO_T *prGlueInfo, struct sk_buff *skb)
 		 */
 		return TRUE;
 	}
-#if 0				/* pass all to supplicant except same thing is handled in supplicant */
-	if (((*(pPkt + 13 + 3)) == TDLS_FRM_ACTION_PTI) ||
-	    ((*(pPkt + 13 + 3)) == TDLS_FRM_ACTION_CHAN_SWITCH_REQ) ||
-	    ((*(pPkt + 13 + 3)) == TDLS_FRM_ACTION_CHAN_SWITCH_RSP) ||
-	    ((*(pPkt + 13 + 3)) == TDLS_FRM_ACTION_PTI_RSP)) {
-		return TRUE;
-	}
-#endif
 
-	return FALSE;
+	/*
+	 * used to decide TDLS role:
+	 * only care setup request / response / confirm
+	 * initor: last rx should be CONFIRM
+	 * responder: last rx should be RESPONSE
+	 */
+	switch (ucActionId) {
+	case TDLS_FRM_ACTION_SETUP_REQ:
+		prTdlsPeer = prGlueInfo->prStaHash[STA_HASH_SIZE];
+		/* we only support one TDLS link */
+		if (prTdlsPeer &&
+		    TDLS_LINK_ENABLED(prTdlsPeer) &&
+		    UNEQUAL_MAC_ADDR(prTdlsPeer->aucAddr, pPkt + 6)) {
+			DBGLOG(TDLS, INFO, "Drop TDLS Setup Request as link already enabled\n");
+			return TRUE;
+		}
+
+		if (prTdlsPeer)
+			return FALSE;
+
+		/*
+		 * Special case:
+		 * 1. we RX tdls setup request, send setup resp, rx setup confirme
+		 * 2. At this point, TX throughput reach tdls setup THD
+		 * 3. driver request to setup tdls link
+		 * 4. supplicant will disable link
+		 *
+		 * results:
+		 * if the data RX/TX has been triggerred, driver will drop data
+		 * due to STATE_3 error check:
+		 * authSendDeauthFrame:(SAA INFO)Sending Deauth, network: 1, seqNo 50
+		 * secCheckClassError:(RSN INFO)Send Deauth to [ 02:12:36:71:96:52 ] for Rx Class 3 Error.
+		 * secCheckClassError:(RSN INFO)Host sends Deauth to [ 02:12:36:71:96:52 ] for Rx Class 3 fail.
+		 *
+		 * Solution:
+		 * Stop the tdls setup request by create target peer.
+		 */
+		MTKTdlsCreateTarget(prGlueInfo, pPkt + 6, "Rx Setup Frame");
+		return FALSE;
+	case TDLS_FRM_ACTION_CONFIRM:
+	case TDLS_FRM_ACTION_SETUP_RSP:
+		prGlueInfo->i4TdlsLastRx = ucActionId;
+	default:
+		return FALSE;
+	}
 }
 
 
@@ -5059,8 +5430,7 @@ VOID TdlsexRxFrameHandle(GLUE_INFO_T *prGlueInfo, struct sk_buff *skb)
 		switch (ucElmId) {
 		case ELEM_ID_HT_CAP:	/* 0x2d */
 			/* backup the HT IE of 1st unhandled setup request frame */
-			if (prGlueInfo->rTdlsHtCap.ucId == 0x00 &&
-					ucElmLen <= sizeof(IE_HT_CAP_T) - 2) {
+			if (prGlueInfo->rTdlsHtCap.ucId == 0x00) {
 				kalMemCopy(prGlueInfo->aucTdlsHtPeerMac, pucPeerMac, 6);
 				kalMemCopy(&prGlueInfo->rTdlsHtCap, pPkt - 2, ucElmLen + 2);
 
@@ -5117,12 +5487,21 @@ TDLS_STATUS TdlsexStaRecIdxGet(ADAPTER_T *prAdapter, MSDU_INFO_T *prMsduInfo)
 	if (TDLS_IS_NO_LINK_GOING(prAdapter->prGlueInfo))
 		return TDLS_STATUS_FAILURE;
 
+	/* get record by ether dest */
+	prStaRec = cnmGetStaRecByAddress(prAdapter, prMsduInfo->ucNetworkType, prMsduInfo->aucEthDestAddr);
+	/*
+	 * Race condiation:
+	 * driver has changed the STA_STATE to STATE_3
+	 * but firware has not complete the update STA_REC operation,
+	 * which will make data to fimrware without firmware ready to
+	 * TX. Key not paired with peer
+	 */
+	if (!prStaRec || !prStaRec->fgIsValid)
+		return TDLS_STATUS_FAILURE;
+
 	/* init */
 	prMsduInfo->ucStaRecIndex = STA_REC_INDEX_NOT_FOUND;
 	Status = TDLS_STATUS_SUCCESS;
-
-	/* get record by ether dest */
-	prStaRec = cnmGetStaRecByAddress(prAdapter, prMsduInfo->ucNetworkType, prMsduInfo->aucEthDestAddr);
 
 	/*
 	 * TDLS Setup Request frames, TDLS Setup Response frames and TDLS Setup Confirm
@@ -5227,7 +5606,7 @@ VOID TdlsexTxQuotaCheck(GLUE_INFO_T *prGlueInfo, STA_RECORD_T *prStaRec, UINT8 F
 	}
 
 	if (prStaRec->ucNetTypeIndex == NETWORK_TYPE_P2P_INDEX) {
-		DBGLOG(TDLS, INFO, "Skip quota check for p2p\n");
+		DBGLOG(TDLS, TRACE, "Skip quota check for p2p\n");
 		return;
 	}
 

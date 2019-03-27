@@ -208,7 +208,7 @@ const struct iw_handler_def wext_handler_def = {
 /*----------------------------------------------------------------------------*/
 BOOLEAN
 wextSrchDesiredWPAIE(IN PUINT_8 pucIEStart,
-		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PUINT_8 *ppucDesiredIE)
+		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -258,7 +258,7 @@ wextSrchDesiredWPAIE(IN PUINT_8 pucIEStart,
 * \note
 */
 /*----------------------------------------------------------------------------*/
-BOOLEAN wextSrchDesiredWAPIIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE)
+BOOLEAN wextSrchDesiredWAPIIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -430,7 +430,7 @@ BOOLEAN wextIsDesiredRoamingConsortiumIE(IN PUINT_8 pucCurIE, IN INT_32 i4TotalI
 * \note
 */
 /*----------------------------------------------------------------------------*/
-BOOLEAN wextSrchDesiredHS20IE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE)
+BOOLEAN wextSrchDesiredHS20IE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -473,7 +473,7 @@ BOOLEAN wextSrchDesiredHS20IE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT
 * \note
 */
 /*----------------------------------------------------------------------------*/
-BOOLEAN wextSrchDesiredOsenIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE)
+BOOLEAN wextSrchDesiredOsenIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -515,7 +515,7 @@ BOOLEAN wextSrchDesiredOsenIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT
 * \note
 */
 /*----------------------------------------------------------------------------*/
-BOOLEAN wextSrchDesiredInterworkingIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE)
+BOOLEAN wextSrchDesiredInterworkingIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -554,7 +554,7 @@ BOOLEAN wextSrchDesiredInterworkingIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIe
 * \note
 */
 /*----------------------------------------------------------------------------*/
-BOOLEAN wextSrchDesiredAdvProtocolIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE)
+BOOLEAN wextSrchDesiredAdvProtocolIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -593,7 +593,7 @@ BOOLEAN wextSrchDesiredAdvProtocolIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeL
 * \note
 */
 /*----------------------------------------------------------------------------*/
-BOOLEAN wextSrchDesiredRoamingConsortiumIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucDesiredIE)
+BOOLEAN wextSrchDesiredRoamingConsortiumIE(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -618,7 +618,7 @@ BOOLEAN wextSrchDesiredRoamingConsortiumIE(IN PUINT_8 pucIEStart, IN INT_32 i4To
 }				/* wextSrchDesiredRoamingConsortiumIE */
 #endif
 
-BOOLEAN wextSrchOkcAndPMKID(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PUINT_8 *ppucPMKID, OUT PUINT_8 okc)
+BOOLEAN wextSrchOkcAndPMKID(IN PUINT_8 pucIEStart, IN INT_32 i4TotalIeLen, OUT PPUINT_8 ppucPMKID, OUT PUINT_8 okc)
 {
 	INT_32 i4InfoElemLen;
 	UINT_8 ucDone = 0;
@@ -696,7 +696,7 @@ check_next:
 /*----------------------------------------------------------------------------*/
 BOOLEAN
 wextSrchDesiredWPSIE(IN PUINT_8 pucIEStart,
-		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PUINT_8 *ppucDesiredIE)
+		     IN INT_32 i4TotalIeLen, IN UINT_8 ucDesiredElemId, OUT PPUINT_8 ppucDesiredIE)
 {
 	INT_32 i4InfoElemLen;
 
@@ -770,22 +770,22 @@ wext_get_name(IN struct net_device *prNetDev, IN struct iw_request_info *prIwrIn
 
 		switch (eNetWorkType) {
 		case PARAM_NETWORK_TYPE_DS:
-			strcpy(pcName, "IEEE 802.11b");
+			strncpy(pcName, "IEEE 802.11b", IFNAMSIZ);
 			break;
 		case PARAM_NETWORK_TYPE_OFDM24:
-			strcpy(pcName, "IEEE 802.11bgn");
+			strncpy(pcName, "IEEE 802.11bgn", IFNAMSIZ);
 			break;
 		case PARAM_NETWORK_TYPE_AUTOMODE:
 		case PARAM_NETWORK_TYPE_OFDM5:
-			strcpy(pcName, "IEEE 802.11abgn");
+			strncpy(pcName, "IEEE 802.11abgn", IFNAMSIZ);
 			break;
 		case PARAM_NETWORK_TYPE_FH:
 		default:
-			strcpy(pcName, "IEEE 802.11");
+			strncpy(pcName, "IEEE 802.11", IFNAMSIZ);
 			break;
 		}
 	} else {
-		strcpy(pcName, "Disconnected");
+		strncpy(pcName, "Disconnected", IFNAMSIZ);
 	}
 
 	return 0;
@@ -2286,8 +2286,6 @@ wext_set_txpow(IN struct net_device *prNetDev,
 		wlanSetAcpiState(prGlueInfo->prAdapter, ePowerState);
 	}
 
-	prGlueInfo->ePowerState = ePowerState;
-
 	return ret;
 }				/* wext_set_txpow */
 
@@ -2825,6 +2823,11 @@ wext_set_encode_ext(IN struct net_device *prNetDev,
 	ASSERT(prEnc);
 	if (GLUE_CHK_PR3(prNetDev, prEnc, pcExtra) == FALSE)
 		return -EINVAL;
+
+	if (prIWEncExt == NULL) {
+		DBGLOG(REQ, ERROR, "prIWEncExt is NULL!\n");
+		return -EINVAL;
+	}
 	prGlueInfo = *((P_GLUE_INFO_T *) netdev_priv(prNetDev));
 
 	memset(keyStructBuf, 0, sizeof(keyStructBuf));
@@ -3027,6 +3030,12 @@ wext_set_encode_ext(IN struct net_device *prNetDev,
 				memcpy(((PUINT_8) prKey->aucKeyMaterial) + 16, prIWEncExt->key + 24, 8);
 				memcpy((prKey->aucKeyMaterial) + 24, prIWEncExt->key + 16, 8);
 			} else {
+				/* aucKeyMaterial is defined as a 32-elements array */
+				if (prIWEncExt->key_len > 32) {
+					DBGLOG(REQ, ERROR, "prIWEncExt->key_len: %d is too long!\n",
+						prIWEncExt->key_len);
+					return -EFAULT;
+				}
 				memcpy(prKey->aucKeyMaterial, prIWEncExt->key, prIWEncExt->key_len);
 			}
 
@@ -3518,18 +3527,16 @@ int wext_support_ioctl(IN struct net_device *prDev, IN struct ifreq *prIfReq, IN
 
 			if (copy_from_user(prExtraBuf, iwr->u.encoding.pointer, u4ExtraSize))
 				ret = -EFAULT;
-		} else if (u4ExtraSize != 0) {
-			ret = -EINVAL;
-			break;
-		}
 
-		if (ret == 0)
-			ret = wext_set_encode(prDev, NULL, &iwr->u.encoding, prExtraBuf);
+			if (ret == 0)
+				ret = wext_set_encode(prDev, NULL, &iwr->u.encoding, prExtraBuf);
 
-		if (prExtraBuf) {
 			kalMemFree(prExtraBuf, VIR_MEM_TYPE, u4ExtraSize);
 			prExtraBuf = NULL;
-		}
+
+		} else if (u4ExtraSize != 0)
+			ret = -EINVAL;
+
 		break;
 
 	case SIOCGIWENCODE:	/* 0x8B2B, get encoding token & mode */
@@ -3587,6 +3594,7 @@ int wext_support_ioctl(IN struct net_device *prDev, IN struct ifreq *prIfReq, IN
 #endif
 #if CFG_SUPPORT_WPS2
 				PUINT_8 prDesiredIE = NULL;
+
 				if (wextSrchDesiredWPSIE(prExtraBuf,
 							 u4ExtraSize,
 							 0xDD, (PUINT_8 *) &prDesiredIE)) {
@@ -3873,7 +3881,8 @@ wext_indicate_wext_event(IN P_GLUE_INFO_T prGlueInfo,
 			u4Cmd = IWEVCUSTOM;
 			pucExtraInfo = aucExtraInfoBuf;
 			pucExtraInfo += sprintf(pucExtraInfo, "MLME-MICHAELMICFAILURE.indication ");
-			pucExtraInfo += sprintf(pucExtraInfo,
+			pucExtraInfo += snprintf(pucExtraInfo,
+						10,
 						"%s",
 						(pAuthReq->u4Flags == PARAM_AUTH_REQUEST_GROUP_ERROR) ?
 						"groupcast " : "unicast ");

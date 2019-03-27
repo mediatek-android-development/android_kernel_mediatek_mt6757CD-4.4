@@ -2561,6 +2561,11 @@ int autok_init_sdr104(struct msdc_host *host)
 		MSDC_SET_FIELD(SDC_FIFO_CFG, SDC_FIFO_CFG_WR_VALID_SEL, 1);
 		MSDC_SET_FIELD(SDC_FIFO_CFG, SDC_FIFO_CFG_RD_VALID_SEL, 1);
 	}
+	if (platform_para_rx.chip_hw_ver == 0xcb00) {
+		MSDC_SET_FIELD(MSDC_PATCH_BIT1, MSDC_PB1_STOP_DLY_SEL, 3);
+		MSDC_SET_FIELD(MSDC_PATCH_BIT2, MSDC_PB2_POPENCNT, 8);
+		MSDC_SET_FIELD(MSDC_PATCH_BIT1, 0x3 << 19, 3);
+	}
 
 	return 0;
 }

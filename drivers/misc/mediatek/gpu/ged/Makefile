@@ -16,27 +16,73 @@ MTK_TOP = $(srctree)/drivers/misc/mediatek/
 
 VER:=eng
 
+#ccflags-y += -DGED_KPI_DEBUG
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6759" "mt6799" "mt6763" "mt6739"))
+ccflags-y += -DGED_KPI_MET_DEBUG
+#ccflags-y += -DGED_ENABLE_FB_DVFS
+ccflags-y += -DMTK_GED_KPI
+ccflags-y += -DGED_KPI_CPU_BOOST
+endif
+
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6759" "mt6799" "mt6763"))
+ccflags-y += -DGED_KPI_DFRC
+endif
+
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6759" "mt6799"))
+ccflags-y += -DGED_KPI_CPU_TRI_CLUSTER
+endif
+
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6739"))
+ccflags-y += -DGED_KPI_CPU_SINGLE_CLUSTER
+endif
+
 ifneq ($(strip $(TARGET_BUILD_VARIANT)),)
 ifneq ($(strip $(TARGET_BUILD_VARIANT)),eng)
 VER:=user
-ccflags-y += -DGED_LOG_SIZE_LIMITED
+#ccflags-y += -DGED_LOG_SIZE_LIMITED
 endif
 endif
+
+ccflags-y += -DMET_USER_EVENT_SUPPORT
 
 ccflags-y += \
 	     -I$(srctree)/include/ \
 	     -I$(MTK_TOP)/include/ \
 	     -I$(GED_TOP)/include/ \
-	     -I$(MTK_TOP)/base/power/$(subst ",,$(CONFIG_MTK_PLATFORM))/ \
-	     -I$(srctree)/drivers/misc/mediatek/video/include
+	     -I$(MTK_TOP)/base/power/$(MTK_PLATFORM)/ \
+	     -I$(srctree)/drivers/misc/mediatek/video/include \
+	     -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox \
+	     -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys \
+		 -I$(srctree)/drivers/misc/mediatek/lcm/inc/ \
+         -I$(srctree)/drivers/misc/mediatek/dfrc/
 
-$(info $$CONFIG_MTK_GPU_COMMON_DVFS_SUPPORT is [${CONFIG_MTK_GPU_COMMON_DVFS_SUPPORT}])
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/sspm/
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/sspm/$(CONFIG_MTK_PLATFORM)
+
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6757" "mt8167" "kiboplus"))
+ccflags-y += \
+		 -I$(srctree)/drivers/misc/mediatek/cmdq/v2 \
+		 -I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(subst ",,$(CONFIG_MTK_PLATFORM))
+else
+#$(info *CONFIG_MTK_PLATFORM 1 = $(word 1,$(CONFIG_MTK_PLATFORM)))
+ccflags-y += \
+		 -I$(srctree)/drivers/misc/mediatek/cmdq/v3 \
+		 -I$(srctree)/drivers/misc/mediatek/cmdq/v3/$(subst ",,$(CONFIG_MTK_PLATFORM))
+endif
+
+#$(info $$CONFIG_MTK_GPU_COMMON_DVFS_SUPPORT is [${CONFIG_MTK_GPU_COMMON_DVFS_SUPPORT}])
+
+#ccflags-$(CONFIG_MTK_TINYSYS_SSPM_SUPPORT) += -DGED_SSPM
+ifeq ($(CONFIG_MTK_TINYSYS_SSPM_SUPPORT),y)
+#ccflags-y += -DGED_SSPM
+endif
 
 ifneq ($(CONFIG_FPGA_EARLY_PORTING), y)
 ifeq ($(CONFIG_MTK_GPU_COMMON_DVFS_SUPPORT),y)
-ccflags-y += -DGED_DVFS_ENABLE \
-             -DENABLE_COMMON_DVFS \
-	     -DENABLE_TIMER_BACKUP 
+ccflags-y += -DENABLE_COMMON_DVFS \
+             -DENABLE_TIMER_BACKUP
+else
+ccflags-y += -DGED_FDVFS_ENABLE
 endif
 else
 $(info $[GED]CONFIG_FPGA_EARLY_PORTING is [${CONFIG_FPGA_EARLY_PORTING}])
@@ -59,6 +105,7 @@ ccflags-y += \
 obj-y += ged.o
 
 ged-y += \
+	src/ged.o \
 	src/ged_base.o \
 	src/ged_main.o \
 	src/ged_debugFS.o \
@@ -70,5 +117,8 @@ ged-y += \
 	src/ged_notify_sw_vsync.o \
 	src/ged_hashtable.o \
 	src/ged_thread.o \
-	src/ged_dvfs.o
+	src/ged_ge.o \
+	src/ged_dvfs.o \
+	src/ged_kpi.o \
+	src/ged_fdvfs.o
 

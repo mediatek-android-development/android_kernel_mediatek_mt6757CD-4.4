@@ -93,7 +93,6 @@ static int max_devices;
 
 /* TODO: Replace these with struct ida */
 static DECLARE_BITMAP(dev_use, MAX_DEVICES);
-static DECLARE_BITMAP(name_use, MAX_DEVICES);
 
 /*
  * There is one mmc_blk_data per slot.
@@ -112,7 +111,6 @@ struct mmc_blk_data {
 	unsigned int	usage;
 	unsigned int	read_only;
 	unsigned int	part_type;
-	unsigned int	name_idx;
 	unsigned int	reset_done;
 #define MMC_BLK_READ		BIT(0)
 #define MMC_BLK_WRITE		BIT(1)
@@ -711,35 +709,6 @@ out:
 	return err;
 }
 
-#ifdef CONFIG_MTK_EMMC_SUPPORT_OTP
-/* otp operations don't check CAP_SYS_RAWIO but
- * lower driver must check address is valid or not
- * to avoid lock invalid partition
- */
-static int mmc_otp_ops_check(struct block_device *bdev,
-		struct mmc_blk_ioc_data *idata)
-{
-
-	if ((idata->ic.opcode == MMC_WRITE_BLOCK) ||
-	    (idata->ic.opcode == MMC_READ_SINGLE_BLOCK) ||
-	    (idata->ic.opcode == MMC_SET_WRITE_PROT) ||
-	    (idata->ic.opcode == MMC_CLR_WRITE_PROT) ||
-	    (idata->ic.opcode == MMC_SEND_WRITE_PROT) ||
-	    (idata->ic.opcode == 31) ||
-	    ((idata->ic.opcode == MMC_SWITCH) &&
-		(idata->ic.arg & (171 << 16)))) {
-		if (bdev != bdev->bd_contains)
-			return -EPERM;
-	} else {
-		if ((!capable(CAP_SYS_RAWIO)) || (bdev != bdev->bd_contains))
-			return -EPERM;
-		else
-			return 0;
-	}
-	return 0;
-}
-#endif
-
 static int __mmc_blk_ioctl_cmd(struct mmc_card *card, struct mmc_blk_data *md,
 			       struct mmc_blk_ioc_data *idata)
 {
@@ -1024,6 +993,40 @@ cmd_err:
 }
 #endif
 
+#ifdef CONFIG_MTK_EMMC_SUPPORT_OTP
+#define MMC_SEND_WRITE_PROT_TYPE        31
+#define EXT_CSD_USR_WP                  171     /* R/W */
+
+int mmc_otp_ops_check_bdev(struct block_device *bdev)
+{
+	if (strcmp(bdev->bd_part->info->volname, "otp"))
+		return 0;
+	return 1;
+}
+
+int mmc_otp_ops_check(struct block_device *bdev,
+		struct mmc_blk_ioc_data *idata)
+{
+	if ((idata->ic.opcode == MMC_SET_WRITE_PROT)
+	 || (idata->ic.opcode == MMC_CLR_WRITE_PROT)
+	 || (idata->ic.opcode == MMC_SEND_WRITE_PROT)
+	 || (idata->ic.opcode == MMC_SEND_WRITE_PROT_TYPE)) {
+		if (idata->ic.arg >= bdev->bd_part->nr_sects)
+			return -EFAULT;
+	} else if (idata->ic.opcode == MMC_SWITCH) {
+		if (((idata->ic.arg >> 16) & 0xFF) != EXT_CSD_USR_WP)
+			return -EPERM;
+	} else {
+		return -EPERM;
+	}
+
+	idata->ic.arg += bdev->bd_part->start_sect;
+
+	return 0;
+
+}
+#endif
+
 static int mmc_blk_ioctl_cmd(struct block_device *bdev,
 			     struct mmc_ioc_cmd __user *ic_ptr)
 {
@@ -1034,25 +1037,29 @@ static int mmc_blk_ioctl_cmd(struct block_device *bdev,
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	u8 cmdq_en = 0;
 #endif
+#ifdef CONFIG_MTK_EMMC_SUPPORT_OTP
+	int otp_dev;
+#endif
 
 	/*
 	 * The caller must have CAP_SYS_RAWIO, and must be calling this on the
 	 * whole block device, not on a partition.  This prevents overspray
 	 * between sibling partitions.
 	 */
-#ifndef CONFIG_MTK_EMMC_SUPPORT_OTP
+#ifdef CONFIG_MTK_EMMC_SUPPORT_OTP
+	otp_dev = mmc_otp_ops_check_bdev(bdev);
+	if (!otp_dev)
+#endif
+
 	if ((!capable(CAP_SYS_RAWIO)) || (bdev != bdev->bd_contains))
 		return -EPERM;
 
 	idata = mmc_blk_ioctl_copy_from_user(ic_ptr);
 	if (IS_ERR(idata))
 		return PTR_ERR(idata);
-#else
-	idata = mmc_blk_ioctl_copy_from_user(ic_ptr);
-	if (IS_ERR(idata))
-		return PTR_ERR(idata);
-	err = mmc_otp_ops_check(bdev, idata);
-	if (err)
+
+#ifdef CONFIG_MTK_EMMC_SUPPORT_OTP
+	if (otp_dev && (mmc_otp_ops_check(bdev, idata) < 0))
 		goto cmd_err;
 #endif
 
@@ -1069,6 +1076,7 @@ static int mmc_blk_ioctl_cmd(struct block_device *bdev,
 	}
 
 	mmc_get_card(card);
+
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	cmdq_en = card->ext_csd.cmdq_mode_en;
 	if (cmdq_en) {
@@ -1187,7 +1195,7 @@ static int mmc_blk_ioctl(struct block_device *bdev, fmode_t mode,
 				(struct mmc_ioc_multi_cmd __user *)arg);
 #ifdef CONFIG_MMC_FFU
 	case MMC_IOC_FFU_CMD:
-		ret = mmc_ffu_ioctl(bdev, (struct mmc_ioc_cmd __user *)arg);
+		return mmc_ffu_ioctl(bdev, (struct mmc_ioc_cmd __user *)arg);
 #endif
 	default:
 		return -EINVAL;
@@ -1445,8 +1453,8 @@ static int mmc_blk_cmd_error(struct request *req, const char *name, int error,
 	case -EILSEQ:
 		/* response crc error, retry the r/w cmd */
 		pr_err("%s: %s sending %s command, card status %#x\n",
-				req->rq_disk->disk_name, "response CRC error",
-				name, status);
+			req->rq_disk->disk_name, "response CRC error",
+			name, status);
 		return ERR_RETRY;
 
 	case -ETIMEDOUT:
@@ -2367,7 +2375,7 @@ static void mmc_blk_packed_hdr_wrq_prep(struct mmc_queue_req *mqrq,
 	struct mmc_blk_data *md = mq->data;
 	struct mmc_packed *packed = mqrq->packed;
 	bool do_rel_wr, do_data_tag;
-	u32 *packed_cmd_hdr;
+	__le32 *packed_cmd_hdr;
 	u8 hdr_blocks;
 	u8 i = 1;
 
@@ -2379,8 +2387,8 @@ static void mmc_blk_packed_hdr_wrq_prep(struct mmc_queue_req *mqrq,
 
 	packed_cmd_hdr = packed->cmd_hdr;
 	memset(packed_cmd_hdr, 0, sizeof(packed->cmd_hdr));
-	packed_cmd_hdr[0] = (packed->nr_entries << 16) |
-		(PACKED_CMD_WR << 8) | PACKED_CMD_VER;
+	packed_cmd_hdr[0] = cpu_to_le32((packed->nr_entries << 16) |
+		(PACKED_CMD_WR << 8) | PACKED_CMD_VER);
 	hdr_blocks = mmc_large_sector(card) ? 8 : 1;
 
 	/*
@@ -2394,14 +2402,14 @@ static void mmc_blk_packed_hdr_wrq_prep(struct mmc_queue_req *mqrq,
 			((brq->data.blocks * brq->data.blksz) >=
 			 card->ext_csd.data_tag_unit_size);
 		/* Argument of CMD23 */
-		packed_cmd_hdr[(i * 2)] =
+		packed_cmd_hdr[(i * 2)] = cpu_to_le32(
 			(do_rel_wr ? MMC_CMD23_ARG_REL_WR : 0) |
 			(do_data_tag ? MMC_CMD23_ARG_TAG_REQ : 0) |
-			blk_rq_sectors(prq);
+			blk_rq_sectors(prq));
 		/* Argument of CMD18 or CMD25 */
-		packed_cmd_hdr[((i * 2)) + 1] =
+		packed_cmd_hdr[((i * 2)) + 1] = cpu_to_le32(
 			mmc_card_blockaddr(card) ?
-			blk_rq_pos(prq) : blk_rq_pos(prq) << 9;
+			blk_rq_pos(prq) : blk_rq_pos(prq) << 9);
 		packed->blocks += blk_rq_sectors(prq);
 		i++;
 	}
@@ -3105,19 +3113,6 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 		goto out;
 	}
 
-	/*
-	 * !subname implies we are creating main mmc_blk_data that will be
-	 * associated with mmc_card with dev_set_drvdata. Due to device
-	 * partitions, devidx will not coincide with a per-physical card
-	 * index anymore so we keep track of a name index.
-	 */
-	if (!subname) {
-		md->name_idx = find_first_zero_bit(name_use, max_devices);
-		__set_bit(md->name_idx, name_use);
-	} else
-		md->name_idx = ((struct mmc_blk_data *)
-				dev_to_disk(parent)->private_data)->name_idx;
-
 	md->area_type = area_type;
 
 	/*
@@ -3167,7 +3162,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	 */
 
 	snprintf(md->disk->disk_name, sizeof(md->disk->disk_name),
-		 "mmcblk%u%s", md->name_idx, subname ? subname : "");
+		 "mmcblk%u%s", card->host->index, subname ? subname : "");
 
 	if (mmc_card_mmc(card))
 		blk_queue_logical_block_size(md->queue.queue,
@@ -3178,7 +3173,8 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
 	set_capacity(md->disk, size);
 
 	if (mmc_host_cmd23(card->host)) {
-		if (mmc_card_mmc(card) ||
+		if ((mmc_card_mmc(card) &&
+		     card->csd.mmca_vsn >= CSD_SPEC_VER_3) ||
 		    (mmc_card_sd(card) &&
 		     card->scr.cmds & SD_SCR_CMD23_SUPPORT))
 			md->flags |= MMC_BLK_CMD23;
@@ -3328,7 +3324,6 @@ static void mmc_blk_remove_parts(struct mmc_card *card,
 	struct list_head *pos, *q;
 	struct mmc_blk_data *part_md;
 
-	__clear_bit(md->name_idx, name_use);
 	list_for_each_safe(pos, q, &md->part) {
 		part_md = list_entry(pos, struct mmc_blk_data, part);
 		list_del(pos);
@@ -3589,8 +3584,25 @@ static void mmc_blk_shutdown(struct mmc_card *card)
 static int mmc_blk_suspend(struct device *dev)
 {
 	struct mmc_card *card = mmc_dev_to_card(dev);
+	struct mmc_blk_data *md = dev_get_drvdata(dev);
+	int ret;
 
-	return _mmc_blk_suspend(card);
+	ret = _mmc_blk_suspend(card);
+	if (ret)
+		goto out;
+
+	/*
+	 * Make sure partition is the main one when
+	 * suspend.
+	 */
+	if (md) {
+		ret = mmc_blk_part_switch(card, md);
+		if (ret)
+			pr_info("%s: error %d during suspend\n",
+				md->disk->disk_name, ret);
+	}
+out:
+	return ret;
 }
 
 static int mmc_blk_resume(struct device *dev)

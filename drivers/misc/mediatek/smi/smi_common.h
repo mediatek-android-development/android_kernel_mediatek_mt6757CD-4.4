@@ -34,8 +34,7 @@
 	do {\
 		if (onoff == 1)\
 			cmdq_core_save_first_dump(string, ##args);\
-		else\
-			SMIMSG(string, ##args);\
+		SMIMSG(string, ##args);\
 	} while (0)
 #else
 #define SMIMSG3(string, args...) SMIMSG(string, ##args)
@@ -83,4 +82,5 @@ extern struct SMI_SETTING smi_mmu_setting_config;
 extern int smi_bus_regs_setting(int larb_id, int profile, struct SMI_SETTING *settings);
 extern int smi_common_setting(struct SMI_SETTING *settings);
 extern int smi_larb_setting(int larb_id, struct SMI_SETTING *settings);
+extern unsigned int get_larb_clock_count(const int larb_id);
 #endif

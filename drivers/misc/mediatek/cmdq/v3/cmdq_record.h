@@ -19,28 +19,29 @@
 #include "cmdq_core.h"
 
 struct TaskStruct;
-typedef uint64_t CMDQ_VARIABLE;
 
-#ifdef CMDQ_RECORD_V3
 enum CMDQ_STACK_TYPE_ENUM {
 	CMDQ_STACK_NULL = -1,
 	CMDQ_STACK_TYPE_IF = 0,
 	CMDQ_STACK_TYPE_ELSE = 1,
 	CMDQ_STACK_TYPE_WHILE = 2,
 	CMDQ_STACK_TYPE_BREAK = 3,
+	CMDQ_STACK_TYPE_CONTINUE = 4,
+	CMDQ_STACK_TYPE_DO_WHILE = 5,
 };
 
-#define CMDQ_DATA_BIT		(62)
-
-#define CMDQ_BIT_VALUE	(0LL)
-#define CMDQ_BIT_VAR	(1LL)
+#define CMDQ_DATA_BIT			(62)
+#define CMDQ_BIT_VALUE			(0LL)
+#define CMDQ_BIT_VAR			(1LL)
+#define CMDQ_TASK_CPR_INITIAL_VALUE	(0)
+#define CMDQ_REC_DEFAULT_PRIORITY	(100)
+#define CMDQ_REC_MAX_PRIORITY		(0x7FFFFFFF)
 
 struct cmdq_stack_node {
 	uint32_t position;
-	CMDQ_STACK_TYPE_ENUM stack_type;
+	enum CMDQ_STACK_TYPE_ENUM stack_type;
 	struct cmdq_stack_node *next;
 };
-#endif				/* CMDQ_RECORD_V3 */
 
 struct cmdq_sub_function {
 	bool is_subfunction;		/* [IN]true for subfunction */
@@ -52,32 +53,31 @@ struct cmdq_sub_function {
 };
 
 struct cmdqRecStruct {
-	uint64_t engineFlag;
-	int32_t scenario;
-	uint32_t blockSize;	/* command size */
+	u64 engineFlag;
+	s32 scenario;
+	u32 blockSize;	/* command size */
 	void *pBuffer;
-	uint32_t bufferSize;	/* allocated buffer size */
+	u32 bufferSize;	/* allocated buffer size */
 	struct TaskStruct *pRunningTask;	/* running task after flush() or startLoop() */
-	enum CMDQ_HW_THREAD_PRIORITY_ENUM priority;	/* setting high priority. This implies Prefetch ENABLE. */
+	u32 priority;	/* task schedule priority. this is NOT HW thread priority. */
 	bool finalized;		/* set to true after flush() or startLoop() */
-	uint32_t prefetchCount;	/* maintenance prefetch instruction */
+	u32 prefetchCount;	/* maintenance prefetch instruction */
 
 	struct cmdqSecDataStruct secData;	/* secure execution data */
 
 	/* For v3 CPR use */
 	struct cmdq_v3_replace_struct replace_instr;
-#ifdef CMDQ_RECORD_V3
-	uint8_t local_var_num;
+	u8 local_var_num;
 	struct cmdq_stack_node *if_stack_node;
 	struct cmdq_stack_node *while_stack_node;
-	/* sub-function */
-	cmdq_sub_function sub_function;
-#endif
+	CMDQ_VARIABLE arg_source;	/* poll source, wait_timeout event */
+	CMDQ_VARIABLE arg_value;	/* poll value, wait_timeout start */
+	CMDQ_VARIABLE arg_timeout;	/* wait_timeout timeout */
 
 	/* profile marker */
-#ifdef CMDQ_PROFILE_MARKER_SUPPORT
 	struct cmdqProfileMarkerStruct profileMarker;
-#endif
+
+	struct CmdqRecExtend ext;
 };
 
 /* typedef dma_addr_t cmdqBackupSlotHandle; */
@@ -223,12 +223,12 @@ extern "C" {
  *     support only when secure OS enabled
  */
 	int32_t cmdq_op_write_reg_secure(struct cmdqRecStruct *handle, uint32_t addr,
-				   enum CMDQ_SEC_ADDR_METADATA_TYPE type, uint32_t baseHandle,
+				   enum CMDQ_SEC_ADDR_METADATA_TYPE type, uint64_t baseHandle,
 				   uint32_t offset, uint32_t size, uint32_t port);
 	int32_t cmdqRecWriteSecure(struct cmdqRecStruct *handle,
 				   uint32_t addr,
 				   enum CMDQ_SEC_ADDR_METADATA_TYPE type,
-				   uint32_t baseHandle,
+				   uint64_t baseHandle,
 				   uint32_t offset, uint32_t size, uint32_t port);
 
 /**
@@ -289,6 +289,20 @@ extern "C" {
  */
 	int32_t cmdq_op_set_event(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM event);
 	int32_t cmdqRecSetEventToken(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM event);
+
+/**
+ * Replace overwite CPR parameters of arg_a.
+ * Parameter:
+ *	   handle: the command queue recorder handle
+ *	   index: the index of instruction to replace
+ *	   new_arg_a: the desired cpr value to overwrite arg_a
+ *	   new_arg_b: the desired cpr value to overwrite arg_b
+ *	   new_arg_c: the desired cpr value to overwrite arg_c
+ * Return:
+ *	   0 for success; else the error code is returned
+ */
+	s32 cmdq_op_replace_overwrite_cpr(struct cmdqRecStruct *handle, u32 index,
+		s32 new_arg_a, s32 new_arg_b, s32 new_arg_c);
 
 /**
  * Read a register value to a CMDQ general purpose register(GPR)
@@ -431,10 +445,10 @@ extern "C" {
 	int32_t cmdq_task_flush_async(struct cmdqRecStruct *handle);
 	int32_t cmdqRecFlushAsync(struct cmdqRecStruct *handle);
 
-	int32_t cmdq_task_flush_async_callback(struct cmdqRecStruct *handle, CmdqAsyncFlushCB callback,
-					  uint32_t userData);
-	int32_t cmdqRecFlushAsyncCallback(struct cmdqRecStruct *handle, CmdqAsyncFlushCB callback,
-					  uint32_t userData);
+	int32_t cmdq_task_flush_async_callback(struct cmdqRecStruct *handle,
+		CmdqAsyncFlushCB callback, u64 user_data);
+	int32_t cmdqRecFlushAsyncCallback(struct cmdqRecStruct *handle,
+		CmdqAsyncFlushCB callback, u64 user_data);
 
 /**
  * Trigger CMDQ to execute the recorded commands in loop.
@@ -461,12 +475,34 @@ extern "C" {
 	int32_t cmdqRecStartLoopWithCallback(struct cmdqRecStruct *handle, CmdqInterruptCB loopCB,
 		unsigned long loopData);
 
+	s32 cmdq_task_start_loop_sram(struct cmdqRecStruct *handle, const char *SRAM_owner_name);
+
 /**
  * Unconditionally stops the loop thread.
  * Must call after cmdq_task_start_loop().
  */
 	int32_t cmdq_task_stop_loop(struct cmdqRecStruct *handle);
 	int32_t cmdqRecStopLoop(struct cmdqRecStruct *handle);
+
+/**
+ * Trigger CMDQ to copy data between DRAM and SRAM.
+ *
+ * Parameter:
+ *     pa_src: the copy to source of DRAM PA address
+ *     pa_dest: the copy from destination of DRAM PA address
+ *     sram_src: the copy to destination of SRAM address
+ *     sram_dest: the copy from source of SRAM address
+ *     size: the copy size
+ *
+ * Return:
+ *     0 for success; else the error code is returned
+ *
+ * Note:
+ *     This is an BLOCKING function. When the function is returned,
+ *     the SRAM move is done.
+ */
+	s32 cmdq_task_copy_to_sram(dma_addr_t pa_src, u32 sram_dest, size_t size);
+	s32 cmdq_task_copy_from_sram(dma_addr_t pa_dest, u32 sram_src, size_t size);
 
 /**
  * returns current count of instructions in given handle
@@ -480,10 +516,6 @@ extern "C" {
  *
  * Return:
  *     0 for success; else the error code is returned
- *
- * Note:
- *     Please define CMDQ_PROFILE_MARKER_SUPPORT in cmdq_def.h
- *     to enable profile marker.
  */
 	int32_t cmdq_op_profile_marker(struct cmdqRecStruct *handle, const char *tag);
 	int32_t cmdqRecProfileMarker(struct cmdqRecStruct *handle, const char *tag);
@@ -609,13 +641,20 @@ extern "C" {
 	int32_t cmdqRecWriteAndReleaseResource(struct cmdqRecStruct *handle, enum CMDQ_EVENT_ENUM resourceEvent,
 		uint32_t addr, uint32_t value, uint32_t mask);
 
-#ifdef CMDQ_RECORD_V3
 /**
  * Initialize the logical variable
  * Parameter:
  *	   arg: the variable you want to Initialize
  */
-	void cmdq_init_op_variable(CMDQ_VARIABLE *arg);
+	void cmdq_op_init_variable(CMDQ_VARIABLE *arg);
+
+/**
+ * Initialize the logical variable
+ * Parameter:
+ *	   arg: the variable you want to Initialize
+ *      cpr_offset: the cpr offset you want to use
+ */
+	void cmdq_op_init_global_cpr_variable(CMDQ_VARIABLE *arg, u32 cpr_offset);
 
 /**
  * Append logic command for assign
@@ -757,11 +796,15 @@ extern "C" {
  * Append commands for delay (micro second)
  * Parameter:
  *     handle: the command queue recorder handle
- *     delay_time: delay time
+ *     delay_time: delay time in us
  * Return:
  *     0 for success; else the error code is returned
  */
-	int32_t cmdq_op_delay_us(struct cmdqRecStruct *handle, CMDQ_VARIABLE delay_time);
+	s32 cmdq_op_delay_us(struct cmdqRecStruct *handle, u32 delay_time);
+	s32 cmdq_op_backup_CPR(struct cmdqRecStruct *handle, CMDQ_VARIABLE cpr,
+		cmdqBackupSlotHandle h_backup_slot, uint32_t slot_index);
+	s32 cmdq_op_backup_TPR(struct cmdqRecStruct *handle,
+		cmdqBackupSlotHandle h_backup_slot, uint32_t slot_index);
 
 /**
  * Append if statement command
@@ -775,7 +818,7 @@ extern "C" {
  *     0 for success; else the error code is returned
  */
 	int32_t cmdq_op_if(struct cmdqRecStruct *handle, CMDQ_VARIABLE arg_b,
-				   CMDQ_CONDITION_ENUM arg_condition, CMDQ_VARIABLE arg_c);
+				   enum CMDQ_CONDITION_ENUM arg_condition, CMDQ_VARIABLE arg_c);
 
 /**
  * Append end if statement command
@@ -807,7 +850,7 @@ extern "C" {
  *     0 for success; else the error code is returned
  */
 	int32_t cmdq_op_else_if(struct cmdqRecStruct *handle, CMDQ_VARIABLE arg_b,
-				   CMDQ_CONDITION_ENUM arg_condition, CMDQ_VARIABLE arg_c);
+				   enum CMDQ_CONDITION_ENUM arg_condition, CMDQ_VARIABLE arg_c);
 
 /**
  * Append while statement command
@@ -820,7 +863,7 @@ extern "C" {
  *     0 for success; else the error code is returned
  */
 	int32_t cmdq_op_while(struct cmdqRecStruct *handle, CMDQ_VARIABLE arg_b,
-				   CMDQ_CONDITION_ENUM arg_condition, CMDQ_VARIABLE arg_c);
+				   enum CMDQ_CONDITION_ENUM arg_condition, CMDQ_VARIABLE arg_c);
 
 /**
  * Append continue statement command into while loop
@@ -829,7 +872,7 @@ extern "C" {
  * Return:
  *     0 for success; else the error code is returned
  */
-	int32_t cmdq_op_continue(struct cmdqRecStruct *handle);
+	s32 cmdq_op_continue(struct cmdqRecStruct *handle);
 
 /**
  * Append break statement command into while loop
@@ -838,7 +881,7 @@ extern "C" {
  * Return:
  *     0 for success; else the error code is returned
  */
-	int32_t cmdq_op_break(struct cmdqRecStruct *handle);
+	s32 cmdq_op_break(struct cmdqRecStruct *handle);
 
 /**
  * Append end while statement command
@@ -847,45 +890,43 @@ extern "C" {
  * Return:
  *     0 for success; else the error code is returned
  */
-	int32_t cmdq_op_end_while(struct cmdqRecStruct *handle);
+	s32 cmdq_op_end_while(struct cmdqRecStruct *handle);
 
-/**
- * Create sub-function handle
- * Parameter:
- *     handle: the command queue recorder handle
- *     inCount: input number of arguments
- *     outCount: output number of arguments
- * Return:
- *     0 for success; else the error code is returned
- */
-	int32_t cmdq_func_create(struct cmdqRecStruct **handle, uint32_t in_num, uint32_t out_num);
-
-/**
- * Mark this sub-function handle can be use
+/*
+ * Append do-while statement command
  * Parameter:
  *     handle: the command queue recorder handle
  * Return:
  *     0 for success; else the error code is returned
  */
-	int32_t cmdq_func_end(struct cmdqRecStruct *handle);
+	s32 cmdq_op_do_while(struct cmdqRecStruct *handle);
 
-/**
- * Call sub-function handle
+/*
+ * Append end do while statement command
  * Parameter:
  *     handle: the command queue recorder handle
+ *     arg_b: the value who use to do conditional operation
+ *     arg_condition: conditional operator
+ *     arg_c: the value who use to do conditional operation
  * Return:
  *     0 for success; else the error code is returned
  */
-	int32_t cmdq_func_call(struct cmdqRecStruct *handle, struct cmdqRecStruct *sub_func_handle, ...);
+	s32 cmdq_op_end_do_while(struct cmdqRecStruct *handle, CMDQ_VARIABLE arg_b,
+		enum CMDQ_CONDITION_ENUM arg_condition, CMDQ_VARIABLE arg_c);
+
 
 /**
- * Destroy sub-function handle
+ * Linux like wait_event_timeout
  * Parameter:
  *     handle: the command queue recorder handle
+ *     arg_out, wait result (=0: timeout, >0: wait time when got event)
+ *     wait_event: GCE event
+ *     timeout_time: timeout time in us
  * Return:
  *     0 for success; else the error code is returned
  */
-	int32_t cmdq_func_destroy(struct cmdqRecStruct *handle);
+	s32 cmdq_op_wait_event_timeout(struct cmdqRecStruct *handle, CMDQ_VARIABLE *arg_out,
+			enum CMDQ_EVENT_ENUM wait_event, u32 timeout_time);
 
 /**
  * Append write command to the recorder
@@ -907,7 +948,6 @@ extern "C" {
  */
 	int32_t cmdq_op_read_mem(struct cmdqRecStruct *handle, cmdqBackupSlotHandle h_backup_slot,
 				    uint32_t slot_index, CMDQ_VARIABLE *arg_out);
-#endif				/* CMDQ_RECORD_V3 */
 
 #ifdef __cplusplus
 }

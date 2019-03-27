@@ -19,12 +19,12 @@
 #define adb_output_reg(reg) \
 	seq_printf(s, "[pmic_boot_status] " #reg " Reg[0x%x]=0x%x\n", reg, upmu_get_reg_value(reg))
 #define kernel_output_reg(reg) \
-	pr_err("[pmic_boot_status] " #reg " Reg[0x%x]=0x%x\n", reg, upmu_get_reg_value(reg))
+	pr_notice("[pmic_boot_status] " #reg " Reg[0x%x]=0x%x\n", reg, upmu_get_reg_value(reg))
 #define both_output_reg(reg) \
 	do { \
 		seq_printf(s, "[pmic_boot_status] " #reg " Reg[0x%x]=0x%x\n", \
 			reg, upmu_get_reg_value(reg)); \
-		pr_err("[pmic_boot_status] " #reg " Reg[0x%x]=0x%x\n", \
+		pr_notice("[pmic_boot_status] " #reg " Reg[0x%x]=0x%x\n", \
 			reg, upmu_get_reg_value(reg)); \
 	} while (0)
 
@@ -35,10 +35,8 @@
 #define PMIC_LOG_ERR     0
 
 /* extern variable */
-extern unsigned int gPMICDbgLvl;
-#ifdef CONFIG_MTK_PMIC_COMMON
 extern struct dentry *mtk_pmic_dir;
-#endif /*--CONFIG_MTK_PMIC_COMMON--*/
+extern unsigned int gPMICDbgLvl;
 
 /* extern function */
 extern void kernel_dump_exception_reg(void);

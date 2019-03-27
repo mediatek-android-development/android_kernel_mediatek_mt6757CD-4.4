@@ -68,7 +68,8 @@ void iommu_put_dma_cookie(struct iommu_domain *domain)
 	if (!iovad)
 		return;
 
-	put_iova_domain(iovad);
+	if (iovad->granule)
+		put_iova_domain(iovad);
 	kfree(iovad);
 	domain->iova_cookie = NULL;
 }
@@ -403,8 +404,18 @@ static int __finalise_sg(struct device *dev, struct scatterlist *sg, int nents,
 	int i, count = 0;
 
 	for_each_sg(sg, s, nents, i) {
+#ifndef CONFIG_MTK_PSEUDO_M4U
 		/* Restore this segment's original unaligned fields first */
 		unsigned int s_iova_off = sg_dma_address(s);
+#else
+		/*
+		 * for pseudo m4u map the pa without page struct, the sg_dma_address(s)
+		 * stores the physical address, and pseudo m4u will always make sure the
+		 * pa is 4K aligned, so we do not want the s_iova_off to mess the
+		 * sg_dma_address(s)
+		 */
+		unsigned int s_iova_off = 0;
+#endif
 		unsigned int s_length = sg_dma_len(s);
 		unsigned int s_iova_len = s->length;
 
@@ -492,12 +503,35 @@ int iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 		size_t s_length = s->length;
 		size_t pad_len = (mask - iova_len + 1) & mask;
 
+#ifndef CONFIG_MTK_PSEUDO_M4U
 		sg_dma_address(s) = s_iova_off;
 		sg_dma_len(s) = s_length;
+
 		s->offset -= s_iova_off;
 		s_length = iova_align(iovad, s_length + s_iova_off);
 		s->length = s_length;
+#else
+		/*
+		 * for some sg which do not have page struct, we store the pa
+		 * and size in this filed, need to be take care of separately.
+		 */
+		if (!sg_dma_address(s) && !sg_dma_len(s)) {
+			sg_dma_address(s) = s_iova_off;
+			sg_dma_len(s) = s_length;
 
+			s->offset -= s_iova_off;
+			s_length = iova_align(iovad, s_length + s_iova_off);
+			s->length = s_length;
+		} else {
+			/*
+			 * pseudo m4u store the s_length in sg_dma_len, it may be in
+			 * different field depend on the CONFIG_NEED_SG_DMA_LENGTH,
+			 * get the length from the macro.
+			 */
+			s_length = sg_dma_len(s);
+			s->length = s_length;
+		}
+#endif
 		/*
 		 * Due to the alignment of our single IOVA allocation, we can
 		 * depend on these assumptions about the segment boundary mask:

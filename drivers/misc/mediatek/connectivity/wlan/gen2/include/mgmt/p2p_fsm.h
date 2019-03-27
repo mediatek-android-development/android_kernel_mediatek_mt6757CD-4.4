@@ -49,7 +49,7 @@ enum _ENUM_P2P_DEV_EXT_LISTEN_T {
 	P2P_DEV_EXT_LISTEN_WAITFOR_TIMEOUT,
 	P2P_DEV_EXT_LISTEN_NUM
 };
-enum ENUM_P2P_CNN_STATE_T {
+typedef enum _ENUM_P2P_CONNECT_STATE_T {
 	P2P_CNN_NORMAL = 0,
 	P2P_CNN_GO_NEG_REQ,
 	P2P_CNN_GO_NEG_RESP,
@@ -60,7 +60,7 @@ enum ENUM_P2P_CNN_STATE_T {
 	P2P_CNN_DEV_DISC_RESP,
 	P2P_CNN_PROV_DISC_REQ,
 	P2P_CNN_PROV_DISC_RES
-};
+} ENUM_P2P_CNN_STATE_T, *P_ENUM_P2P_CNN_STATE_T;
 
 typedef enum _ENUM_CHANNEL_REQ_TYPE_T {
 	CHANNEL_REQ_TYPE_REMAIN_ON_CHANNEL,
@@ -151,6 +151,13 @@ typedef struct _P2P_CONNECTION_REQ_INFO_T {
 	UINT_32 u4BufLength;
 	UINT_8 aucIEBuf[MAX_IE_LENGTH];
 } P2P_CONNECTION_REQ_INFO_T, *P_P2P_CONNECTION_REQ_INFO_T;
+
+typedef struct _P2P_GC_DISCONNECTION_REQ_INFO_T {
+	P_STA_RECORD_T prTargetStaRec;
+	UINT_32 u4RetryCount;
+	UINT_16 u2ReasonCode;
+	BOOLEAN fgSendDeauth;
+} P2P_GC_DISCONNECTION_REQ_INFO_T, *P_P2P_GC_DISCONNECTION_REQ_INFO_T;
 
 typedef struct _P2P_MGMT_TX_REQ_INFO_T {
 	BOOLEAN fgIsMgmtTxRequested;
@@ -248,7 +255,7 @@ struct _P2P_FSM_INFO_T {
 	/* State related. */
 	ENUM_P2P_STATE_T ePreviousState;
 	ENUM_P2P_STATE_T eCurrentState;
-	enum ENUM_P2P_CNN_STATE_T eCNNState;
+	ENUM_P2P_CNN_STATE_T eCNNState;
 
 	/* Channel related. */
 	P2P_CHNL_REQ_INFO_T rChnlReqInfo;
@@ -258,6 +265,9 @@ struct _P2P_FSM_INFO_T {
 
 	/* Connection related. */
 	P2P_CONNECTION_REQ_INFO_T rConnReqInfo;
+
+	/* Disconnection related. */
+	P2P_GC_DISCONNECTION_REQ_INFO_T rGcDisConnReqInfo;
 
 	/* Mgmt tx related. */
 	P2P_MGMT_TX_REQ_INFO_T rMgmtTxInfo;
@@ -303,6 +313,9 @@ struct _P2P_FSM_INFO_T {
 	BOOLEAN fgIsWPSMode;
 
 	enum _ENUM_P2P_DEV_EXT_LISTEN_T eListenExted;
+
+	/* GO start and scan its channel first. */
+	BOOLEAN fgIsFirstGOScan;
 };
 
 /*---------------- Messages -------------------*/
@@ -362,7 +375,7 @@ typedef struct _MSG_P2P_START_AP_T {
 	UINT_32 u4BcnInterval;
 	UINT_8 aucSsid[32];
 	UINT_16 u2SsidLen;
-	ENUM_HIDDEN_SSID_TYPE_T eHiddenSsidType;
+	UINT_8 ucHiddenSsidType;
 	BOOLEAN fgIsPrivacy;
 	AP_CRYPTO_SETTINGS_T rEncryptionSettings;
 	INT_32 i4InactiveTimeout;
@@ -434,6 +447,8 @@ VOID p2pFsmStateTransition(IN P_ADAPTER_T prAdapter, IN P_P2P_FSM_INFO_T prP2pFs
 VOID p2pFsmRunEventAbort(IN P_ADAPTER_T prAdapter, IN P_P2P_FSM_INFO_T prP2pFsmInfo);
 
 VOID p2pFsmRunEventScanRequest(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr);
+
+VOID p2pFsmRunEventScanAbort(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr);
 
 VOID p2pFsmRunEventMgmtFrameTx(IN P_ADAPTER_T prAdapter, IN P_MSG_HDR_T prMsgHdr);
 
@@ -1554,6 +1569,8 @@ VOID p2pFsmRunEventFsmTimeout(IN P_ADAPTER_T prAdapter, IN ULONG u4Param);
 
 VOID p2pFsmRunEventRejoinTimeout(IN P_ADAPTER_T prAdapter, IN UINT_32 u4Parm);
 
+VOID p2pFsmRunEventDeauthTimeout(IN P_ADAPTER_T prAdapter, IN ULONG u4Param);
+
 /*=============== P2P Function Related ================*/
 
 /*=============== P2P Function Related ================*/
@@ -1741,6 +1758,7 @@ p2pProcessEvent_UpdateNOAParam(IN P_ADAPTER_T prAdapter,
 WLAN_STATUS p2pUpdateBeaconEcsaIE(IN P_ADAPTER_T prAdapter, IN UINT_8 ucNetTypeIndex);
 
 VOID p2pFuncCompleteIOCTL(IN P_ADAPTER_T prAdapter, IN WLAN_STATUS rWlanStatus);
+VOID p2pFsmRunEventTdlsTimeout(IN P_ADAPTER_T prAdapter, IN ULONG ulParam);
 
 /*******************************************************************************
 *                              F U N C T I O N S

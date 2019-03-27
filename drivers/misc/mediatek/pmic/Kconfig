@@ -42,6 +42,26 @@ config MTK_PMIC_CHIP_MT6355
 	  Set y to support this driver.
 	  Set n and choose other chip.
 
+config MTK_PMIC_CHIP_MT6356
+	tristate "MediaTek PMIC MT6356 Driver"
+	default n
+	---help---
+	  This selects for MediaTek(R) PMIC MT6356 driver.
+	  It's main chip type and providing power features like auxadc,
+	  buck/ldo, interrupt-controller..etc
+	  Set y to support this driver.
+	  Set n and choose other chip.
+
+config MTK_PMIC_CHIP_MT6357
+	tristate "MediaTek PMIC MT6357 Driver"
+	default n
+	---help---
+	  This selects for MediaTek(R) PMIC MT6357 driver.
+	  It's main chip type and providing power features like auxadc,
+	  buck/ldo, interrupt-controller..etc
+	  Set y to support this driver.
+	  Set n and choose other chip.
+
 config MTK_PMIC_CHIP_MT6335
 	tristate "MediaTek Power MT6335 Driver"
 	default n
@@ -63,6 +83,7 @@ config MTK_PMIC_CHIP_MT6337
 
 config MTK_PMIC_CHIP_MT6336
 	tristate "MediaTek Power MT6336 Driver"
+	select MTK_SWITCH_INPUT_OUTPUT_CURRENT_SUPPORT
 	default n
 	---help---
 	  This selects for MediaTek(R) PMIC MT6336 driver.
@@ -88,6 +109,15 @@ config MTK_EXTBUCK
 	  Set y to support this driver.
 	  Set n and choose other chip.
 
+config EXTBUCK_MT6311
+	bool "MediaTek I2C Ext Buck MT6311"
+	depends on MTK_EXTBUCK
+	default n
+	---help---
+	  MediaTek(R) I2C interface External BUCK MT6311 driver.
+	  External Buck for PROC1.
+	  Regulator Driver.
+
 if MTK_LDVT
 config MTK_LDVT_PMIC
 	bool "MediaTek PMIC driver for LDVT"
@@ -111,6 +141,7 @@ config MTK_AUXADC_INTF
 config REGULATOR_ISL91302A
 	bool "Intersil Spi Ext Buck Isl91302a"
 	depends on MTK_EXTBUCK
+	select RT_REGMAP
 	default n
 	---help---
 	  Intersil SPI Interface
@@ -118,4 +149,38 @@ config REGULATOR_ISL91302A
 	  GPU, PROC1, PROC2
 	  Regulator Driver
 
+config REGULATOR_RT5734
+	bool "Richtek Spi Ext Buck rt5734"
+	depends on MTK_EXTBUCK
+	select RT_REGMAP
+	default n
+	---help---
+	  Richtek SPI Interface External Buck for GPU, PROC1, PROC2
+	  Regulator Driver
+	  Say Y to enable it.
+	  Say N to disable it.
+
+config REGULATOR_RT5738
+	bool "Richtek Ext Buck RT5738"
+	depends on MTK_EXTBUCK
+	default n
+	---help---
+	  Richtek I2c Interface
+	  Extern Buck for MTK Platform
+	  Say Y to enable it.
+	  Say N to disable it.
+
+config MTK_EXTERNAL_CHARGER_TYPE_DETECT
+	bool "MediaTek external charger type detection"
+	depends on MTK_PMIC_NEW_ARCH
+	default n
+	---help---
+	  MediaTek external charger type detection flow
+	  only for MTK_PMIC_NEW_ARCH
+	  It used to support external charger type detection.
+	  Default is MTK PMIC path. Select Y to disable MTK charger type detect.
+	  Set y to enable it.
+	  Set n to disable it.
+
 source "drivers/misc/mediatek/pmic/rt5081/Kconfig"
+

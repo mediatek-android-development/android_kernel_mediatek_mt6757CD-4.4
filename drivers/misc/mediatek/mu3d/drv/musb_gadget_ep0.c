@@ -44,6 +44,11 @@
 #include "mtk-phy-asic.h"
 #endif
 
+#ifdef CONFIG_PHY_MTK_SSUSB
+#include "mtk-ssusb-hal.h"
+#endif
+
+
 /* ep0 is always musb->endpoints[0].ep_in */
 #define	next_ep0_request(musb)	next_in_request(&(musb)->endpoints[0])
 
@@ -484,7 +489,7 @@ __releases(musb->lock) __acquires(musb->lock)
 						pr_debug("TEST_J\n");
 						/* TEST_J */
 						musb->test_mode_nr = TEST_J_MODE;
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 						usb20_rev6_setting(0, false);
 #endif
 						break;
@@ -492,7 +497,7 @@ __releases(musb->lock) __acquires(musb->lock)
 						/* TEST_K */
 						pr_debug("TEST_K\n");
 						musb->test_mode_nr = TEST_K_MODE;
-#ifdef CONFIG_PROJECT_PHY
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
 						usb20_rev6_setting(0, false);
 #endif
 						break;
@@ -984,7 +989,7 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 			os_printk(K_DEBUG, "----- ep0 state: MUSB_EP0_STAGE_STATUSIN\n");
 			break;
 		default:
-			ERR("SetupEnd came in a wrong ep0stage %s\n",
+			dev_err(musb->controller, "SetupEnd came in a wrong ep0stage %s\n",
 			    decode_ep0stage(musb->ep0_state));
 		}
 		csr = os_readl(U3D_EP0CSR);
@@ -1073,7 +1078,7 @@ setup:
 			int handled = 0;
 
 			if (len != 8) {
-				ERR("SETUP packet len %d != 8 ?\n", len);
+				dev_err(musb->controller, "SETUP packet len %d != 8 ?\n", len);
 				break;
 			}
 			musb_read_setup(musb, &setup);

@@ -40,17 +40,12 @@ static struct i2c_client *g_pstAF_I2Cclient;
 static int *g_pAF_Opened;
 static spinlock_t *g_pAF_SpinLock;
 
-static DEFINE_MUTEX(main2_af_mutex);
+
 static unsigned long g_u4AF_INF;
 static unsigned long g_u4AF_MACRO = 1023;
 static unsigned long g_u4TargetPosition;
 static unsigned long g_u4CurrPosition;
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-extern int camera_main2_af_power(int on);
-#endif
-/*Add end */
 
 static int s4AF_ReadReg(u8 a_uAddr, u16 *a_pu2Result)
 {
@@ -82,40 +77,6 @@ static int s4AF_ReadReg(u8 a_uAddr, u16 *a_pu2Result)
 	return 0;
 }
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-static int s4AF_ReadReg_w(u8 a_uAddr, u16 *a_pu2Result)
-{
-	int i4RetValue = 0;
-	u8 pBuff[2];
-	char puSendCmd[1];
-
-	puSendCmd[0] = a_uAddr;
-
-	g_pstAF_I2Cclient->addr = AF_I2C_SLAVE_ADDR;
-
-	g_pstAF_I2Cclient->addr = g_pstAF_I2Cclient->addr >> 1;
-
-	i4RetValue = i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 1);
-
-	if (i4RetValue < 0) {
-		LOG_INF("I2C read - send failed!!\n");
-		return -1;
-	}
-
-	i4RetValue = i2c_master_recv(g_pstAF_I2Cclient, pBuff, 2);
-
-	if (i4RetValue < 0) {
-		LOG_INF("I2C read - recv failed!!\n");
-		return -1;
-	}
-	*a_pu2Result = ((pBuff[0] & 0xFF) << 2) + ((pBuff[1] >> 6) & 0x3);
-
-	return 0;
-}
-#endif
-/*Add end */
-
 static int s4AF_WriteReg(u16 a_u2Addr, u16 a_u2Data)
 {
 	int i4RetValue = 0;
@@ -136,9 +97,9 @@ static int s4AF_WriteReg(u16 a_u2Addr, u16 a_u2Data)
 	return 0;
 }
 
-static inline int getAFInfo(__user stAF_MotorInfo * pstMotorInfo)
+static inline int getAFInfo(__user struct stAF_MotorInfo *pstMotorInfo)
 {
-	stAF_MotorInfo stMotorInfo;
+	struct stAF_MotorInfo stMotorInfo;
 
 	stMotorInfo.u4MacroPosition = g_u4AF_MACRO;
 	stMotorInfo.u4InfPosition = g_u4AF_INF;
@@ -152,62 +113,11 @@ static inline int getAFInfo(__user stAF_MotorInfo * pstMotorInfo)
 	else
 		stMotorInfo.bIsMotorOpen = 0;
 
-	if (copy_to_user(pstMotorInfo, &stMotorInfo, sizeof(stAF_MotorInfo)))
+	if (copy_to_user(pstMotorInfo, &stMotorInfo, sizeof(struct stAF_MotorInfo)))
 		LOG_INF("copy to user failed when getting motor information\n");
 
 	return 0;
 }
-
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-static int ak7371_enable(struct i2c_client *i2c_client, int on)
-{
-	g_pstAF_I2Cclient = i2c_client;
-	if (on) {
-		camera_main2_af_power(1);
-		usleep_range(10000, 11000);
-		/* 00:active mode        10:Standby mode    x1:Sleep mode */
-		s4AF_WriteReg(0x02, 0x00);	/* from Standby mode to Active mode */
-		msleep(20);
-	} else {
-		s4AF_WriteReg(0x02, 0x20);	/* from active mode to sleep mode */
-		camera_main2_af_power(0);
-	}
-
-	return 0;
-}
-
-static int ak7371_pos_set(struct i2c_client *i2c_client, int position)
-{
-	int ret = 0;
-
-	g_pstAF_I2Cclient = i2c_client;
-
-	ret = s4AF_WriteReg(0x0, (u16)((position >> 2) & 0xff));
-	ret += s4AF_WriteReg(0x1, (u16)((position & 0x3) << 6));
-
-	if (ret < 0) {
-		LOG_INF("%s: set reg failed.\n", __func__);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int ak7371_pos_get(struct i2c_client *i2c_client, int *position)
-{
-	u16 reg_pos = 0;
-	int ret =0;
-	g_pstAF_I2Cclient = i2c_client;
-
-	ret = s4AF_ReadReg_w(0x84, &reg_pos);
-	*position = reg_pos;
-
-	return ret;
-}
-#endif
-/*Add end */
-
 
 static inline int setVCMPos(unsigned long a_u4Position)
 {
@@ -227,12 +137,9 @@ static inline int moveAF(unsigned long a_u4Position)
 {
 	int ret = 0;
 
-	LOG_INF("move main 2af start\n");
-	mutex_lock(&main2_af_mutex);
 	if ((a_u4Position > g_u4AF_MACRO) || (a_u4Position < g_u4AF_INF)) {
 		LOG_INF("out of range\n");
-		ret = -EINVAL;
-		goto end;
+		return -EINVAL;
 	}
 
 	if (*g_pAF_Opened == 1) {
@@ -268,7 +175,7 @@ static inline int moveAF(unsigned long a_u4Position)
 	}
 
 	if (g_u4CurrPosition == a_u4Position)
-		goto end;
+		return 0;
 
 	spin_lock(g_pAF_SpinLock);
 	g_u4TargetPosition = a_u4Position;
@@ -284,11 +191,10 @@ static inline int moveAF(unsigned long a_u4Position)
 		spin_unlock(g_pAF_SpinLock);
 	} else {
 		LOG_INF("set I2C failed when moving the motor\n");
+		ret = -1;
 	}
-end:
-	mutex_unlock(&main2_af_mutex);
-	LOG_INF("move main2 af end\n");
-	return 0;
+
+	return ret;
 }
 
 static inline int setAFInf(unsigned long a_u4Position)
@@ -308,13 +214,13 @@ static inline int setAFMacro(unsigned long a_u4Position)
 }
 
 /* ////////////////////////////////////////////////////////////// */
-long AK7371AF_MAIN2_Ioctl(struct file *a_pstFile, unsigned int a_u4Command, unsigned long a_u4Param)
+long AK7371AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command, unsigned long a_u4Param)
 {
 	long i4RetValue = 0;
 
 	switch (a_u4Command) {
 	case AFIOC_G_MOTORINFO:
-		i4RetValue = getAFInfo((__user stAF_MotorInfo *) (a_u4Param));
+		i4RetValue = getAFInfo((__user struct stAF_MotorInfo *) (a_u4Param));
 		break;
 
 	case AFIOC_T_MOVETO:
@@ -343,7 +249,7 @@ long AK7371AF_MAIN2_Ioctl(struct file *a_pstFile, unsigned int a_u4Command, unsi
 /* 2.Shut down the device on last close. */
 /* 3.Only called once on last time. */
 /* Q1 : Try release multiple times. */
-int AK7371AF_MAIN2_Release(struct inode *a_pstInode, struct file *a_pstFile)
+int AK7371AF_Release(struct inode *a_pstInode, struct file *a_pstFile)
 {
 	LOG_INF("Start\n");
 
@@ -366,7 +272,7 @@ int AK7371AF_MAIN2_Release(struct inode *a_pstInode, struct file *a_pstFile)
 	return 0;
 }
 
-int AK7371AF_MAIN2_PowerDown(void)
+int AK7371AF_PowerDown(void)
 {
 	LOG_INF("+\n");
 	if (*g_pAF_Opened == 0) {
@@ -393,22 +299,11 @@ int AK7371AF_MAIN2_PowerDown(void)
 	return 0;
 }
 
-/* Add by meizu BSP hudong@meizu.com */
-#ifdef CONFIG_MEIZU_BSP
-struct vcm_factory_fops ak7371_main2_fops = {
-	.vcm_enable = ak7371_enable,
-	.vcm_pos_set = ak7371_pos_set,
-	.vcm_pos_get = ak7371_pos_get,
-};
-#endif
-/*Add end */
-
-
-int AK7371AF_MAIN2_SetI2Cclient(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened)
+int AK7371AF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened)
 {
 	g_pstAF_I2Cclient = pstAF_I2Cclient;
 	g_pAF_SpinLock = pAF_SpinLock;
 	g_pAF_Opened = pAF_Opened;
 
-	return (s4AF_WriteReg(0x02, 0x00) == 0);
+	return 1;
 }

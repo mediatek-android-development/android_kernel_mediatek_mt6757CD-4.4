@@ -105,7 +105,7 @@
 
 
 #if defined(CONFIG_MTK_DUAL_INPUT_CHARGER_SUPPORT)
-#include <mach/diso.h>
+#include <mach/mtk_diso.h>
 #endif
 
 /* ////////////////////////////////////////////////////////////////////////////// */
@@ -298,6 +298,7 @@ struct battery_data {
 	int BAT_BatterySenseVoltage;
 	int BAT_ISenseVoltage;
 	int BAT_ChargerVoltage;
+	int BAT_CURRENT_NOW;
 	/* Dual battery */
 	int status_smb;
 	int capacity_smb;
@@ -315,6 +316,9 @@ static enum power_supply_property ac_props[] = {
 
 static enum power_supply_property usb_props[] = {
 	POWER_SUPPLY_PROP_ONLINE,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER
 };
 
 static enum power_supply_property battery_props[] = {
@@ -323,6 +327,10 @@ static enum power_supply_property battery_props[] = {
 	POWER_SUPPLY_PROP_PRESENT,
 	POWER_SUPPLY_PROP_TECHNOLOGY,
 	POWER_SUPPLY_PROP_CAPACITY,
+	POWER_SUPPLY_PROP_CURRENT_NOW,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
+	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	/* Add for Battery Service */
 	POWER_SUPPLY_PROP_batt_vol,
 	POWER_SUPPLY_PROP_batt_temp,
@@ -343,20 +351,6 @@ static enum power_supply_property battery_props[] = {
 };
 
 struct timespec batteryThreadRunTime;
-
-
-struct charger_consumer *charger_manager_get_by_name(struct device *dev,
-	const char *name)
-{
-	return NULL;
-}
-
-
-int charger_manager_enable_high_voltage_charging(struct charger_consumer *consumer,
-	int idx, bool en)
-{
-	return 0;
-}
 
 void mt_battery_update_time(struct timespec *pre_time, BATTERY_TIME_ENUM duration_type)
 {
@@ -617,6 +611,16 @@ static int usb_get_property(struct power_supply *psy,
 		val->intval = data->USB_ONLINE;
 #endif
 		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		val->intval = 5000000;
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		val->intval = 500000;
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+		val->intval = battery_meter_get_QMAX25() * 1000;
+		/* QMAX from battery, ma to ua */
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -647,7 +651,7 @@ static int battery_get_property(struct power_supply *psy,
 		val->intval = data->BAT_CAPACITY;
 		break;
 	case POWER_SUPPLY_PROP_batt_vol:
-		val->intval = data->BAT_batt_vol;
+		val->intval = data->BAT_batt_vol * 1000;
 		break;
 	case POWER_SUPPLY_PROP_batt_temp:
 		val->intval = data->BAT_batt_temp;
@@ -672,6 +676,19 @@ static int battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_ChargerVoltage:
 		val->intval = data->BAT_ChargerVoltage;
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_NOW:
+		val->intval = data->BAT_CURRENT_NOW; /* charge_current */
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		val->intval = 3000000;
+		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		val->intval = 5000000;
+		break;
+	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
+		val->intval = battery_meter_get_QMAX25() * 1000;
+		/* QMAX from battery, ma to ua */
 		break;
 		/* Dual battery */
 	case POWER_SUPPLY_PROP_status_smb:
@@ -1676,6 +1693,7 @@ static void mt_battery_update_EM(struct battery_data *bat_data)
 	bat_data->BAT_BatterySenseVoltage = BMT_status.bat_vol;
 	bat_data->BAT_ISenseVoltage = BMT_status.Vsense;	/* API */
 	bat_data->BAT_ChargerVoltage = BMT_status.charger_vol;
+	bat_data->BAT_CURRENT_NOW = BMT_status.CURRENT_NOW * 100; /* 0.1mA to uA */
 	/* Dual battery */
 	bat_data->status_smb = g_status_smb;
 	bat_data->capacity_smb = g_capacity_smb;
@@ -2186,6 +2204,7 @@ void mt_battery_GetBatteryData(void)
 	BMT_status.temperatureR = temperatureR;
 	BMT_status.ZCV = ZCV;
 	BMT_status.IBattery = battery_meter_get_battery_current();
+	BMT_status.CURRENT_NOW = BMT_status.IBattery;
 	current_sign = battery_meter_get_battery_current_sign();
 	BMT_status.IBattery *= (current_sign ? 1 : (-1));
 
@@ -2711,7 +2730,6 @@ static void mt_battery_charger_detect_check(void)
 		battery_log(BAT_LOG_FULL, "[BAT_thread]Cable out \r\n");
 
 		mt_usb_disconnect();
-		mt_bc12_dcd_release();
 
 		battery_log(BAT_LOG_FULL, "[PE+] Cable OUT\n");
 
@@ -2820,13 +2838,11 @@ void do_chrdet_int_task(void)
 
 #if defined(CONFIG_POWER_EXT)
 			mt_usb_disconnect();
-			mt_bc12_dcd_release();
 			battery_log(BAT_LOG_CRTI,
 				    "[do_chrdet_int_task] call mt_usb_disconnect() in EVB\n");
 #elif defined(CONFIG_MTK_POWER_EXT_DETECT)
 			if (bat_is_ext_power() == KAL_TRUE) {
 				mt_usb_disconnect();
-				mt_bc12_dcd_release();
 				battery_log(BAT_LOG_CRTI,
 					    "[do_chrdet_int_task] call mt_usb_disconnect() in EVB\n");
 				return;
@@ -2923,7 +2939,6 @@ void BAT_thread(void)
 	}
 
 	mt_kpoc_power_off_check();
-	battery_meter_set_fg_int();
 }
 
 /* ///////////////////////////////////////////////////////////////////////////////////////// */
@@ -3027,8 +3042,6 @@ static long adc_cali_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	int ret = 0;
 	int adc_in_data[2] = { 1, 1 };
 	int adc_out_data[2] = { 1, 1 };
-	int temp_car_tune;
-	static int car_tune = -1;
 
 	mutex_lock(&bat_mutex);
 
@@ -3197,31 +3210,21 @@ static long adc_cali_ioctl(struct file *file, unsigned int cmd, unsigned long ar
 	case Get_META_BAT_CAR_TUNE_VALUE:
 		user_data_addr = (int *)arg;
 		ret = copy_from_user(adc_in_data, user_data_addr, 8);
-		if (car_tune != -1)
-			adc_out_data[0] = car_tune;
-		else
-			adc_out_data[0] = batt_meter_cust_data.car_tune_value * 10;
+		adc_out_data[0] = batt_meter_cust_data.car_tune_value;
 		battery_log(BAT_LOG_CRTI, "Get_BAT_CAR_TUNE_VALUE, res=%d\n", adc_out_data[0]);
 		ret = copy_to_user(user_data_addr, adc_out_data, 8);
 
 		break;
 
 	case Set_META_BAT_CAR_TUNE_VALUE:
-
-		/* meta tool input: adc_in_data[1] (mA)*/
 		user_data_addr = (int *)arg;
 		ret = copy_from_user(adc_in_data, user_data_addr, 8);
-
-		/* Send cali_current to hal to calculate car_tune_value*/
-		temp_car_tune = battery_meter_meta_tool_cali_car_tune(adc_in_data[1]);
-
-		/* return car_tune_value to meta tool in adc_out_data[0] */
-		batt_meter_cust_data.car_tune_value = temp_car_tune / 10;
-		car_tune = temp_car_tune;
-		adc_out_data[0] = temp_car_tune;
+		/* Input X mA, div 1k => car_tune_value */
+		batt_meter_cust_data.car_tune_value = adc_in_data[1] / 1000;
+		adc_out_data[0] = batt_meter_cust_data.car_tune_value;
+		battery_log(BAT_LOG_CRTI, "Set_BAT_CAR_TUNE_VALUE[%d], res=%d\n",
+			adc_in_data[1], adc_out_data[0]);
 		ret = copy_to_user(user_data_addr, adc_out_data, 8);
-		pr_err("Set_BAT_CAR_TUNE_VALUE[%d], res=%d, ret=%d\n",
-			adc_in_data[1], adc_out_data[0], ret);
 
 		break;
 		/* add bing meta tool------------------------------- */
@@ -3298,7 +3301,7 @@ int charger_hv_detect_sw_thread_handler(void *unused)
 	ktime_t ktime;
 	unsigned int charging_enable;
 	unsigned int hv_voltage = batt_cust_data.v_charger_max * 1000;
-	kal_bool hv_status;
+	kal_bool hv_status = KAL_FALSE;
 
 
 #if defined(CONFIG_MTK_DUAL_INPUT_CHARGER_SUPPORT)
@@ -3437,7 +3440,6 @@ static irqreturn_t diso_auxadc_irq_thread(int irq, void *dev_id)
 		BMT_status.charger_exist = KAL_FALSE;
 		/* need stop charger quickly */
 		battery_charging_control(CHARGING_CMD_ENABLE, &BMT_status.charger_exist);
-		mt_bc12_dcd_release();
 		BMT_status.charger_exist = KAL_FALSE;	/* reset charger status */
 		BMT_status.charger_type = CHARGER_UNKNOWN;
 		wake_unlock(&battery_suspend_lock);
@@ -3448,12 +3450,10 @@ static irqreturn_t diso_auxadc_irq_thread(int irq, void *dev_id)
 		if ((BMT_status.charger_type == STANDARD_HOST)
 		    || (BMT_status.charger_type == CHARGING_HOST))
 			mt_usb_disconnect();	/* disconnect if connected */
-		mt_bc12_dcd_release();
 		BMT_status.charger_type = CHARGER_UNKNOWN;	/* reset chr_type */
 		wake_up_bat();
 		break;
 	case DC_ONLY:
-		mt_bc12_dcd_release();
 		BMT_status.charger_type = CHARGER_UNKNOWN;
 		mt_battery_charger_detect_check();	/* plug in VUSB, check if need connect usb */
 		break;

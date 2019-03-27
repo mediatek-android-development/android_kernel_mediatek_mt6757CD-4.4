@@ -508,6 +508,7 @@ WMT_IC_OPS wmt_ic_ops_mt6620 = {
 	.is_quick_sleep = mt6620_quick_sleep_flag_get,
 	.is_aee_dump_support = mt6620_aee_dump_flag_get,
 	.trigger_stp_assert = NULL,
+	.deep_sleep_ctrl = NULL,
 };
 
 /*******************************************************************************
@@ -1466,6 +1467,11 @@ static INT32 mt6620_patch_dwn(UINT32 index)
 	/* remove patch header:
 	 * |<-patch body: X Bytes (X=patchSize)--->|
 	 */
+	if (patchSize < sizeof(WMT_PATCH)) {
+		WMT_ERR_FUNC("error patch size\n");
+		iRet = -1;
+		goto done;
+	}
 	patchSize -= sizeof(WMT_PATCH);
 	pbuf += sizeof(WMT_PATCH);
 
@@ -1744,6 +1750,10 @@ static INT32 mt6620_patch_dwn(VOID)
 	/* remove patch header:
 	 * |<-patch body: X Bytes (X=patchSize)--->|
 	 */
+	if (patchSize < sizeof(WMT_PATCH)) {
+		WMT_ERR_FUNC("error patch size\n");
+		return -1;
+	}
 	patchSize -= sizeof(WMT_PATCH);
 	pbuf += sizeof(WMT_PATCH);
 	WMT_INFO_FUNC("===========================================\n");

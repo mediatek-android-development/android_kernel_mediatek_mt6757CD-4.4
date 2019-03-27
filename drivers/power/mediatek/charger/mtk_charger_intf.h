@@ -27,10 +27,15 @@
 #include <linux/spinlock.h>
 #include <mt-plat/mtk_battery.h>
 
+/* PD */
+#include <tcpm.h>
+
+
 struct charger_manager;
 #include "mtk_pe_intf.h"
 #include "mtk_pe20_intf.h"
 #include "mtk_pe30_intf.h"
+#include "mtk_pdc_intf.h"
 
 #define CHARGING_INTERVAL 10
 #define CHARGING_FULL_INTERVAL 20
@@ -111,6 +116,7 @@ enum {
 	CHARGER_DEV_NOTIFY_SAFETY_TIMEOUT,
 };
 
+
 /*
 *Software Jeita
 *T0:-10
@@ -119,14 +125,14 @@ enum {
 *T3:45
 *T4:50
 */
-typedef enum {
+enum sw_jeita_state_enum {
 	TEMP_BELOW_T0 = 0,
 	TEMP_T0_TO_T1,
 	TEMP_T1_TO_T2,
 	TEMP_T2_TO_T3,
 	TEMP_T3_TO_T4,
 	TEMP_ABOVE_T4
-} sw_jeita_state_enum;
+};
 
 struct sw_jeita_data {
 	int sm;
@@ -137,11 +143,11 @@ struct sw_jeita_data {
 };
 
 /* battery thermal protection */
-typedef enum {
+enum bat_temp_state_enum {
 	BAT_TEMP_LOW = 0,
 	BAT_TEMP_NORMAL,
 	BAT_TEMP_HIGH
-} bat_temp_state_enum;
+};
 
 struct battery_thermal_protection_data {
 	int sm;
@@ -167,6 +173,7 @@ struct charger_custom_data {
 	int apple_1_0a_charger_current;
 	int apple_2_1a_charger_current;
 	int ta_ac_charger_current;
+	int pd_charger_current;
 
 	/* sw jeita */
 	int jeita_temp_above_t4_cv_voltage;
@@ -342,9 +349,13 @@ struct charger_manager {
 	struct mtk_pe30 pe3;
 	struct charger_device *dc_chg;
 
+	/* pd */
+	struct mtk_pdc pdc;
+
+
 	/* thread related */
 	struct hrtimer charger_kthread_timer;
-	struct fgtimer charger_kthread_fgtimer;
+	struct gtimer charger_kthread_fgtimer;
 
 	struct wake_lock charger_wakelock;
 	struct mutex charger_lock;
@@ -353,6 +364,9 @@ struct charger_manager {
 	bool charger_thread_timeout;
 	wait_queue_head_t  wait_que;
 	bool charger_thread_polling;
+
+	/* kpoc */
+	atomic_t enable_kpoc_shdn;
 };
 
 /* charger related module interface */

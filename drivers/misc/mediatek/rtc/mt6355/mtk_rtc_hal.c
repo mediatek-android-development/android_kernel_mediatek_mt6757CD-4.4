@@ -107,7 +107,7 @@
  *     bit 7 - 15: reserved bits
  */
 
-u16 rtc_spare_reg[][3] = {
+u16 rtc_spare_reg[RTC_SPAR_NUM][3] = {
 	{RTC_AL_MTH, 0xff, 8},
 	{RTC_PDN1, 0xf, 0},
 	{RTC_PDN1, 0x3, 4},
@@ -237,14 +237,13 @@ void rtc_bbpu_pwrdown(bool auto_boot)
 {
 	u16 bbpu;
 
-	PMIC_POWER_HOLD(0);
-
 	if (auto_boot)
 		bbpu = RTC_BBPU_KEY | RTC_BBPU_AUTO | RTC_BBPU_PWREN;
 	else
 		bbpu = RTC_BBPU_KEY | RTC_BBPU_PWREN;
 	rtc_write(RTC_BBPU, bbpu);
 	rtc_write_trigger();
+	PMIC_POWER_HOLD(0);
 }
 
 void hal_rtc_bbpu_pwdn(bool charger_status)

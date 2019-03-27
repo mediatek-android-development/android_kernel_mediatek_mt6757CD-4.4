@@ -21,10 +21,10 @@
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
 
-#define LOGD(fmt, msg...)	pr_notice(fmt, ##msg)
-#define LOGV(fmt, msg...)
+#define LOGD(fmt, msg...)	no_printk(fmt, ##msg)
+#define LOGV(fmt, msg...)    no_printk(fmt, ##msg)
 #define LOGI	LOGD
-#define LOGE(fmt, msg...)	pr_err(fmt, ##msg)
+#define LOGE(fmt, msg...)	no_printk(fmt, ##msg)
 #define LOGW	LOGE
 
 #define IPANIC_MODULE_TAG "KERNEL-PANIC"
@@ -102,6 +102,7 @@ enum AE_CMD_ID {
 	AE_REQ_USERSPACEBACKTRACE = 40,
 	AE_REQ_USER_REG,
 	AE_REQ_USER_MAPS,
+	AE_REQ_TRIGGER_TIME,	/* get db trigger time */
 	AE_CMD_ID_END
 };
 
@@ -114,7 +115,7 @@ struct AE_Msg {
 	};
 	union {
 		unsigned int arg;	/* simple argument */
-		AE_EXP_CLASS cls;	/* exception/error/defect class */
+		enum AE_EXP_CLASS cls;	/* exception/error/defect class */
 	};
 	union {
 		unsigned int len;	/* dynamic length argument */
@@ -152,6 +153,15 @@ struct aee_thread_user_stack {
 	int StackLength;
 	unsigned char Userspace_Stack[8192];	/* 8k stack ,define to char only for match 64bit/32bit */
 };
+
+struct aee_siginfo {
+	pid_t tid;
+	int si_signo;
+	int si_errno;
+	int si_code;
+	uintptr_t fault_addr;
+};
+
 #define AEEIOCTL_DAL_SHOW       _IOW('p', 0x01, struct aee_dal_show)	/* Show string on DAL layer  */
 #define AEEIOCTL_DAL_CLEAN      _IO('p', 0x02)	/* Clear DAL layer */
 #define AEEIOCTL_SETCOLOR       _IOW('p', 0x03, struct aee_dal_setcolor)	/* RGB color 0x00RRGGBB */
@@ -170,6 +180,7 @@ struct aee_thread_user_stack {
 #define AEEIOCTL_GET_SF_STATE _IOW('p', 0x0D, long long)
 #define AEEIOCTL_USER_IOCTL_TO_KERNEL_WANING _IOR('p', 0x0E, int)
 #define AEEIOCTL_SET_AEE_FORCE_EXP _IOR('p', 0x0F, int)
+#define AEEIOCTL_GET_AEE_SIGINFO _IOW('p', 0x10, struct aee_siginfo)
 
 #define AED_FILE_OPS(entry) \
 	static const struct file_operations proc_##entry##_fops = { \
@@ -191,8 +202,6 @@ struct proc_dir_entry;
 
 int aed_proc_debug_init(struct proc_dir_entry *aed_proc_dir);
 int aed_proc_debug_done(struct proc_dir_entry *aed_proc_dir);
-
-int aed_get_process_bt(struct aee_process_bt *bt);
 
 void aee_rr_proc_init(struct proc_dir_entry *aed_proc_dir);
 void aee_rr_proc_done(struct proc_dir_entry *aed_proc_dir);

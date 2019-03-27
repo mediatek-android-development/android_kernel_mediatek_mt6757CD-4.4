@@ -23,14 +23,8 @@ static const char *this_state_name[DTS_GPIO_STATE_MAX] = {
 	"mode_te_te",
 	"lcm_rst_out0_gpio",
 	"lcm_rst_out1_gpio",
-	/* [liliwen start] Add LCM config gpio */
 	"lcd_bias_enp0_gpio",
-	"lcd_bias_enp1_gpio",
-	"lcd_bias_enn0_gpio",
-	"lcd_bias_enn1_gpio",
-	"lcd_tp_rst_out0_gpio",
-	"lcd_tp_rst_out1_gpio"
-	/* [liliwen end] */
+	"lcd_bias_enp1_gpio"
 };
 
 /* pinctrl implementation */

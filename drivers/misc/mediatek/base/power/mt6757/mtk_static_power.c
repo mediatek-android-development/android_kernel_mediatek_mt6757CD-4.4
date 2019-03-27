@@ -35,7 +35,7 @@
 #if (SPOWER_LOG_PRINT == SPOWER_LOG_NONE)
 #define SPOWER_INFO(fmt, args...)
 #elif (SPOWER_LOG_PRINT == SPOWER_LOG_WITH_PRINTK)
-/* pr_debug("[Power/spower] "fmt, ##args) */
+/* printk("[Power/spower] "fmt, ##args) */
 #define SPOWER_INFO(fmt, args...)	 pr_err(SP_TAG fmt, ##args)
 #endif
 

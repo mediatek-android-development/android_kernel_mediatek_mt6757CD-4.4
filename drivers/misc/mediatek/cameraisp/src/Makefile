@@ -16,5 +16,33 @@ obj-y := cameraisp_dummy.o
 ifeq ($(CONFIG_MACH_MT6757),y)
   obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
 endif
-#this moment do not have other folder
-#obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+
+ifeq ($(CONFIG_MACH_MT6799),y)
+  ifeq ($(CONFIG_MTK_CAMERA_ISP),y)
+  obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+  obj-y += fdvt/
+  endif
+endif
+
+ifeq ($(CONFIG_MACH_MT6759),y)
+  ifeq ($(CONFIG_MTK_CAMERA_ISP),y)
+  obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+  obj-y += fdvt/
+  endif
+endif
+
+ifeq ($(CONFIG_MACH_MT6763),y)
+  ifeq ($(CONFIG_MTK_CAMERA_ISP),y)
+  obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+  obj-y += fdvt/
+  endif
+endif
+
+ifeq ($(CONFIG_MACH_MT6758),y)
+  obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+  obj-y += fdvt/
+endif
+
+ifeq ($(CONFIG_MACH_MT8167),y)
+  obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+endif

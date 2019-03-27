@@ -204,6 +204,7 @@ typedef struct {
 	signed int charger_protect_status;
 	signed int ICharging;
 	signed int IBattery;
+	signed int CURRENT_NOW;
 	signed int temperature;
 	signed int temperatureR;
 	signed int temperatureV;
@@ -381,7 +382,7 @@ extern PMU_STATUS do_jeita_state_machine(void);
 #ifdef CONFIG_MTK_POWER_EXT_DETECT
 extern kal_bool bat_is_ext_power(void);
 #endif
-
+extern signed int gFG_capacity_by_c;
 extern int g_platform_boot_mode;
 extern bool mt_usb_is_device(void);
 #if defined(CONFIG_USB_MTK_HDRC) || defined(CONFIG_USB_MU3D_DRV)
@@ -395,13 +396,16 @@ void check_battery_exist(void);
 #ifdef DLPT_POWER_OFF_EN
 	extern int dlpt_check_power_off(void);
 #endif
+#ifdef BATTERY_CDP_WORKAROUND
 extern kal_bool is_usb_rdy(void);
+#endif
 extern unsigned int upmu_get_reg_value(unsigned int reg);
 
 extern void mt_charger_enable_DP_voltage(int ison);
 
 /* usb header */
 extern bool mt_usb_is_device(void);
+extern bool is_usb_rdy(void);
 #if defined(CONFIG_USB_MTK_HDRC) || defined(CONFIG_USB_MU3D_DRV)
 extern void mt_usb_connect(void);
 extern void mt_usb_disconnect(void);
@@ -410,7 +414,6 @@ extern void mt_usb_disconnect(void);
 #define mt_usb_disconnect() do { } while (0)
 #endif
 
-extern void mt_bc12_dcd_release(void) __attribute__((weak));
 
 
 

@@ -27,7 +27,6 @@
 
 #define AF_DRVNAME "BU6429AF_DRV"
 #define AF_I2C_SLAVE_ADDR        0x18
-#define EEPROM_I2C_SLAVE_ADDR     0xA2
 
 #define AF_DEBUG
 #ifdef AF_DEBUG
@@ -37,7 +36,8 @@
 #endif
 
 /* if use ISRC mode, should modify variables in init_setting */
-#define USE_ISRC_MODE_S5K2P8_SENSOR
+/* #define USE_ISRC_MODE_S5K2P8_SENSOR */
+#define USE_ISRC_MODE_IMX386_SENSOR
 
 static struct i2c_client *g_pstAF_I2Cclient;
 static int *g_pAF_Opened;
@@ -49,42 +49,6 @@ static unsigned long g_u4AF_MACRO = 1023;
 static unsigned long g_u4TargetPosition;
 static unsigned long g_u4CurrPosition;
 
-static int s4AF_ReadReg_BU6429(u8 *a_pSendData, u16 a_sizeSendData, u8 *a_pRecvData,
-			  u16 a_sizeRecvData, u16 i2cId)
-{
-	int i4RetValue = 0;
-
-	g_pstAF_I2Cclient->addr = i2cId >> 1;
-
-	i4RetValue = i2c_master_send(g_pstAF_I2Cclient, a_pSendData, a_sizeSendData);
-
-	if (i4RetValue != a_sizeSendData) {
-		LOG_INF("I2C send failed!!, Addr = 0x%x\n", a_pSendData[0]);
-		return -1;
-	}
-
-	i4RetValue = i2c_master_recv(g_pstAF_I2Cclient, (u8 *) a_pRecvData, a_sizeRecvData);
-
-	if (i4RetValue != a_sizeRecvData) {
-		LOG_INF("I2C read failed!!\n");
-		return -1;
-	}
-
-	return 0;
-}
-
-static int s4EEPROM_ReadReg_BU6429(u16 addr, u8 *data)
-{
-	int i4RetValue = 0;
-
-	u8 puSendCmd[2] = { (u8) (addr >> 8), (u8) (addr & 0xFF) };
-
-	i4RetValue = s4AF_ReadReg_BU6429(puSendCmd, sizeof(puSendCmd), data, 1, EEPROM_I2C_SLAVE_ADDR);
-	if (i4RetValue < 0)
-		LOG_INF("I2C read e2prom failed!!\n");
-
-	return i4RetValue;
-}
 
 static int s4AF_ReadReg(unsigned short *a_pu2Result)
 {
@@ -112,7 +76,7 @@ static int s4AF_WriteReg(u16 a_u2Data)
 {
 	int i4RetValue = 0;
 
-	#ifdef USE_ISRC_MODE_S5K2P8_SENSOR
+	#if defined(USE_ISRC_MODE_S5K2P8_SENSOR) || defined(USE_ISRC_MODE_IMX386_SENSOR)
 	char puSendCmd[2] = {(char)(((a_u2Data >> 8) & 0x03) | 0xC4), (char)(a_u2Data & 0xFF)};
 	#else
 	char puSendCmd[2] = {(char)(((a_u2Data >> 8) & 0x03) | 0xC0), (char)(a_u2Data & 0xFF)};
@@ -233,9 +197,9 @@ static int init_setting(void)
 }
 #endif
 
-static inline int getAFInfo(__user stAF_MotorInfo *pstMotorInfo)
+static inline int getAFInfo(__user struct stAF_MotorInfo *pstMotorInfo)
 {
-	stAF_MotorInfo stMotorInfo;
+	struct stAF_MotorInfo stMotorInfo;
 
 	stMotorInfo.u4MacroPosition = g_u4AF_MACRO;
 	stMotorInfo.u4InfPosition = g_u4AF_INF;
@@ -249,7 +213,7 @@ static inline int getAFInfo(__user stAF_MotorInfo *pstMotorInfo)
 	else
 		stMotorInfo.bIsMotorOpen = 0;
 
-	if (copy_to_user(pstMotorInfo, &stMotorInfo, sizeof(stAF_MotorInfo)))
+	if (copy_to_user(pstMotorInfo, &stMotorInfo, sizeof(struct stAF_MotorInfo)))
 		LOG_INF("copy to user failed when getting motor information\n");
 
 	return 0;
@@ -269,6 +233,22 @@ static inline int moveAF(unsigned long a_u4Position)
 
 	if (*g_pAF_Opened == 1) {
 		unsigned short InitPos;
+
+		#ifdef USE_ISRC_MODE_IMX386_SENSOR
+		char puSendCmd[2];
+
+		puSendCmd[0] = (char)(0xD0);
+		puSendCmd[1] = (char)(0xC8);
+		i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2);
+
+		puSendCmd[0] = (char)(0xC8);
+		puSendCmd[1] = (char)(0x01);
+		i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2);
+
+		puSendCmd[0] = (char)(0xC6);
+		puSendCmd[1] = (char)(0x00);
+		i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2);
+		#endif
 
 		ret = s4AF_ReadReg(&InitPos);
 		#ifdef USE_ISRC_MODE_S5K2P8_SENSOR
@@ -309,9 +289,10 @@ static inline int moveAF(unsigned long a_u4Position)
 		spin_unlock(g_pAF_SpinLock);
 	} else {
 		LOG_INF("set I2C failed when moving the motor\n");
+		ret = -1;
 	}
 
-	return 0;
+	return ret;
 }
 
 static inline int setAFInf(unsigned long a_u4Position)
@@ -330,41 +311,6 @@ static inline int setAFMacro(unsigned long a_u4Position)
 	return 0;
 }
 
-static inline int getAFCalPos(__user stAF_MotorCalPos * pstMotorCalPos)
-{
-	stAF_MotorCalPos stMotorCalPos;
-	u32 u4AF_CalibData_INF;
-	u32 u4AF_CalibData_MACRO;
-	u8 val1;
-	u8 val2;
-
-	u4AF_CalibData_INF = 0;
-	u4AF_CalibData_MACRO = 0;
-
-	s4EEPROM_ReadReg_BU6429(0x0011, &val2); /* low byte */
-	s4EEPROM_ReadReg_BU6429(0x0012, &val1);
-	u4AF_CalibData_INF = ((val1 << 8) | (val2 & 0x00FF)) & 0xFFFF;
-	LOG_INF("AF_Infi : %x\n", u4AF_CalibData_INF);
-
-	s4EEPROM_ReadReg_BU6429(0x0013, &val2);
-	s4EEPROM_ReadReg_BU6429(0x0014, &val1);
-	u4AF_CalibData_MACRO = ((val1 << 8) | (val2 & 0x00FF)) & 0xFFFF;
-	LOG_INF("AF_Marco : %x\n", u4AF_CalibData_MACRO);
-
-	if (0 < u4AF_CalibData_INF && 1024 > u4AF_CalibData_MACRO && u4AF_CalibData_INF < u4AF_CalibData_MACRO) {
-		stMotorCalPos.u4MacroPos = u4AF_CalibData_MACRO;
-		stMotorCalPos.u4InfPos = u4AF_CalibData_INF;
-	} else {
-		stMotorCalPos.u4MacroPos = 0;
-		stMotorCalPos.u4InfPos = 0;
-	}
-
-	if (copy_to_user(pstMotorCalPos, &stMotorCalPos, sizeof(stMotorCalPos)))
-		LOG_INF("copy to user failed when getting motor information\n");
-
-	return 0;
-}
-
 /* ////////////////////////////////////////////////////////////// */
 long BU6429AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command, unsigned long a_u4Param)
 {
@@ -372,7 +318,7 @@ long BU6429AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command, unsigned l
 
 	switch (a_u4Command) {
 	case AFIOC_G_MOTORINFO:
-		i4RetValue = getAFInfo((__user stAF_MotorInfo *) (a_u4Param));
+		i4RetValue = getAFInfo((__user struct stAF_MotorInfo *) (a_u4Param));
 		break;
 
 	case AFIOC_T_MOVETO:
@@ -387,9 +333,6 @@ long BU6429AF_Ioctl(struct file *a_pstFile, unsigned int a_u4Command, unsigned l
 		i4RetValue = setAFMacro(a_u4Param);
 		break;
 
-	case AFIOC_G_MOTORCALPOS:
-		i4RetValue = getAFCalPos((__user stAF_MotorCalPos *) (a_u4Param));
-		break;
 	default:
 		LOG_INF("No CMD\n");
 		i4RetValue = -EPERM;
@@ -415,10 +358,6 @@ int BU6429AF_Release(struct inode *a_pstInode, struct file *a_pstFile)
 		puSendCmd[1] = (char)(0x00);
 		i2c_master_send(g_pstAF_I2Cclient, puSendCmd, 2);
 		LOG_INF("Wait\n");
-		/*s4AF_WriteReg(200);
-		msleep(20);
-		s4AF_WriteReg(100);
-		msleep(20);*/
 	}
 
 	if (*g_pAF_Opened) {
@@ -436,9 +375,11 @@ int BU6429AF_Release(struct inode *a_pstInode, struct file *a_pstFile)
 	return 0;
 }
 
-void BU6429AF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened)
+int BU6429AF_SetI2Cclient(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened)
 {
 	g_pstAF_I2Cclient = pstAF_I2Cclient;
 	g_pAF_SpinLock = pAF_SpinLock;
 	g_pAF_Opened = pAF_Opened;
+
+	return 1;
 }

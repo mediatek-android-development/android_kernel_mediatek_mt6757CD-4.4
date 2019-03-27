@@ -3794,7 +3794,7 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 		set_shutter(*feature_data);
 		break;
 	case SENSOR_FEATURE_SET_NIGHTMODE:
-		night_mode((BOOL) * feature_data);
+		night_mode((BOOL) *feature_data);
 		break;
 	case SENSOR_FEATURE_SET_GAIN:
 		set_gain((UINT16) *feature_data);
@@ -3822,7 +3822,7 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 		get_imgsensor_id(feature_return_para_32);
 		break;
 	case SENSOR_FEATURE_SET_AUTO_FLICKER_MODE:
-		set_auto_flicker_mode((BOOL) * feature_data_16, *(feature_data_16 + 1));
+		set_auto_flicker_mode((BOOL) *feature_data_16, *(feature_data_16 + 1));
 		break;
 	case SENSOR_FEATURE_SET_MAX_FRAME_RATE_BY_SCENARIO:
 		set_max_framerate_by_scenario((MSDK_SCENARIO_ID_ENUM) *feature_data,
@@ -3836,7 +3836,7 @@ static kal_uint32 feature_control(MSDK_SENSOR_FEATURE_ENUM feature_id,
 		 */
 		break;
 	case SENSOR_FEATURE_SET_TEST_PATTERN:
-		set_test_pattern_mode((BOOL) * feature_data);
+		set_test_pattern_mode((BOOL) *feature_data);
 		break;
 	case SENSOR_FEATURE_GET_TEST_PATTERN_CHECKSUM_VALUE:	/* for factory mode auto testing */
 		*feature_return_para_32 = imgsensor_info.checksum_value;

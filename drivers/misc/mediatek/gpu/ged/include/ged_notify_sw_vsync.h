@@ -16,13 +16,18 @@
 
 #include "ged_type.h"
 
+extern unsigned int gpu_block;
+extern unsigned int gpu_idle;
+extern unsigned int gpu_av_loading;
 
 GED_ERROR ged_notify_sw_vsync(GED_VSYNC_TYPE eType, GED_DVFS_UM_QUERY_PACK* psQueryData);
 
 GED_ERROR ged_notify_sw_vsync_system_init(void);
 
 void ged_notify_sw_vsync_system_exit(void);
-
+#ifdef GED_ENABLE_FB_DVFS
+void ged_cancel_backup_timer(void);
+#endif
 
 void ged_sodi_start(void);
 void ged_sodi_stop(void);

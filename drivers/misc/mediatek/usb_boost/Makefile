@@ -1,4 +1,4 @@
 obj-y := usb_boost.o
-obj-$(CONFIG_ARCH_MT6755) += v1/
-obj-$(CONFIG_ARCH_MT6757) += v1/
-obj-$(CONFIG_ARCH_MT6797) += v1/
+obj-$(CONFIG_MACH_MT6799) += v1/
+obj-$(CONFIG_MACH_MT6759) += v1/
+obj-$(CONFIG_MACH_MT6763) += v1/

@@ -34,7 +34,7 @@
 /*#include <asm/system.h>//for SMP */
 
 /* #define CAM_CALGETDLT_DEBUG */
-/* #define CAM_CAL_DEBUG */
+/*#define CAM_CAL_DEBUG*/
 #ifdef CAM_CAL_DEBUG
 #define CAM_CALDB pr_debug
 #else
@@ -42,7 +42,7 @@
 #endif
 
 
-/*static DEFINE_SPINLOCK(g_CAM_CALLock); for SMP */
+static DEFINE_SPINLOCK(g_CAM_CALLock);/* for SMP */
 /* #define CAM_CAL_I2C_BUSNUM 1 */
 #define CAM_CAL_I2C_BUSNUM 3
 #define CAM_CAL_DEV_MAJOR_NUMBER 226
@@ -68,6 +68,12 @@
 ********************************************************************************/
 /*static struct i2c_board_info kd_cam_cal_dev __initdata = { I2C_BOARD_INFO(CAM_CAL_DRVNAME, 0xAA >> 1)};*/
 static struct i2c_client *g_pstI2Cclient;
+
+/* add for linux-4.4 */
+#ifndef I2C_WR_FLAG
+#define I2C_WR_FLAG		(0x1000)
+#define I2C_MASK_FLAG	(0x00ff)
+#endif
 /*static struct class *CAM_CAL_class;*/
 /*static atomic_t g_CAM_CALatomic;*/
 /* static DEFINE_SPINLOCK(kdcam_cal_drv_lock); */
@@ -111,17 +117,18 @@ static int iReadCAM_CAL(u16 a_u2Addr, u32 ui4_length, u8 *a_puBuff)
 {
 	int  i4RetValue = 0;
 	char puReadCmd[2] = {(char)(a_u2Addr >> 8), (char)(a_u2Addr & 0xFF)};
-	/*CAM_CALDB("[CAM_CAL] iReadCAM_CAL~~g_pstI2Cclient->addr=%x\n", g_pstI2Cclient->addr);*/
+
+	/* CAM_CALDB("[CAM_CAL] iReadCAM_CAL!!\n"); */
 
 	if (ui4_length > 8) {
 		CAM_CALDB("[BRCB032GWZ] exceed I2c-mt65xx.c 8 bytes limitation\n");
 		return -1;
 	}
-#ifdef CONFIG_MTK_I2C_EXTENSION
+
 	spin_lock(&g_CAM_CALLock); /* for SMP */
 	g_pstI2Cclient->addr = g_pstI2Cclient->addr & (I2C_MASK_FLAG | I2C_WR_FLAG);
 	spin_unlock(&g_CAM_CALLock); /* for SMP */
-#endif
+
 	/* CAM_CALDB("[CAM_CAL] i2c_master_send\n"); */
 	i4RetValue = i2c_master_send(g_pstI2Cclient, puReadCmd, 2);
 	if (i4RetValue != 2) {
@@ -135,11 +142,11 @@ static int iReadCAM_CAL(u16 a_u2Addr, u32 ui4_length, u8 *a_puBuff)
 		CAM_CALDB("[CAM_CAL] I2C read data failed!!\n");
 		return -1;
 	}
-#ifdef CONFIG_MTK_I2C_EXTENSION
+
 	spin_lock(&g_CAM_CALLock); /* for SMP */
 	g_pstI2Cclient->addr = g_pstI2Cclient->addr & I2C_MASK_FLAG;
 	spin_unlock(&g_CAM_CALLock); /* for SMP */
-#endif
+
 	/* CAM_CALDB("[CAM_CAL] iReadCAM_CAL done!!\n"); */
 	return 0;
 }
@@ -559,7 +566,6 @@ static int CAM_CAL_Open(struct inode *a_pstInode, struct file *a_pstFile)
 	CAM_CALDB("[BRCB032GWZ_3_CAM_CAL] CAM_CAL_Open\n");
 	spin_lock(&g_CAM_CALLock);
 	if (g_u4Opened) {
-		spin_unlock(&g_CAM_CALLock);
 		result = -EBUSY;
 	} else {
 		g_u4Opened = 1;

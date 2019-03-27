@@ -22,7 +22,6 @@
 #include <mt-plat/sync_write.h>
 #include <mt-plat/mtk_io.h>
 #include "../systracker_v2.h"
-#include "systracker_platform.h"
 
 #ifdef SYSTRACKER_TEST_SUIT
 void __iomem *p1;
@@ -55,8 +54,6 @@ static int read_timeout_handler(unsigned long addr,
 		}
 	}
 
-	debug_dump();
-
 	/* return -1 to indicate kernel go on its flow */
 	return -1;
 }
@@ -83,10 +80,9 @@ static void write_timeout_handler(struct pt_regs *regs, void *priv)
 			       readl(IOMEM(BUS_DBG_AW_TRANS_TID(i))));
 		}
 	}
-	debug_dump();
 }
 
-static int systracker_platform_hook_fault(void)
+static int __init systracker_platform_hook_fault(void)
 {
 	int ret = 0;
 
@@ -144,13 +140,11 @@ int systracker_handler(unsigned long addr,
 		}
 	}
 
-	debug_dump();
-
 	return -1;
 }
 
 /* ARM32 version */
-static int systracker_platform_hook_fault(void)
+static int __init systracker_platform_hook_fault(void)
 {
 
 #ifdef CONFIG_ARM_LPAE
@@ -257,15 +251,6 @@ static void systracker_platform_notimeout_test(void)
 #endif
 /* end of SYSTRACKER_TEST_SUIT */
 
-
-void debug_dump(void)
-{
-#ifdef TRACKER_DEBUG
-	pr_debug("Sys Tracker extra Dump\n");
-#endif
-	dump_i2c_cg_clk();
-}
-
 /*
  * mt_systracker_init: initialize driver.
  * Always return 0.
@@ -278,9 +263,6 @@ static int __init mt_systracker_init(void)
 
 	systracker_drv->systracker_hook_fault =
 		systracker_platform_hook_fault;
-
-	systracker_drv->systracker_debug_dump =
-		debug_dump;
 #ifdef SYSTRACKER_TEST_SUIT
 	systracker_drv->systracker_test_init =
 		systracker_platform_test_init;

@@ -73,14 +73,11 @@ ifneq ($(strip $(TARGET_NO_KERNEL)),true)
         KERNEL_ZIMAGE_OUT := $(KERNEL_OUT)/arch/$(TARGET_ARCH)/boot/zImage
       endif
     endif
-    ifeq ($(strip $(MTK_INTERNAL)),yes)
-      KBUILD_BUILD_USER ?= mediatek
-      KBUILD_BUILD_HOST ?= mediatek
-    endif
-    export KBUILD_BUILD_USER
-    export KBUILD_BUILD_HOST
+    export MTK_DTBO_FEATURE
     BUILT_KERNEL_TARGET := $(KERNEL_ZIMAGE_OUT).bin
     INSTALLED_KERNEL_TARGET := $(PRODUCT_OUT)/kernel
+    INSTALLED_DTB_OVERLAY_TARGET := $(PRODUCT_OUT)/odmdtbo.img
+    BUILT_DTB_OVERLAY_TARGET := $(KERNEL_OUT)/arch/$(TARGET_ARCH)/boot/dts/odmdtbo.img
     TARGET_KERNEL_CONFIG := $(KERNEL_OUT)/.config
     KERNEL_HEADERS_INSTALL := $(KERNEL_OUT)/usr
     KERNEL_CONFIG_FILE := $(KERNEL_DIR)/arch/$(TARGET_ARCH)/configs/$(KERNEL_DEFCONFIG)
@@ -93,24 +90,24 @@ ifneq ($(strip $(TARGET_NO_KERNEL)),true)
 # .config cannot be PHONY due to config_data.gz
 $(TARGET_KERNEL_CONFIG): $(KERNEL_CONFIG_FILE) $(LOCAL_PATH)/Android.mk
 $(TARGET_KERNEL_CONFIG): $(shell find $(KERNEL_DIR) -name "Kconfig*")
-	$(hide) mkdir -p $(KERNEL_OUT)
+	$(hide) mkdir -p $(dir $@)
 	$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION) $(KERNEL_DEFCONFIG)
 
 $(KERNEL_MODULES_DEPS): $(KERNEL_ZIMAGE_OUT) ;
+$(BUILT_DTB_OVERLAY_TARGET): $(KERNEL_ZIMAGE_OUT)
 
 .KATI_RESTAT: $(KERNEL_ZIMAGE_OUT)
 $(KERNEL_ZIMAGE_OUT): $(TARGET_KERNEL_CONFIG) FORCE
-	$(hide) mkdir -p $(KERNEL_OUT)
+	$(hide) mkdir -p $(dir $@)
 	$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION)
 	$(hide) $(call fixup-kernel-cmd-file,$(KERNEL_OUT)/arch/$(TARGET_ARCH)/boot/compressed/.piggy.xzkern.cmd)
 ifneq ($(KERNEL_CONFIG_MODULES),)
-	$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION) modules
-	$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION) INSTALL_MOD_PATH=$(KERNEL_MODULES_SYMBOLS_OUT) modules_install
-	$(hide) $(call move-kernel-module-files,$(KERNEL_MODULES_SYMBOLS_OUT),$(KERNEL_OUT))
-	$(hide) $(call clean-kernel-module-dirs,$(KERNEL_MODULES_SYMBOLS_OUT),$(KERNEL_OUT))
-	$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION) INSTALL_MOD_PATH=$(KERNEL_MODULES_OUT) modules_install
-	$(hide) $(call move-kernel-module-files,$(KERNEL_MODULES_OUT),$(KERNEL_OUT))
-	$(hide) $(call clean-kernel-module-dirs,$(KERNEL_MODULES_OUT),$(KERNEL_OUT))
+	#$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION) INSTALL_MOD_PATH=$(KERNEL_MODULES_SYMBOLS_OUT) modules_install
+	#$(hide) $(call move-kernel-module-files,$(KERNEL_MODULES_SYMBOLS_OUT),$(KERNEL_OUT))
+	#$(hide) $(call clean-kernel-module-dirs,$(KERNEL_MODULES_SYMBOLS_OUT),$(KERNEL_OUT))
+	#$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION) INSTALL_MOD_PATH=$(KERNEL_MODULES_OUT) modules_install
+	#$(hide) $(call move-kernel-module-files,$(KERNEL_MODULES_OUT),$(KERNEL_OUT))
+	#$(hide) $(call clean-kernel-module-dirs,$(KERNEL_MODULES_OUT),$(KERNEL_OUT))
 endif
 
 ifeq ($(strip $(MTK_HEADER_SUPPORT)), yes)
@@ -130,6 +127,13 @@ $(TARGET_PREBUILT_KERNEL): $(BUILT_KERNEL_TARGET) $(LOCAL_PATH)/Android.mk | $(A
     BUILT_KERNEL_TARGET := $(TARGET_PREBUILT_KERNEL)
   endif#TARGET_PREBUILT_KERNEL
 
+$(INSTALLED_DTB_OVERLAY_TARGET): $(BUILT_DTB_OVERLAY_TARGET) $(LOCAL_PATH)/Android.mk | $(ACP)
+	$(copy-file-to-target)
+
+ifeq ($(strip $(MTK_DTBO_FEATURE)), yes)
+droid: $(INSTALLED_DTB_OVERLAY_TARGET)
+endif
+
 $(INSTALLED_KERNEL_TARGET): $(BUILT_KERNEL_TARGET) $(LOCAL_PATH)/Android.mk | $(ACP)
 	$(copy-file-to-target)
 
@@ -137,7 +141,7 @@ ifneq ($(KERNEL_CONFIG_MODULES),)
 $(BUILT_SYSTEMIMAGE): $(KERNEL_MODULES_DEPS)
 endif
 
-.PHONY: kernel save-kernel kernel-savedefconfig %config-kernel clean-kernel
+.PHONY: kernel save-kernel kernel-savedefconfig %config-kernel clean-kernel odmdtboimage
 kernel: $(INSTALLED_KERNEL_TARGET)
 save-kernel: $(TARGET_PREBUILT_KERNEL)
 
@@ -154,6 +158,15 @@ kernel-menuconfig:
 
 clean-kernel:
 	$(hide) rm -rf $(KERNEL_OUT) $(KERNEL_MODULES_OUT) $(INSTALLED_KERNEL_TARGET)
+	$(hide) rm -f $(INSTALLED_DTB_OVERLAY_TARGET)
+
+ifeq ($(strip $(MTK_DTBO_FEATURE)), yes)
+.PHONY: odmdtboimage
+odmdtboimage: $(TARGET_KERNEL_CONFIG)
+	$(hide) mkdir -p $(KERNEL_OUT)
+	$(MAKE) -C $(KERNEL_DIR) $(KERNEL_MAKE_OPTION) odmdtboimage
+	$(hide) cp $(BUILT_DTB_OVERLAY_TARGET) $(INSTALLED_DTB_OVERLAY_TARGET)
+endif
 
 .PHONY: check-kernel-config check-kernel-dotconfig
 droid: check-kernel-config check-kernel-dotconfig

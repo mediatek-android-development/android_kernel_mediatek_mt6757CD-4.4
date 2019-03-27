@@ -82,9 +82,6 @@ static kgid_t gid = KGIDT_INIT(1000);
 static DEFINE_SEMAPHORE(sem_mutex);
 static int isTimerCancelled;
 
-int tscpu_fake_temp_enable; /*fake temperature flag*/
-int tscpu_fake_temp = 0x7FFFFFFF; /*fake temperature*/
-
 #if !defined(CONFIG_MTK_CLKMGR)
 struct clk *therm_main;		/* main clock for Thermal */
 #endif
@@ -377,20 +374,16 @@ void tscpu_thermal_tempADCPNP(int adc, int order)
 	}
 }
 
-static int max_temperature_in_bank(thermal_bank_name bank)
+static int max_temperature_in_bank(enum thermal_bank_name bank)
 {
 	int j = 0;
 	int max_in_bank = 0;
 
 	for (j = 0; j < tscpu_g_bank[bank].ts_number; j++) {
-		if (j == 0) {
-			max_in_bank = tscpu_bank_ts[bank][tscpu_g_bank[bank].ts[j].type];
-		} else {
 		if (tscpu_bank_ts[bank][tscpu_g_bank[bank].ts[j].type] > max_in_bank)
 			max_in_bank = tscpu_bank_ts[bank][tscpu_g_bank[bank].ts[j].type];
 		tscpu_dprintk("tscpu_get_temp CPU bank%d T%d=%d\n", bank, j,
 			      tscpu_bank_ts[bank][tscpu_g_bank[bank].ts[j].type]);
-	}
 	}
 
 	return max_in_bank;
@@ -405,14 +398,12 @@ int tscpu_max_temperature(void)
 
 	tscpu_dprintk("tscpu_get_temp %s, %d\n", __func__, __LINE__);
 	for (i = 0; i < ARRAY_SIZE(tscpu_g_bank); i++) {
-		if (i == 0) {
-			max = max_temperature_in_bank(i);
-		} else {
+
 		max_in_bank = max_temperature_in_bank(i);
 		if (max_in_bank > max)
 			max = max_in_bank;
 	}
-	}
+
 	return max;
 }
 
@@ -644,12 +635,12 @@ static int tscpu_get_temp(struct thermal_zone_device *thermal, int *t)
 #if THERMAL_LT_SET_HPM
 	if (enable_hpm_temp) {
 		ts_temp = get_immediate_ts4_wrap();
-		if (ts_temp > leave_hpm_temp) {
+		if (ts_temp > leave_hpm_temp && ts_temp != CLEAR_TEMP) {
 			if (vcorefs_get_kicker_opp(KIR_THERMAL) != OPPI_UNREQ) {
 				tscpu_warn("ts4: temp=%d leave HPM\n", ts_temp);
 				r = vcorefs_request_dvfs_opp(KIR_THERMAL, OPPI_UNREQ);
 			}
-		} else if (ts_temp < enter_hpm_temp) {
+		} else if (ts_temp < enter_hpm_temp && ts_temp != CLEAR_TEMP) {
 			if (vcorefs_get_kicker_opp(KIR_THERMAL) != OPPI_PERF) {
 				tscpu_warn("ts4: temp=%d enter HPM\n", ts_temp);
 				r = vcorefs_request_dvfs_opp(KIR_THERMAL, OPPI_PERF);
@@ -1056,48 +1047,6 @@ static ssize_t tscpu_pmic_current_limit_write(struct file *file, const char __us
 #endif
 
 
-
-static int tscpu_read_fake_temp(struct seq_file *m, void *v)
-{
-	seq_printf(m, "[tscpu_read_fake_temp] %d %d\n", tscpu_fake_temp, tscpu_fake_temp_enable);
-	return 0;
-}
-
-static ssize_t tscpu_write_fake_temp(struct file *file, const char __user *buffer, size_t count,
-	loff_t *data)
-{
-	char desc[128];
-	int len = 0;
-
-	int set_enable = 0;
-	int temperature = -1, enable = 1;
-
-	len = (count < (sizeof(desc) - 1)) ? count : (sizeof(desc) - 1);
-	if (copy_from_user(desc, buffer, len))
-		return 0;
-
-	desc[len] = '\0';
-
-	if (sscanf(desc, "%d %d", &temperature, &enable) == 2) {
-		set_enable = 1;
-	} else {
-		tscpu_warn("tscpu_write_fake_temp bad argument\n");
-		return -EINVAL;
-	}
-
-	if (set_enable) {
-		tscpu_fake_temp_enable = !!(enable);
-
-		tscpu_fake_temp = temperature;
-
-		tscpu_warn("tscpu_write_fake_temp enable: %d %d(%d)\n",
-			tscpu_fake_temp_enable, tscpu_fake_temp_enable, enable);
-	}
-
-	return count;
-}
-
-
 static int tscpu_read_log(struct seq_file *m, void *v)
 {
 
@@ -1315,7 +1264,6 @@ static ssize_t tscpu_write(struct file *file, const char __user *buffer, size_t 
 	     &ptr_mtktscpu_data->trip[8], &ptr_mtktscpu_data->t_type[8], ptr_mtktscpu_data->bind8,
 	     &ptr_mtktscpu_data->trip[9], &ptr_mtktscpu_data->t_type[9], ptr_mtktscpu_data->bind9,
 	     &ptr_mtktscpu_data->time_msec) == 32) {
-
 		/*      modify for PTPOD, if disable Thermal,
 		*   PTPOD still need to use this function for getting temperature
 		 */
@@ -1547,7 +1495,7 @@ static void thermal_release_all_periodoc_temp_sensing(void)
 	}
 }
 
-void tscpu_thermal_enable_all_periodoc_sensing_point(thermal_bank_name bank_num)
+void tscpu_thermal_enable_all_periodoc_sensing_point(enum thermal_bank_name bank_num)
 {
 
 	switch (tscpu_g_bank[bank_num].ts_number) {
@@ -1843,7 +1791,7 @@ static int ktp_thread(void *arg)
 }
 #endif
 
-int tscpu_get_temp_by_bank(thermal_bank_name ts_bank)
+int tscpu_get_temp_by_bank(enum thermal_bank_name ts_bank)
 {
 	int bank_T = 0;
 
@@ -2082,22 +2030,6 @@ static const struct file_operations mtktscpu_ts4_fops = {
 };
 #endif
 
-
-static int tscpu_open_fake_temp(struct inode *inode, struct file *file)
-{
-	return single_open(file, tscpu_read_fake_temp, NULL);
-}
-
-static const struct file_operations mtktscpu_fake_temp = {
-	.owner = THIS_MODULE,
-	.open = tscpu_open_fake_temp,
-	.read = seq_read,
-	.llseek = seq_lseek,
-	.write = tscpu_write_fake_temp,
-	.release = single_release,
-};
-
-
 static int tscpu_read_ttpct(struct seq_file *m, void *v)
 {
 	unsigned int cpu_power, gpu_power, max_cpu_pwr, max_gpu_pwr;
@@ -2114,17 +2046,8 @@ static int tscpu_read_ttpct(struct seq_file *m, void *v)
 	cpu_power = (cpu_power < max_cpu_pwr) ? cpu_power : max_cpu_pwr;
 	gpu_power = (gpu_power == 0x7FFFFFFF || gpu_power == 0) ? max_gpu_pwr:gpu_power;
 	gpu_power = (gpu_power < max_gpu_pwr) ? gpu_power : max_gpu_pwr;
-
-	if (max_cpu_pwr != 0)
 	cpu_power = (max_cpu_pwr - cpu_power)*100/max_cpu_pwr;
-	else
-		seq_printf(m, "ERROR: max_cpu_pwr = %d\n", max_cpu_pwr);
-
-	if (max_gpu_pwr != 0)
 	gpu_power = (max_gpu_pwr - gpu_power)*100/max_gpu_pwr;
-	else
-		seq_printf(m, "ERROR: max_gpu_pwr = %d\n", max_gpu_pwr);
-
 	seq_printf(m, "%d,%d\n", cpu_power, gpu_power);
 
 	return 0;
@@ -2145,7 +2068,7 @@ static const struct file_operations mtktscpu_ttpct_fops = {
 
 
 #if THERMAL_DRV_UPDATE_TEMP_DIRECT_TO_MET
-int tscpu_get_cpu_temp_met(MTK_THERMAL_SENSOR_CPU_ID_MET id)
+int tscpu_get_cpu_temp_met(enum mtk_thermal_sensor_cpu_id_met id)
 {
 	unsigned long flags;
 	int ret;
@@ -2435,7 +2358,6 @@ void tscpu_workqueue_cancel_timer(void)
 
 	up(&sem_mutex);
 #endif
-
 }
 
 void tscpu_workqueue_start_timer(void)
@@ -2450,7 +2372,7 @@ void tscpu_workqueue_start_timer(void)
 		return;
 
 	if (!is_worktimer_en && thz_dev != NULL && interval != 0) {
-		mod_delayed_work(system_freezable_wq, &(thz_dev->poll_queue), 0);
+		mod_delayed_work(system_freezable_power_efficient_wq, &(thz_dev->poll_queue), 0);
 
 		tscpu_dprintk("[tTimer] workqueue starting\n");
 		spin_lock(&timer_lock);
@@ -2470,11 +2392,12 @@ void tscpu_workqueue_start_timer(void)
 
 	/* resume thermal framework polling when leaving deep idle */
 	if (thz_dev != NULL && interval != 0)
-		mod_delayed_work(system_freezable_wq, &(thz_dev->poll_queue),
-			round_jiffies(msecs_to_jiffies(1000)));
+		mod_delayed_work(system_freezable_power_efficient_wq,
+				&(thz_dev->poll_queue), round_jiffies(msecs_to_jiffies(1000)));
 
 	up(&sem_mutex);
 #endif
+
 }
 
 static void tscpu_cancel_thermal_timer(void)
@@ -2511,24 +2434,6 @@ static void tscpu_start_thermal_timer(void)
 	tscpu_thermal_release();
 #endif
 }
-
-#ifdef CONFIG_OF
-long tscpu_dev_alloc_module_base_by_name(const char *name)
-{
-	unsigned long VA;
-	struct device_node *node = NULL;
-
-	node = of_find_compatible_node(NULL, NULL, name);
-	if (!node) {
-		pr_debug("find node failed\n");
-		return 0;
-	}
-	VA = (unsigned long)of_iomap(node, 0);
-	pr_debug("DEV: VA(%s): 0x%lx\n", name, VA);
-
-	return VA;
-}
-#endif
 
 static void init_thermal(void)
 {
@@ -2680,12 +2585,6 @@ static void tscpu_create_fs(void)
 		if (entry)
 			proc_set_user(entry, uid, gid);
 #endif
-
-		entry =
-			proc_create("tzcpu_fake_temp", S_IRUGO | S_IWUSR, mtktscpu_dir, &mtktscpu_fake_temp);
-		if (entry)
-			proc_set_user(entry, uid, gid);
-
 	}
 }
 

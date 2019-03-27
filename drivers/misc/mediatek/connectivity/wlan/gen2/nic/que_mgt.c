@@ -401,6 +401,7 @@ VOID qmDeactivateStaRec(IN P_ADAPTER_T prAdapter, IN UINT_32 u4StaRecIdx)
 	prStaRec->fgIsValid = FALSE;
 	prStaRec->fgIsInPS = FALSE;
 	prStaRec->fgIsTxAllowed = FALSE;
+
 	/* To reduce printk for IOT sta to connect all the time, */
 	/* DBGLOG(QM, INFO, ("QM: -STA[%ld]\n", u4StaRecIdx)); */
 }
@@ -749,7 +750,6 @@ P_MSDU_INFO_T qmEnqueueTxPackets(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMs
 	UINT_8 ucPacketType;
 	UINT_8 ucTC;
 	P_QUE_MGT_T prQM = &prAdapter->rQM;
-
 	UINT_8 aucNextUP[WMM_AC_INDEX_NUM] = { 1 /* BEtoBK */, 1 /*na */, 0 /*VItoBE */, 4 /*VOtoVI */};
 #if QM_TC_RESOURCE_EMPTY_COUNTER
 	P_TX_CTRL_T prTxCtrl = NULL;
@@ -983,6 +983,7 @@ P_MSDU_INFO_T qmEnqueueTxPackets(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMs
 
 		/* 4 <4> Enqueue the packet to different AC queue (max 5 AC queues) */
 		QUEUE_INSERT_TAIL(prTxQue, (P_QUE_ENTRY_T) prCurrentMsduInfo);
+		wlanFillTimestamp(prAdapter, prCurrentMsduInfo->prPacket, PHASE_ENQ_QM);
 
 		if (prTxQue != &rNotEnqueuedQue) {
 			prQM->u4EnqeueuCounter++;
@@ -1155,6 +1156,7 @@ qmDequeueTxPacketsFromPerStaQueues(IN P_ADAPTER_T prAdapter,
 	for (i = 0; i < CFG_NUM_OF_STA_RECORD + 1; i++) {
 		prStaRec = &prAdapter->arStaRec[(*pu4HeadStaRecIndex)];
 		ASSERT(prStaRec);
+
 		/* Only Data frame (1x was not included) will be queued in */
 		if (prStaRec->fgIsValid && prStaRec->fgIsTxAllowed) {
 
@@ -1216,6 +1218,7 @@ qmDequeueTxPacketsFromPerStaQueues(IN P_ADAPTER_T prAdapter,
 				}
 			}
 #endif /* CFG_ENABLE_WIFI_DIRECT */
+
 			/* Determine whether the head STA can continue to forward packets in this round */
 			if ((*pu4HeadStaRecForwardCount) < u4MaxForwardCount)
 				break;
@@ -1700,6 +1703,7 @@ P_MSDU_INFO_T qmDequeueTxPackets(IN P_ADAPTER_T prAdapter, IN P_TX_TCQ_STATUS_T 
 	QUEUE_INITIALIZE(&rReturnedQue);
 
 	prReturnedPacketListHead = NULL;
+
 	/* dequeue packets from different AC queue based on available aucFreeBufferCount */
 	/* TC0 to TC4: AC0~AC3, 802.1x (commands packets are not handled by QM) */
 	for (i = TC4_INDEX; i >= TC0_INDEX; i--) {
@@ -1748,6 +1752,7 @@ P_MSDU_INFO_T qmDequeueTxPackets(IN P_ADAPTER_T prAdapter, IN P_TX_TCQ_STATUS_T 
 		prReturnedPacketListHead = (P_MSDU_INFO_T) QUEUE_GET_HEAD(&rReturnedQue);
 		QM_TX_SET_NEXT_MSDU_INFO((P_MSDU_INFO_T) QUEUE_GET_TAIL(&rReturnedQue), NULL);
 	}
+
 	return prReturnedPacketListHead;
 }
 
@@ -3751,7 +3756,7 @@ VOID mqmProcessAssocRsp(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb, IN PUIN
 	}
 
 	/* Parse AC parameters and write to HW CRs */
-	if ((prStaRec->fgIsQoS) && (prStaRec->eStaType == STA_TYPE_LEGACY_AP)) {
+	if (prStaRec->fgIsQoS) {
 		mqmParseEdcaParameters(prAdapter, prSwRfb, pucIEStart, u2IELength, TRUE);
 #if ARP_MONITER_ENABLE
 		qmResetArpDetect();
@@ -4545,15 +4550,11 @@ qmGetFrameAction(IN P_ADAPTER_T prAdapter,
 			u2TxFrameCtrl = (prWlanFrame->u2FrameCtrl) & MASK_FRAME_TYPE;	/* Optimized for ARM */
 
 			if (u2TxFrameCtrl == MAC_FRAME_BEACON) {
-				if (prBssInfo->fgIsNetAbsent &&
-					!(prAdapter->rWifiVar.prP2pFsmInfo->eCurrentState == P2P_STATE_CHNL_ON_HAND)) {
+				if (prBssInfo->fgIsNetAbsent)
 					return FRAME_ACTION_DROP_PKT;
-				}
 			} else if (u2TxFrameCtrl == MAC_FRAME_PROBE_RSP) {
-				if (prBssInfo->fgIsNetAbsent &&
-					!(prAdapter->rWifiVar.prP2pFsmInfo->eCurrentState == P2P_STATE_CHNL_ON_HAND)) {
+				if (prBssInfo->fgIsNetAbsent)
 					return FRAME_ACTION_DROP_PKT;
-				}
 			} else if (u2TxFrameCtrl == MAC_FRAME_DEAUTH) {
 				if (prBssInfo->fgIsNetAbsent)
 					break;
@@ -5101,6 +5102,7 @@ VOID qmResetArpDetect(VOID)
 }
 #endif
 
+
 VOID qmHandleReorderBubbleTimeout(IN P_ADAPTER_T prAdapter, IN ULONG ulParamPtr)
 {
 	P_RX_BA_ENTRY_T prReorderQueParm = (P_RX_BA_ENTRY_T) ulParamPtr;
@@ -5259,7 +5261,6 @@ VOID qmHandleEventCheckReorderBubble(IN P_ADAPTER_T prAdapter, IN P_WIFI_EVENT_T
 
 }
 
-
 VOID qmHandleMissTimeout(IN P_RX_BA_ENTRY_T prReorderQueParm)
 {
 	P_QUE_T prReorderQue;
@@ -5276,6 +5277,7 @@ VOID qmHandleMissTimeout(IN P_RX_BA_ENTRY_T prReorderQueParm)
 		GET_CURRENT_SYSTIME(prMissTimeout);
 	}
 }
+
 VOID qmMoveStaTxQueue(P_STA_RECORD_T prSrcStaRec, P_STA_RECORD_T prDstStaRec)
 {
 	UINT_8 ucQueArrayIdx;
@@ -5307,7 +5309,7 @@ VOID qmMoveStaTxQueue(P_STA_RECORD_T prSrcStaRec, P_STA_RECORD_T prDstStaRec)
 VOID qmHandleDelTspec(P_ADAPTER_T prAdapter, ENUM_NETWORK_TYPE_INDEX_T eNetType,
 	P_STA_RECORD_T prStaRec, ENUM_ACI_T eAci)
 {
-	UINT_8 aucNextUP[ACI_NUM] = { 1 /* BEtoBK */, 1 /*na */, 0 /*VItoBE */, 4 /*VOtoVI */  };
+	UINT_8 aucNextUP[ACI_NUM] = {1/* BEtoBK */, 1/*na */, 0/*VItoBE */, 4/*VOtoVI */};
 	ENUM_ACI_T aeNextAci[ACI_NUM] = {ACI_BK, ACI_BK, ACI_BE, ACI_VI};
 	UINT_16 u2ActivedTspec = 0;
 	UINT_8 ucNewUp = 0;

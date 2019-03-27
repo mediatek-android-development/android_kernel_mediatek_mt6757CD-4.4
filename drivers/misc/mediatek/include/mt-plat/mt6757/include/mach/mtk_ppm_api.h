@@ -48,6 +48,7 @@ enum ppm_sysboost_user {
 	/* dedicate ID for debugd to avoid over-writing other kernel users */
 	BOOST_BY_DEBUGD = 5,
 	BOOST_BY_DEBUGD_64,
+	BOOST_BY_BOOT_TIME_OPT,
 
 	NR_PPM_SYSBOOST_USER,
 };
@@ -65,7 +66,6 @@ struct ppm_client_req {
 	unsigned int root_cluster;
 	bool is_ptp_policy_activate;
 	unsigned int smart_detect;
-
 	struct ppm_client_limit {
 		unsigned int cluster_id;
 		unsigned int cpu_id;
@@ -96,6 +96,11 @@ struct ppm_cluster_status {
 	int volt;
 };
 
+struct ppm_limit_data {
+	int min;
+	int max;
+};
+
 /*==============================================================*/
 /* APIs								*/
 /*==============================================================*/
@@ -122,6 +127,13 @@ extern void mt_ppm_cpu_thermal_protect(unsigned int limited_power);
 extern unsigned int mt_ppm_thermal_get_min_power(void);
 extern unsigned int mt_ppm_thermal_get_max_power(void);
 extern unsigned int mt_ppm_thermal_get_cur_power(void);
+
+/* User limit policy */
+extern unsigned int mt_ppm_userlimit_cpu_core(unsigned int cluster_num, struct ppm_limit_data *data);
+extern unsigned int mt_ppm_userlimit_cpu_freq(unsigned int cluster_num, struct ppm_limit_data *data);
+
+/* Force limit policy */
+extern unsigned int mt_ppm_forcelimit_cpu_core(unsigned int cluster_num, struct ppm_limit_data *data);
 
 /* PTPOD policy */
 extern void mt_ppm_ptpod_policy_activate(void);

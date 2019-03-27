@@ -194,8 +194,12 @@ WLAN_STATUS nicAllocateAdapterMemory(IN P_ADAPTER_T prAdapter)
 
 		/* Allocate memory for the common coalescing buffer. */
 		u4CbSize = CFG_COALESCING_BUFFER_SIZE;
-		prAdapter->u4CoalescingBufCachedSize = u4CbSize > CFG_RX_COALESCING_BUFFER_SIZE ?
-		    u4CbSize : CFG_RX_COALESCING_BUFFER_SIZE;
+
+#if CFG_COALESCING_BUFFER_SIZE > CFG_RX_COALESCING_BUFFER_SIZE
+		prAdapter->u4CoalescingBufCachedSize = CFG_COALESCING_BUFFER_SIZE;
+#else
+		prAdapter->u4CoalescingBufCachedSize = CFG_RX_COALESCING_BUFFER_SIZE;
+#endif
 
 		prAdapter->pucCoalescingBufCached = kalAllocateIOBuffer(prAdapter->u4CoalescingBufCachedSize);
 
@@ -282,7 +286,7 @@ VOID nicReleaseAdapterMemory(IN P_ADAPTER_T prAdapter)
 #if CFG_DBG_MGT_BUF
 	/* Check if all allocated memories are free */
 	prBufInfo = &prAdapter->rMgtBufInfo;
-	DBGLOG(CNM, INFO, "freeCnt:%d,AllocCnt:%d\n", prBufInfo->u4FreeCount, prBufInfo->u4AllocCount);
+	DBGLOG(CNM, TRACE, "freeCnt:%d,AllocCnt:%d\n", prBufInfo->u4FreeCount, prBufInfo->u4AllocCount);
 	ASSERT(prAdapter->u4MemFreeDynamicCount == prAdapter->u4MemAllocDynamicCount);
 #endif
 
@@ -694,6 +698,8 @@ VOID nicProcessAbnormalInterrupt(IN P_ADAPTER_T prAdapter)
 	prGlueInfo->IsrAbnormalCnt++;
 	HAL_MCR_RD(prAdapter, MCR_WASR, &u4Value);
 	DBGLOG(REQ, WARN, "MCR_WASR: 0x%x\n", u4Value);
+
+	GL_RESET_TRIGGER(prAdapter, RST_FLAG_DO_CORE_DUMP);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -1059,14 +1065,17 @@ nicMediaStateChange(IN P_ADAPTER_T prAdapter,
 		    IN ENUM_NETWORK_TYPE_INDEX_T eNetworkType, IN P_EVENT_CONNECTION_STATUS prConnectionStatus)
 {
 	P_GLUE_INFO_T prGlueInfo;
+	P_AIS_FSM_INFO_T prAisFsmInfo;
 
 	ASSERT(prAdapter);
 	prGlueInfo = prAdapter->prGlueInfo;
+	prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
 
 	switch (eNetworkType) {
 	case NETWORK_TYPE_AIS_INDEX:
 		if (prConnectionStatus->ucMediaStatus == PARAM_MEDIA_STATE_DISCONNECTED) {	/* disconnected */
-			if (kalGetMediaStateIndicated(prGlueInfo) != PARAM_MEDIA_STATE_DISCONNECTED) {
+			if (kalGetMediaStateIndicated(prGlueInfo) != PARAM_MEDIA_STATE_DISCONNECTED ||
+				prAisFsmInfo->eCurrentState == AIS_STATE_JOIN) {
 
 				DBGLOG(NIC, TRACE, "DisByMC\n");
 				kalIndicateStatusAndComplete(prGlueInfo, WLAN_STATUS_MEDIA_DISCONNECT, NULL, 0);
@@ -1416,7 +1425,6 @@ WLAN_STATUS nicUpdateBss(IN P_ADAPTER_T prAdapter, IN ENUM_NETWORK_TYPE_INDEX_T 
 
 	if (rCmdSetBssInfo.ucNetTypeIndex == NETWORK_TYPE_AIS_INDEX) {
 		P_CONNECTION_SETTINGS_T prConnSettings = &(prAdapter->rWifiVar.rConnSettings);
-
 #if CFG_SUPPORT_HOTSPOT_2_0
 		/* mapping OSEN to WPA2, due to firmware no need to know current is OSEN */
 		if (prConnSettings->eAuthMode == AUTH_MODE_WPA_OSEN)
@@ -1484,6 +1492,7 @@ WLAN_STATUS nicUpdateBss(IN P_ADAPTER_T prAdapter, IN ENUM_NETWORK_TYPE_INDEX_T 
 	else
 		rCmdSetBssInfo.ucStaRecIdxOfAP = STA_REC_INDEX_NOT_FOUND;
 
+	DBGLOG(NIC, INFO, "nicUpdateBss eNetworkTypeIdx: %d\n", eNetworkTypeIdx);
 	u4Status = wlanSendSetQueryCmd(prAdapter,
 				       CMD_ID_SET_BSS_INFO,
 				       TRUE,
@@ -1631,6 +1640,7 @@ WLAN_STATUS nicPmIndicateBssAbort(IN P_ADAPTER_T prAdapter, IN ENUM_NETWORK_TYPE
 
 	rCmdIndicatePmBssAbort.ucNetTypeIndex = (UINT_8) eNetworkTypeIdx;
 
+	DBGLOG(NIC, INFO, "nicPmIndicateBssAbort eNetTypeIndex:%d\n", eNetworkTypeIdx);
 	return wlanSendSetQueryCmd(prAdapter,
 				   CMD_ID_INDICATE_PM_BSS_ABORT,
 				   TRUE,
@@ -1691,14 +1701,19 @@ WLAN_STATUS nicEnterCtiaMode(IN P_ADAPTER_T prAdapter, BOOLEAN fgEnterCtia, BOOL
 {
 	CMD_SW_DBG_CTRL_T rCmdSwCtrl;
 	CMD_ACCESS_REG rCmdAccessReg;
+	struct CMD_SET_CTIA_MODE rCmdSetCtiaMode;
 	WLAN_STATUS rWlanStatus;
 
 	DEBUGFUNC("nicEnterCtiaMode");
-	DBGLOG(NIC, TRACE, "nicEnterCtiaMode: %d\n", fgEnterCtia);
+	DBGLOG(NIC, INFO, "nicEnterCtiaMode: %d\n", fgEnterCtia);
 
 	ASSERT(prAdapter);
 
 	rWlanStatus = WLAN_STATUS_SUCCESS;
+
+	kalMemZero(&rCmdSetCtiaMode, sizeof(rCmdSetCtiaMode));
+	rCmdSetCtiaMode.ucCmdVersion = 0x01,
+	rCmdSetCtiaMode.ucCtiaModeEnable = fgEnterCtia;
 
 	if (fgEnterCtia) {
 		/* 1. Disable On-Lin Scan */
@@ -1807,6 +1822,13 @@ WLAN_STATUS nicEnterCtiaMode(IN P_ADAPTER_T prAdapter, BOOLEAN fgEnterCtia, BOOL
 
 	}
 
+	/* 6. Sync to FW : enable/disable CTIA mode*/
+	wlanSendSetQueryCmd(prAdapter,
+	    CMD_ID_SET_CTIA_MODE_STATUS,
+	    TRUE,
+	    FALSE,
+	    FALSE, NULL, NULL, sizeof(rCmdSetCtiaMode), (PUINT_8)&rCmdSetCtiaMode, NULL, 0);
+
 	return rWlanStatus;
 }				/* end of nicEnterCtiaMode() */
 
@@ -1851,11 +1873,11 @@ nicUpdateBeaconIETemplate(IN P_ADAPTER_T prAdapter,
 	if (u2IELen > MAX_IE_LENGTH)
 		return WLAN_STATUS_INVALID_DATA;
 
-	if (eIeUpdMethod == IE_UPD_METHOD_UPDATE_RANDOM || eIeUpdMethod == IE_UPD_METHOD_UPDATE_ALL) {
+	if (eIeUpdMethod == IE_UPD_METHOD_UPDATE_RANDOM || eIeUpdMethod == IE_UPD_METHOD_UPDATE_ALL)
 		u2CmdBufLen = OFFSET_OF(CMD_BEACON_TEMPLATE_UPDATE, aucIE) + u2IELen;
-	} else if (eIeUpdMethod == IE_UPD_METHOD_DELETE_ALL) {
+	else if (eIeUpdMethod == IE_UPD_METHOD_DELETE_ALL)
 		u2CmdBufLen = OFFSET_OF(CMD_BEACON_TEMPLATE_UPDATE, u2IELen);
-	}
+
 #if CFG_SUPPORT_P2P_GO_OFFLOAD_PROBE_RSP
 	else if (eIeUpdMethod == IE_UPD_METHOD_UPDATE_PROBE_RSP) {
 		DBGLOG(NIC, INFO, "update probe response temp for probe response offload to firmware\n");
@@ -1907,9 +1929,17 @@ nicUpdateBeaconIETemplate(IN P_ADAPTER_T prAdapter,
 	prCmdBcnUpdate->ucNetTypeIndex = (UINT_8) eNetTypeIndex;
 	prCmdBcnUpdate->u2Capability = u2Capability;
 	prCmdBcnUpdate->u2IELen = u2IELen;
-	if (u2IELen > 0)
-		kalMemCopy(prCmdBcnUpdate->aucIE, aucIe, u2IELen);
 
+	DBGLOG(REQ, INFO, "CmdSeqNum =%d , UpdateMethod=%d ,Capability=0x%x, NetTypeIndex:%d\n"
+		, ucCmdSeqNum
+		, prCmdBcnUpdate->ucUpdateMethod
+		, prCmdBcnUpdate->u2Capability
+		, prCmdBcnUpdate->ucNetTypeIndex);
+
+	if (u2IELen > 0) {
+		kalMemCopy(prCmdBcnUpdate->aucIE, aucIe, u2IELen);
+		DBGLOG_MEM8_IE_ONE_LINE(REQ, TRACE, "BCN_IE", prCmdBcnUpdate->aucIE, u2IELen);
+	}
 	/* insert into prCmdQueue */
 	kalEnqueueCommand(prGlueInfo, (P_QUE_ENTRY_T) prCmdInfo);
 
@@ -2342,6 +2372,7 @@ VOID nicInitMGMT(IN P_ADAPTER_T prAdapter, IN P_REG_INFO_T prRegInfo)
 	cnmInit(prAdapter);
 
 	wmmInit(prAdapter);
+
 	/* RLM Module - initialization */
 	rlmFsmEventInit(prAdapter);
 
@@ -2396,6 +2427,7 @@ VOID nicUninitMGMT(IN P_ADAPTER_T prAdapter)
 	scnUninit(prAdapter);
 
 	wmmUnInit(prAdapter);
+
 	/* RLM Module - uninitialization */
 	rlmFsmEventUninit(prAdapter);
 

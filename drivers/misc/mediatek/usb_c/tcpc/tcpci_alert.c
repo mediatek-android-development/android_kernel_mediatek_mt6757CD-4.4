@@ -35,6 +35,10 @@
 #include <linux/usb/class-dual-role.h>
 #endif /* CONFIG_DUAL_ROLE_USB_INTF */
 
+/*
+ * [BLOCK] TCPCI IRQ Handler
+ */
+
 static int tcpci_alert_cc_changed(struct tcpc_device *tcpc_dev)
 {
 	return tcpc_typec_handle_cc_change(tcpc_dev);
@@ -112,7 +116,7 @@ static int tcpci_alert_tx_success(struct tcpc_device *tcpc_dev)
 {
 	uint8_t tx_state;
 
-	pd_event_t evt = {
+	struct pd_event evt = {
 		.event_type = PD_EVT_CTRL_MSG,
 		.msg = PD_CTRL_GOOD_CRC,
 		.pd_msg = NULL,
@@ -184,7 +188,7 @@ static int tcpci_alert_tx_discard(struct tcpc_device *tcpc_dev)
 static int tcpci_alert_recv_msg(struct tcpc_device *tcpc_dev)
 {
 	int retval;
-	pd_msg_t *pd_msg;
+	struct pd_msg *pd_msg;
 	enum tcpm_transmit_type type;
 
 	const uint32_t alert_rx =
@@ -193,7 +197,7 @@ static int tcpci_alert_recv_msg(struct tcpc_device *tcpc_dev)
 	pd_msg = pd_alloc_msg(tcpc_dev);
 	if (pd_msg == NULL) {
 		tcpci_alert_status_clear(tcpc_dev, alert_rx);
-		return -1;
+		return -EINVAL;
 	}
 
 	retval = tcpci_get_message(tcpc_dev,
@@ -206,6 +210,7 @@ static int tcpci_alert_recv_msg(struct tcpc_device *tcpc_dev)
 
 	pd_msg->frame_type = (uint8_t) type;
 	pd_put_pd_msg_event(tcpc_dev, pd_msg);
+
 	return 0;
 }
 
@@ -274,17 +279,17 @@ static int tcpci_alert_ra_detach(struct tcpc_device *tcpc_dev)
 }
 #endif /* CONFIG_TYPEC_CAP_RA_DETACH */
 
-typedef struct __tcpci_alert_handler {
+struct tcpci_alert_handler {
 	uint32_t bit_mask;
 	int (*handler)(struct tcpc_device *tcpc_dev);
-} tcpci_alert_handler_t;
+};
 
 #define DECL_TCPCI_ALERT_HANDLER(xbit, xhandler) {\
 		.bit_mask = 1 << xbit,\
 		.handler = xhandler, \
 	}
 
-const tcpci_alert_handler_t tcpci_alert_handlers[] = {
+const struct tcpci_alert_handler tcpci_alert_handlers[] = {
 #ifdef CONFIG_USB_POWER_DELIVERY
 	DECL_TCPCI_ALERT_HANDLER(4, tcpci_alert_tx_failed),
 	DECL_TCPCI_ALERT_HANDLER(5, tcpci_alert_tx_discard),
@@ -309,19 +314,30 @@ const tcpci_alert_handler_t tcpci_alert_handlers[] = {
 	DECL_TCPCI_ALERT_HANDLER(1, tcpci_alert_power_status_changed),
 };
 
+#ifdef CONFIG_USB_POWER_DELIVERY
+static inline bool tcpci_check_hard_reset_complete(
+	struct tcpc_device *tcpc_dev, uint32_t alert_status)
+{
+	if ((alert_status & TCPC_REG_ALERT_HRESET_SUCCESS)
+			== TCPC_REG_ALERT_HRESET_SUCCESS) {
+		pd_put_sent_hard_reset_event(tcpc_dev);
+		return true;
+	}
+
+	if (alert_status & TCPC_REG_ALERT_TX_DISCARDED) {
+		TCPC_INFO("HResetFailed\r\n");
+		tcpci_transmit(tcpc_dev, TCPC_TX_HARD_RESET, 0, NULL);
+		return false;
+	}
+
+	return false;
+}
+#endif	/* CONFIG_USB_POWER_DELIVERY */
+
 static inline int __tcpci_alert(struct tcpc_device *tcpc_dev)
 {
 	int rv, i;
 	uint32_t alert_status;
-	const uint32_t alert_rx =
-		TCPC_REG_ALERT_RX_STATUS | TCPC_REG_ALERT_RX_BUF_OVF;
-
-#ifdef CONFIG_USB_POWER_DELIVERY
-#ifdef CONFIG_USB_PD_IGNORE_HRESET_COMPLETE_TIMER
-	const uint32_t alert_sent_hreset =
-		TCPC_REG_ALERT_TX_SUCCESS | TCPC_REG_ALERT_TX_FAILED;
-#endif	/* CONFIG_USB_PD_IGNORE_HRESET_COMPLETE_TIMER */
-#endif	/* CONFIG_USB_POWER_DELIVERY */
 
 	rv = tcpci_get_alert_status(tcpc_dev, &alert_status);
 	if (rv)
@@ -332,7 +348,8 @@ static inline int __tcpci_alert(struct tcpc_device *tcpc_dev)
 		TCPC_INFO("Alert:0x%04x\r\n", alert_status);
 #endif /* CONFIG_USB_PD_DBG_ALERT_STATUS */
 
-	tcpci_alert_status_clear(tcpc_dev, alert_status & (~alert_rx));
+	tcpci_alert_status_clear(tcpc_dev,
+		alert_status & (~TCPC_REG_ALERT_RX_MASK));
 
 	if (tcpc_dev->typec_role == TYPEC_ROLE_UNKNOWN)
 		return 0;
@@ -341,14 +358,10 @@ static inline int __tcpci_alert(struct tcpc_device *tcpc_dev)
 		alert_status |= TCPC_REG_ALERT_POWER_STATUS;
 
 #ifdef CONFIG_USB_POWER_DELIVERY
-#ifdef CONFIG_USB_PD_IGNORE_HRESET_COMPLETE_TIMER
-	if ((alert_status & alert_sent_hreset) == alert_sent_hreset) {
-		if (tcpc_dev->tcpc_flags & TCPC_FLAGS_WAIT_HRESET_COMPLETE) {
-			alert_status &= ~alert_sent_hreset;
-			pd_put_sent_hard_reset_event(tcpc_dev);
-		}
+	if (tcpc_dev->pd_transmit_state == PD_TX_STATE_WAIT_HARD_RESET) {
+		tcpci_check_hard_reset_complete(tcpc_dev, alert_status);
+		alert_status &= ~TCPC_REG_ALERT_TX_MASK;
 	}
-#endif	/* CONFIG_USB_PD_IGNORE_HRESET_COMPLETE_TIMER */
 #endif	/* CONFIG_USB_POWER_DELIVERY */
 
 #ifndef CONFIG_USB_PD_DBG_SKIP_ALERT_HANDLER
@@ -379,7 +392,6 @@ int tcpci_alert(struct tcpc_device *tcpc_dev)
 
 	return ret;
 }
-EXPORT_SYMBOL(tcpci_alert);
 
 /*
  * [BLOCK] TYPEC device changed
@@ -460,6 +472,26 @@ static inline int tcpci_report_usb_port_attached(struct tcpc_device *tcpc)
 {
 	TCPC_INFO("usb_port_attached\r\n");
 
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+	switch (tcpc->typec_attach_new) {
+	case TYPEC_ATTACHED_SNK:
+		tcpc->dual_role_pr = DUAL_ROLE_PROP_PR_SNK;
+		tcpc->dual_role_dr = DUAL_ROLE_PROP_DR_DEVICE;
+		tcpc->dual_role_mode = DUAL_ROLE_PROP_MODE_UFP;
+		tcpc->dual_role_vconn = DUAL_ROLE_PROP_VCONN_SUPPLY_NO;
+		break;
+	case TYPEC_ATTACHED_SRC:
+		tcpc->dual_role_pr = DUAL_ROLE_PROP_PR_SRC;
+		tcpc->dual_role_dr = DUAL_ROLE_PROP_DR_HOST;
+		tcpc->dual_role_mode = DUAL_ROLE_PROP_MODE_DFP;
+		tcpc->dual_role_vconn = DUAL_ROLE_PROP_VCONN_SUPPLY_YES;
+		break;
+	default:
+		break;
+	}
+	dual_role_instance_changed(tcpc->dr_usb);
+#endif /* CONFIG_DUAL_ROLE_USB_INTF */
+
 	tcpci_set_wake_lock_pd(tcpc, true);
 
 #ifdef CONFIG_USB_POWER_DELIVERY
@@ -473,6 +505,14 @@ static inline int tcpci_report_usb_port_attached(struct tcpc_device *tcpc)
 static inline int tcpci_report_usb_port_detached(struct tcpc_device *tcpc)
 {
 	TCPC_INFO("usb_port_detached\r\n");
+
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+	tcpc->dual_role_pr = DUAL_ROLE_PROP_PR_NONE;
+	tcpc->dual_role_dr = DUAL_ROLE_PROP_DR_NONE;
+	tcpc->dual_role_mode = DUAL_ROLE_PROP_MODE_NONE;
+	tcpc->dual_role_vconn = DUAL_ROLE_PROP_VCONN_SUPPLY_NO;
+	dual_role_instance_changed(tcpc->dr_usb);
+#endif /* CONFIG_DUAL_ROLE_USB_INTF */
 
 	tcpci_set_wake_lock_pd(tcpc, false);
 
@@ -490,32 +530,6 @@ static inline int tcpci_report_usb_port_detached(struct tcpc_device *tcpc)
 
 int tcpci_report_usb_port_changed(struct tcpc_device *tcpc)
 {
-#ifdef CONFIG_DUAL_ROLE_USB_INTF
-	switch (tcpc->typec_attach_new) {
-	case TYPEC_UNATTACHED:
-	case TYPEC_ATTACHED_AUDIO:
-	case TYPEC_ATTACHED_DEBUG:
-		tcpc->dual_role_pr = DUAL_ROLE_PROP_PR_NONE;
-		tcpc->dual_role_dr = DUAL_ROLE_PROP_DR_NONE;
-		tcpc->dual_role_mode = DUAL_ROLE_PROP_MODE_NONE;
-		tcpc->dual_role_vconn = DUAL_ROLE_PROP_VCONN_SUPPLY_NO;
-		break;
-	case TYPEC_ATTACHED_SNK:
-		tcpc->dual_role_pr = DUAL_ROLE_PROP_PR_SNK;
-		tcpc->dual_role_dr = DUAL_ROLE_PROP_DR_DEVICE;
-		tcpc->dual_role_mode = DUAL_ROLE_PROP_MODE_UFP;
-		tcpc->dual_role_vconn = DUAL_ROLE_PROP_VCONN_SUPPLY_NO;
-		break;
-	case TYPEC_ATTACHED_SRC:
-		tcpc->dual_role_pr = DUAL_ROLE_PROP_PR_SRC;
-		tcpc->dual_role_dr = DUAL_ROLE_PROP_DR_HOST;
-		tcpc->dual_role_mode = DUAL_ROLE_PROP_MODE_DFP;
-		tcpc->dual_role_vconn = DUAL_ROLE_PROP_VCONN_SUPPLY_YES;
-		break;
-	}
-	dual_role_instance_changed(tcpc->dr_usb);
-#endif /* CONFIG_DUAL_ROLE_USB_INTF */
-
 	tcpci_notify_typec_state(tcpc);
 
 	if (tcpc->typec_attach_old == TYPEC_UNATTACHED)
@@ -523,11 +537,10 @@ int tcpci_report_usb_port_changed(struct tcpc_device *tcpc)
 	else if (tcpc->typec_attach_new == TYPEC_UNATTACHED)
 		tcpci_report_usb_port_detached(tcpc);
 	else
-		TCPC_DBG("TCPC Attach Again\r\n");
+		TCPC_DBG2("TCPC Attach Again\r\n");
 
 	return 0;
 }
-EXPORT_SYMBOL(tcpci_report_usb_port_changed);
 
 /*
  * [BLOCK] TYPEC power control changed

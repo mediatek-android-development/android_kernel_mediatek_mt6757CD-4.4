@@ -78,14 +78,12 @@
 #define RT5081_WT_FC_MAX	20
 #define RT5081_WT_FC_STEP	2
 
-/* [lidebiao] Modify IR compensation for charging */
 /* IR compensation */
 /* uohm */
 #define RT5081_IRCMP_RES_NUM	8
 #define RT5081_IRCMP_RES_MIN	0
-#define RT5081_IRCMP_RES_MAX	140000
-#define RT5081_IRCMP_RES_STEP	20000
-/* [lidebiao end] */
+#define RT5081_IRCMP_RES_MAX	175000
+#define RT5081_IRCMP_RES_STEP	25000
 
 /* IR compensation maximum voltage clamp */
 /* uV */

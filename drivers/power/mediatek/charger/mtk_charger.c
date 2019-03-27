@@ -70,20 +70,11 @@
 #include <mt-plat/mtk_battery.h>
 #include <mt-plat/mtk_boot.h>
 #include <musb_core.h>
+#include <pmic.h>
 
 static struct charger_manager *pinfo;
 static struct list_head consumer_head = LIST_HEAD_INIT(consumer_head);
 static DEFINE_MUTEX(consumer_mutex);
-/* [lidebiao start] Add for FactoryKit test */
-static struct charger_manager *pinfo_pe20;
-/* [lidebiao end] */
-/* [lidebiao start] Add for config batt temp protect */
-int batt_temp_protect_mode = 1;
-/* [lidebiao end] */
-/* [lidebiao start] Disable charging for Runin test */
-int Charging_Mode = 1;
-bool Runin_Test_Mode = false;
-/* [lidebiao end] */
 
 #define USE_FG_TIMER 1
 
@@ -248,12 +239,39 @@ int charger_manager_enable_high_voltage_charging(struct charger_consumer *consum
 	bool en)
 {
 	struct charger_manager *info = consumer->cm;
+	struct list_head *pos;
+	struct list_head *phead = &consumer_head;
+	struct charger_consumer *ptr;
 
 	if (!info)
 		return -EINVAL;
 
-	pr_info("%s: enable = %d\n", __func__, en);
-	info->enable_hv_charging = en;
+	pr_debug("[%s] %s, %d\n", __func__, dev_name(consumer->dev), en);
+
+	if (!en && consumer->hv_charging_disabled == false)
+		consumer->hv_charging_disabled = true;
+	else if (en && consumer->hv_charging_disabled == true)
+		consumer->hv_charging_disabled = false;
+	else {
+		pr_info("[%s] already set: %d %d\n", __func__,
+			consumer->hv_charging_disabled, en);
+		return 0;
+	}
+
+	mutex_lock(&consumer_mutex);
+	list_for_each(pos, phead) {
+		ptr = container_of(pos, struct charger_consumer, list);
+		if (ptr->hv_charging_disabled == true) {
+			info->enable_hv_charging = false;
+			break;
+		}
+		if (list_is_last(pos, phead))
+			info->enable_hv_charging = true;
+	}
+	mutex_unlock(&consumer_mutex);
+
+	pr_info("%s: user: %s, en = %d\n", __func__, dev_name(consumer->dev),
+		info->enable_hv_charging);
 	_wake_up_charger(info);
 
 	return 0;
@@ -521,6 +539,18 @@ int charger_manager_get_zcv(struct charger_consumer *consumer, int idx, u32 *uV)
 	return 0;
 }
 
+int charger_manager_enable_kpoc_shutdown(struct charger_consumer *consumer,
+	bool en)
+{
+	struct charger_manager *info = consumer->cm;
+
+	if (en)
+		atomic_set(&info->enable_kpoc_shdn, 1);
+	else
+		atomic_set(&info->enable_kpoc_shdn, 0);
+	return 0;
+}
+
 int register_charger_manager_notifier(struct charger_consumer *consumer,
 	struct notifier_block *nb)
 {
@@ -555,6 +585,129 @@ int unregister_charger_manager_notifier(struct charger_consumer *consumer,
 }
 
 /* user interface end*/
+
+/* factory mode */
+#define CHARGER_DEVNAME "charger_ftm"
+#define GET_IS_SLAVE_CHARGER_EXIST _IOW('k', 13, int)
+
+static struct class *charger_class;
+static struct cdev *charger_cdev;
+static int charger_major;
+static dev_t charger_devno;
+
+static int is_slave_charger_exist(void)
+{
+	if (get_charger_by_name("secondary_chg") == NULL)
+		return 0;
+	return 1;
+}
+
+static long charger_ftm_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	int ret = 0;
+	int out_data = 0;
+	void __user *user_data = (void __user *)arg;
+
+	switch (cmd) {
+	case GET_IS_SLAVE_CHARGER_EXIST:
+		out_data = is_slave_charger_exist();
+		ret = copy_to_user(user_data, &out_data, sizeof(out_data));
+		chr_err("[%s] GET_IS_SLAVE_CHARGER_EXIST: %d\n", __func__, out_data);
+		break;
+	default:
+		chr_err("[%s] Error ID\n", __func__);
+		break;
+	}
+
+	return ret;
+}
+#ifdef CONFIG_COMPAT
+static long charger_ftm_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+{
+	int ret = 0;
+
+	switch (cmd) {
+	case GET_IS_SLAVE_CHARGER_EXIST:
+		ret = file->f_op->unlocked_ioctl(file, cmd, arg);
+		break;
+	default:
+		chr_err("[%s] Error ID\n", __func__);
+		break;
+	}
+
+	return ret;
+}
+#endif
+static int charger_ftm_open(struct inode *inode, struct file *file)
+{
+	return 0;
+}
+
+static int charger_ftm_release(struct inode *inode, struct file *file)
+{
+	return 0;
+}
+
+static const struct file_operations charger_ftm_fops = {
+	.owner = THIS_MODULE,
+	.unlocked_ioctl = charger_ftm_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = charger_ftm_compat_ioctl,
+#endif
+	.open = charger_ftm_open,
+	.release = charger_ftm_release,
+};
+
+void charger_ftm_init(void)
+{
+	struct class_device *class_dev = NULL;
+	int ret = 0;
+
+	ret = alloc_chrdev_region(&charger_devno, 0, 1, CHARGER_DEVNAME);
+	if (ret < 0) {
+		chr_err("[%s]Can't get major num for charger_ftm\n", __func__);
+		return;
+	}
+
+	charger_cdev = cdev_alloc();
+	if (!charger_cdev) {
+		chr_err("[%s]cdev_alloc fail\n", __func__);
+		goto unregister;
+	}
+	charger_cdev->owner = THIS_MODULE;
+	charger_cdev->ops = &charger_ftm_fops;
+
+	ret = cdev_add(charger_cdev, charger_devno, 1);
+	if (ret < 0) {
+		chr_err("[%s] cdev_add failed\n", __func__);
+		goto free_cdev;
+	}
+
+	charger_major = MAJOR(charger_devno);
+	charger_class = class_create(THIS_MODULE, CHARGER_DEVNAME);
+	if (IS_ERR(charger_class)) {
+		chr_err("[%s] class_create failed\n", __func__);
+		goto free_cdev;
+	}
+
+	class_dev = (struct class_device *)device_create(charger_class,
+				NULL, charger_devno, NULL, CHARGER_DEVNAME);
+	if (IS_ERR(class_dev)) {
+		chr_err("[%s] device_create failed\n", __func__);
+		goto free_class;
+	}
+
+	pr_debug("%s done\n", __func__);
+	return;
+
+free_class:
+	class_destroy(charger_class);
+free_cdev:
+	cdev_del(charger_cdev);
+unregister:
+	unregister_chrdev_region(charger_devno, 1);
+}
+/* factory mode end */
 
 /* sw jeita */
 void do_sw_jeita_state_machine(struct charger_manager *info)
@@ -789,6 +942,32 @@ static ssize_t store_charger_log_level(struct device *dev, struct device_attribu
 	return size;
 }
 static DEVICE_ATTR(charger_log_level, 0664, show_charger_log_level, store_charger_log_level);
+
+static ssize_t show_pdc_max_watt_level(struct device *dev, struct device_attribute *attr,
+					char *buf)
+{
+	struct charger_manager *pinfo = dev->driver_data;
+
+	return sprintf(buf, "%d\n", mtk_pdc_get_max_watt(pinfo));
+}
+
+static ssize_t store_pdc_max_watt_level(struct device *dev, struct device_attribute *attr,
+					 const char *buf, size_t size)
+{
+	struct charger_manager *pinfo = dev->driver_data;
+	int temp;
+
+	if (kstrtoint(buf, 10, &temp) == 0) {
+		mtk_pdc_set_max_watt(pinfo, temp);
+		chr_err("[store_pdc_max_watt]:%d\n", temp);
+	} else
+		chr_err("[store_pdc_max_watt]: format error!\n");
+
+	return size;
+}
+static DEVICE_ATTR(pdc_max_watt, 0664, show_pdc_max_watt_level, store_pdc_max_watt_level);
+
+
 int mtk_get_dynamic_cv(struct charger_manager *info, unsigned int *cv)
 {
 	int ret = 0;
@@ -942,8 +1121,6 @@ static bool mtk_is_charger_on(struct charger_manager *info)
 	} else {
 		if (info->chr_type == CHARGER_UNKNOWN)
 			mtk_charger_plug_in(info, chr_type);
-		else if (info->chr_type == NONSTANDARD_CHARGER)
-			info->chr_type = chr_type;
 	}
 
 	if (chr_type == CHARGER_UNKNOWN)
@@ -978,12 +1155,6 @@ static void mtk_battery_notify_VCharger_check(struct charger_manager *info)
 
 static void mtk_battery_notify_VBatTemp_check(struct charger_manager *info)
 {
-	/* [lidebiao start] Add for config batt temp protect */
-	if (batt_temp_protect_mode == 0) {
-		return;
-	}
-	/* [lidebiao end] */
-
 #if defined(BATTERY_NOTIFY_CASE_0002_VBATTEMP)
 	if (info->battery_temperature >= info->thermal.max_charge_temperature) {
 		info->notify_code |= 0x0002;
@@ -1141,7 +1312,8 @@ static void kpoc_power_off_check(struct charger_manager *info)
 	    || boot_mode == LOW_POWER_OFF_CHARGING_BOOT) {
 		pr_debug("[%s] vchr=%d, boot_mode=%d\n",
 			__func__, vbus, boot_mode);
-		if (!mtk_is_pe30_running(info) && vbus < 2500) {
+		if (!mtk_is_pe30_running(info) && vbus < 2500
+			&& atomic_read(&info->enable_kpoc_shdn)) {
 			pr_err("Unplug Charger/USB in KPOC mode, shutdown\n");
 			kernel_power_off();
 		}
@@ -1157,7 +1329,7 @@ enum hrtimer_restart charger_kthread_hrtimer_func(struct hrtimer *timer)
 	return HRTIMER_NORESTART;
 }
 
-int charger_kthread_fgtimer_func(struct fgtimer *data)
+int charger_kthread_fgtimer_func(struct gtimer *data)
 {
 	struct charger_manager *info = container_of(data, struct charger_manager, charger_kthread_fgtimer);
 
@@ -1168,9 +1340,9 @@ int charger_kthread_fgtimer_func(struct fgtimer *data)
 static void mtk_charger_init_timer(struct charger_manager *info)
 {
 	if (IS_ENABLED(USE_FG_TIMER)) {
-		fgtimer_init(&info->charger_kthread_fgtimer, &info->pdev->dev, "charger_thread");
+		gtimer_init(&info->charger_kthread_fgtimer, &info->pdev->dev, "charger_thread");
 		info->charger_kthread_fgtimer.callback = charger_kthread_fgtimer_func;
-		fgtimer_start(&info->charger_kthread_fgtimer, info->polling_interval);
+		gtimer_start(&info->charger_kthread_fgtimer, info->polling_interval);
 	} else {
 		ktime_t ktime = ktime_set(info->polling_interval, 0);
 
@@ -1184,7 +1356,7 @@ static void mtk_charger_start_timer(struct charger_manager *info)
 {
 	if (IS_ENABLED(USE_FG_TIMER)) {
 		chr_debug("fg start timer");
-		fgtimer_start(&info->charger_kthread_fgtimer, info->polling_interval);
+		gtimer_start(&info->charger_kthread_fgtimer, info->polling_interval);
 	} else {
 		ktime_t ktime = ktime_set(info->polling_interval, 0);
 
@@ -1196,7 +1368,7 @@ static void mtk_charger_start_timer(struct charger_manager *info)
 void mtk_charger_stop_timer(struct charger_manager *info)
 {
 	if (IS_ENABLED(USE_FG_TIMER))
-		fgtimer_stop(&info->charger_kthread_fgtimer);
+		gtimer_stop(&info->charger_kthread_fgtimer);
 }
 
 static int charger_routine_thread(void *arg)
@@ -1226,12 +1398,12 @@ static int charger_routine_thread(void *arg)
 		charger_update_data(info);
 		charger_check_status(info);
 		kpoc_power_off_check(info);
-
+#ifndef CONFIG_POWER_EXT
 		if (is_charger_on == true) {
 			if (info->do_algorithm)
 				info->do_algorithm(info);
 		}
-
+#endif
 		if (info->charger_thread_polling == true)
 			mtk_charger_start_timer(info);
 
@@ -1347,6 +1519,8 @@ static int mtk_charger_parse_dt(struct charger_manager *info, struct device *dev
 			AC_CHARGER_CURRENT);
 		info->data.ac_charger_current = AC_CHARGER_CURRENT;
 	}
+
+	info->data.pd_charger_current = 3000000;
 
 	if (of_property_read_u32(np, "ac_charger_input_current", &val) >= 0) {
 		info->data.ac_charger_input_current = val;
@@ -1715,195 +1889,26 @@ static ssize_t show_Pump_Express(struct device *dev, struct device_attribute *at
 		/* Is PE+20 connect */
 		if (mtk_pe20_get_is_connect(pinfo))
 			is_ta_detected = 1;
-		pr_debug("%s: pe20_is_connect = %d\n",
-			__func__, mtk_pe20_get_is_connect(pinfo));
 	}
 
 	if (IS_ENABLED(CONFIG_MTK_PUMP_EXPRESS_PLUS_SUPPORT)) {
 		/* Is PE+ connect */
 		if (mtk_pe_get_is_connect(pinfo))
 			is_ta_detected = 1;
-		chr_err("%s: pe_is_connect = %d\n",
-			__func__, mtk_pe_get_is_connect(pinfo));
 	}
 
 	if (mtk_is_TA_support_pe30(pinfo) == true)
 		is_ta_detected = 1;
 
-	pr_debug("%s: detected = %d\n", __func__, is_ta_detected);
+	pr_debug("%s: detected = %d, pe20_is_connect = %d, pe_is_connect = %d\n",
+		__func__, is_ta_detected,
+		mtk_pe20_get_is_connect(pinfo),
+		mtk_pe_get_is_connect(pinfo));
 
 	return sprintf(buf, "%u\n", is_ta_detected);
 }
 
 static DEVICE_ATTR(Pump_Express, 0444, show_Pump_Express, NULL);
-
-/* [lidebiao start] Add for FactoryKit test */
-static ssize_t show_Pump_Express_Type(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	struct charger_manager *pinfo = pinfo_pe20;
-	int is_ta_detected = 0;
-
-	pr_err("[%s] chr_type:%d UISOC:%d startsoc:%d stopsoc:%d\n", __func__,
-		mt_get_charger_type(), get_ui_soc(),
-		pinfo->data.ta_start_battery_soc,
-		pinfo->data.ta_stop_battery_soc);
-
-	if (IS_ENABLED(CONFIG_MTK_PUMP_EXPRESS_PLUS_20_SUPPORT)) {
-		/* Is PE+20 connect */
-		if (mtk_pe20_get_is_connect(pinfo))
-			is_ta_detected = 1;
-		pr_err("%s: pe20_is_connect = %d\n",
-			__func__, mtk_pe20_get_is_connect(pinfo));
-	}
-
-	pr_err("%s: detected = %d\n", __func__, is_ta_detected);
-
-	return sprintf(buf, "%u\n", is_ta_detected);
-}
-
-static DEVICE_ATTR(Pump_Express_Type, 0444, show_Pump_Express_Type, NULL);
-
-static ssize_t show_Pump_Express_Current(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int bat_current = 0;
-
-	bat_current = battery_get_bat_current() / 10;
-	if (bat_current < 0) {
-		bat_current = -1 * bat_current;
-		pr_err("[%s] bat_current is err\n", __func__);
-	}
-	if (bat_current > 3200) {
-		bat_current = 3200;
-		pr_err("[%s] bat_current is err\n", __func__);
-	}
-
-	pr_err("[%s] bat_current = %d\n", __func__, bat_current);
-
-	return sprintf(buf, "%u\n", bat_current);
-}
-
-static DEVICE_ATTR(Pump_Express_Current, 0444, show_Pump_Express_Current, NULL);
-
-static ssize_t show_Pump_Express_Vbus(struct device *dev, struct device_attribute *attr, char *buf)
-{
-	int vbus = 0;
-
-	vbus = battery_get_vbus();
-	if (vbus >= 12000) {
-		vbus = 12000;
-	}
-	if (vbus <= 0) {
-		vbus = 0;
-	}
-	pr_err("Pump_Express_Vbus vbus= %d\n", vbus);
-	return sprintf(buf, "%u\n", vbus);
-}
-
-static ssize_t store_Pump_Express_Vbus(struct device *dev, struct device_attribute *attr,
-				   const char *buf, size_t size)
-{
-	int ret = 0;
-	int val = 0;
-	struct charger_manager *pinfo = pinfo_pe20;
-
-	mutex_lock(&pinfo->charger_lock);
-	ret = kstrtouint(buf, 10, &val);
-	if (val >= 12000) {
-		val = 12000;
-	}
-	if (val <= 6000) {
-		val = 6000;
-	}
-	val = val * 1000;
-	pr_err("Pump_Express_Vbus val= %d\n", val);
-	mtk_pe20_set_for_vbus(val, true);
-	msleep(2000);
-	mtk_pe20_set_to_vbus(pinfo, val);
-	mutex_unlock(&pinfo->charger_lock);
-
-	return size;
-}
-
-static DEVICE_ATTR(Pump_Express_Vbus, 0664, show_Pump_Express_Vbus, store_Pump_Express_Vbus);
-/* [lidebiao end]*/
-
-/* [lidebiao start] Add for config batt temp protect */
-static ssize_t show_Batt_Temp_Protect(struct device *dev, struct device_attribute *attr, char *buf)
-{
-
-	pr_err("show_Batt_Temp_Protect batt_temp_protect_mode = %d\n", batt_temp_protect_mode);
-	return sprintf(buf, "%u\n", batt_temp_protect_mode);
-}
-
-static ssize_t store_Batt_Temp_Protect(struct device *dev, struct device_attribute *attr,
-				   const char *buf, size_t size)
-{
-	int ret;
-
-	ret = kstrtouint(buf, 10, &batt_temp_protect_mode);
-
-	pr_err("batt_temp_protect_mode = %d ret = %d\n", batt_temp_protect_mode, ret);
-	if (ret != 0) {
-		batt_temp_protect_mode = 1;
-	}
-	if (batt_temp_protect_mode != 0) {
-		batt_temp_protect_mode = 1;
-	}
-	pr_err("store_Batt_Temp_Protect batt_temp_protect_mode = %d\n", batt_temp_protect_mode);
-
-	return size;
-}
-
-static DEVICE_ATTR(Batt_Temp_Protect, 0664, show_Batt_Temp_Protect, store_Batt_Temp_Protect);
-
-int get_Batt_Temp_Protect_Mode(void)
-{
-	return batt_temp_protect_mode;
-}
-/* [lidebiao end]*/
-
-/* [lidebiao start] Disable charging for Runin test */
-static ssize_t show_Charging_Mode(struct device *dev, struct device_attribute *attr, char *buf)
-{
-
-	pr_err("show_Charging_Mod Charging_Mode = %d\n", Charging_Mode);
-	return sprintf(buf, "%u\n", Charging_Mode);
-}
-
-static ssize_t store_Charging_Mode(struct device *dev, struct device_attribute *attr,
-				   const char *buf, size_t size)
-{
-	int ret;
-
-	ret = kstrtouint(buf, 10, &Charging_Mode);
-
-	pr_err("Charging_Mode = %d ret = %d\n", Charging_Mode, ret);
-	if (ret != 0) {
-		Charging_Mode = 1;
-	}
-	if (Charging_Mode != 0) {
-		Charging_Mode = 1;
-	} else {
-		Charging_Mode = 0;
-		Runin_Test_Mode = true;
-	}
-	pr_err("store_Charging_Mode Charging_Mode = %d Runin_Test_Mode = %d\n", Charging_Mode, Runin_Test_Mode);
-
-	return size;
-}
-
-static DEVICE_ATTR(Charging_Mode, 0664, show_Charging_Mode, store_Charging_Mode);
-
-int get_Charging_Mode(void)
-{
-	return Charging_Mode;
-}
-
-bool get_Runin_Test_Mode(void)
-{
-	return Runin_Test_Mode;
-}
-/* [lidebiao end] */
 
 static ssize_t show_BatteryNotify(struct device *dev, struct device_attribute *attr, char *buf)
 {
@@ -2127,6 +2132,10 @@ static int mtk_charger_setup_files(struct platform_device *pdev)
 	if (ret)
 		goto _out;
 
+	ret = device_create_file(&(pdev->dev), &dev_attr_pdc_max_watt);
+	if (ret)
+		goto _out;
+
 	ret = device_create_file(&(pdev->dev), &dev_attr_ADC_Charger_Voltage);
 	if (ret)
 		goto _out;
@@ -2175,6 +2184,7 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	mtk_charger_parse_dt(info, &pdev->dev);
 
 	mutex_init(&info->charger_lock);
+	atomic_set(&info->enable_kpoc_shdn, 1);
 	wake_lock_init(&info->charger_wakelock, WAKE_LOCK_SUSPEND, "charger suspend wakelock");
 	spin_lock_init(&info->slock);
 
@@ -2218,6 +2228,9 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	if (mtk_pe30_init(info) == false)
 		info->enable_pe_3 = false;
 
+	mtk_pdc_init(info);
+	charger_ftm_init();
+
 	mutex_lock(&consumer_mutex);
 	list_for_each(pos, phead) {
 		ptr = container_of(pos, struct charger_consumer, list);
@@ -2232,68 +2245,8 @@ static int mtk_charger_probe(struct platform_device *pdev)
 	info->init_done = true;
 	_wake_up_charger(info);
 
-	/* [lidebiao start] Add for FactoryKit test */
-	info->chg1_data.input_current_limit = 500000;
-	pinfo_pe20 = info;
-	/* [lidebiao] */
-
 	return 0;
 }
-
-/* [lidebiao start] Add for FactoryKit test */
-/* Create sysfs and procfs attributes */
-static int mtk_tpcharger_setup_files(struct platform_device *pdev)
-{
-	int ret = 0;
-
-	ret = device_create_file(&(pdev->dev), &dev_attr_Pump_Express_Type);
-	if (ret)
-		goto _out;
-
-	ret = device_create_file(&(pdev->dev), &dev_attr_Pump_Express_Current);
-	if (ret)
-		goto _out;
-
-	ret = device_create_file(&(pdev->dev), &dev_attr_Pump_Express_Vbus);
-	if (ret)
-		goto _out;
-
-	ret = device_create_file(&(pdev->dev), &dev_attr_Batt_Temp_Protect);
-	if (ret)
-		goto _out;
-
-	/* [lidebiao start] Disable charging for Runin test */
-	ret = device_create_file(&(pdev->dev), &dev_attr_Charging_Mode);
-	if (ret)
-		goto _out;
-	/* [lidebiao end] */
-
-_out:
-	return ret;
-}
-
-static int mtk_tpcharger_probe(struct platform_device *pdev)
-{
-	int ret;
-
-	pr_err("%s: starts\n", __func__);
-
-	ret = mtk_tpcharger_setup_files(pdev);
-
-	return 0;
-}
-
-static int mtk_tpcharger_remove(struct platform_device *dev)
-{
-	return 0;
-}
-
-static void mtk_tpcharger_shutdown(struct platform_device *dev)
-{
-
-	pr_debug("%s: reset TA before shutdown\n", __func__);
-}
-/* [lidebiao end] */
 
 static int mtk_charger_remove(struct platform_device *dev)
 {
@@ -2336,47 +2289,15 @@ static struct platform_driver charger_driver = {
 		   },
 };
 
-/* [lidebiao start] Add for FactoryKit test */
-static const struct of_device_id mtk_tpcharger_of_match[] = {
-	{.compatible = "mediatek,tpcharger",},
-	{},
-};
-
-MODULE_DEVICE_TABLE(of, mtk_tpcharger_of_match);
-
-struct platform_device tpcharger_device = {
-	.name = "tpcharger",
-	.id = -1,
-};
-
-static struct platform_driver tpcharger_driver = {
-	.probe = mtk_tpcharger_probe,
-	.remove = mtk_tpcharger_remove,
-	.shutdown = mtk_tpcharger_shutdown,
-	.driver = {
-		   .name = "tpcharger",
-		   .of_match_table = mtk_tpcharger_of_match,
-		   },
-};
-
-
 static int __init mtk_charger_init(void)
 {
-	int ret;
-
-	ret = platform_driver_register(&charger_driver);
-	ret = platform_driver_register(&tpcharger_driver);
-
-	return ret;
+	return platform_driver_register(&charger_driver);
 }
-/* [lidebiao end] */
-
 late_initcall(mtk_charger_init);
 
 static void __exit mtk_charger_exit(void)
 {
 	platform_driver_unregister(&charger_driver);
-	platform_driver_unregister(&tpcharger_driver);	// [lidebiao] Add for FactoryKit test
 }
 module_exit(mtk_charger_exit);
 

@@ -65,14 +65,6 @@ void switch_set_state(struct switch_dev *sdev, int state)
 	char *envp[3];
 	int env_offset = 0;
 	int length;
-	int ret = 0;
-	int sw_state = 0;
-
-	if (sdev->get_state) {
-		ret = sdev->get_state(sdev, &sw_state);
-		if (ret >= 0)
-			sdev->state = sw_state;
-	}
 
 	if (sdev->state != state) {
 		sdev->state = state;

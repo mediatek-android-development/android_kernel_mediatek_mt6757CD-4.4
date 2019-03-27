@@ -22,40 +22,146 @@
 
 #include "mtk_power_gs.h"
 
+/* #define POWER_GS_DEBUG */
+#undef mt_power_gs_dump_suspend
+#undef mt_power_gs_dump_dpidle
+#undef mt_power_gs_dump_sodi3
+#undef mt_power_gs_t_dump_suspend
+#undef mt_power_gs_t_dump_dpidle
+#undef mt_power_gs_t_dump_sodi3
+
 struct proc_dir_entry *mt_power_gs_dir;
 
 struct golden _golden;
 
 bool is_already_snap_shot;
 
-bool slp_chk_golden_suspend;
-bool slp_chk_golden_dpidle;
-bool slp_chk_golden_sodi3;
+bool slp_chk_golden_suspend = true;
+bool slp_chk_golden_dpidle = true;
+bool slp_chk_golden_sodi3 = true;
+bool slp_chk_golden_diff_mode = true;
+
+void __weak mt_power_gs_suspend_compare(unsigned int dump_flag)
+{
+	pr_info("Power_gs: %s does not implement intead of dump suspend\n", __func__);
+}
+void __weak mt_power_gs_dpidle_compare(unsigned int dump_flag)
+{
+	pr_info("Power_gs: %s does not implement intead of dump dpidle\n", __func__);
+}
+void __weak mt_power_gs_sodi_compare(unsigned int dump_flag)
+{
+	pr_info("Power_gs: %s does not implement intead of dump sodi\n", __func__);
+}
+
+/* deprecated, temp used for api argument transfer */
+void mt_power_gs_f_dump_suspend(unsigned int dump_flag)
+{
+#ifdef POWER_GS_DEBUG
+	pr_warn("Power_gs: %s arg = %d\n", __func__, dump_flag);
+#endif
+	if (slp_chk_golden_suspend)
+		mt_power_gs_suspend_compare(dump_flag);
+}
+void mt_power_gs_t_dump_suspend(int count, ...)
+{
+	unsigned int p1 = GS_ALL;
+	va_list v;
+
+	va_start(v, count);
+
+	/* C pre-processor macros do not distinguish well between zero and one arguments */
+	if (count)
+		p1 = va_arg(v, unsigned int);
+
+#ifdef POWER_GS_DEBUG
+	pr_warn("Power_gs: %s arg count = %d, arg = %d\n", __func__, count, p1);
+#endif
+
+	/* if the argument is void, va_arg will get -1 */
+	if (p1 > GS_ALL)
+		p1 = GS_ALL;
+
+	mt_power_gs_f_dump_suspend(p1);
+	va_end(v);
+}
+EXPORT_SYMBOL(mt_power_gs_t_dump_suspend);
+void mt_power_gs_f_dump_dpidle(unsigned int dump_flag)
+{
+#ifdef POWER_GS_DEBUG
+	pr_warn("Power_gs: %s arg = %d\n", __func__, dump_flag);
+#endif
+	if (slp_chk_golden_dpidle)
+		mt_power_gs_dpidle_compare(dump_flag);
+}
+void mt_power_gs_t_dump_dpidle(int count, ...)
+{
+	unsigned int p1 = GS_ALL;
+	va_list v;
+
+	va_start(v, count);
+
+	/* C pre-processor macros do not distinguish well between zero and one arguments */
+	if (count)
+		p1 = va_arg(v, unsigned int);
+
+#ifdef POWER_GS_DEBUG
+	pr_warn("Power_gs: %s arg count = %d, arg = %d\n", __func__, count, p1);
+#endif
+
+	/* if the argument is void, va_arg will get -1 */
+	if (p1 > GS_ALL)
+		p1 = GS_ALL;
+
+	mt_power_gs_f_dump_dpidle(p1);
+	va_end(v);
+}
+EXPORT_SYMBOL(mt_power_gs_t_dump_dpidle);
+void mt_power_gs_f_dump_sodi3(unsigned int dump_flag)
+{
+#ifdef POWER_GS_DEBUG
+	pr_warn("Power_gs: %s arg = %d\n", __func__, dump_flag);
+#endif
+	if (slp_chk_golden_sodi3)
+		mt_power_gs_sodi_compare(dump_flag);
+}
+void mt_power_gs_t_dump_sodi3(int count, ...)
+{
+	unsigned int p1 = GS_ALL;
+	va_list v;
+
+	va_start(v, count);
+
+	/* C pre-processor macros do not distinguish well between zero and one arguments */
+	if (count)
+		p1 = va_arg(v, unsigned int);
+
+#ifdef POWER_GS_DEBUG
+	pr_warn("Power_gs: %s arg count = %d, arg = %d\n", __func__, count, p1);
+#endif
+
+	/* if the argument is void, va_arg will get -1 */
+	if (p1 > GS_ALL)
+		p1 = GS_ALL;
+
+	mt_power_gs_f_dump_sodi3(p1);
+	va_end(v);
+}
+EXPORT_SYMBOL(mt_power_gs_t_dump_sodi3);
 
 void mt_power_gs_dump_suspend(void)
 {
-	if (slp_chk_golden_suspend) {
-		mt_power_gs_suspend_compare();
-		slp_chk_golden_suspend = 0;
-	}
+	mt_power_gs_f_dump_suspend(GS_ALL);
 }
 EXPORT_SYMBOL(mt_power_gs_dump_suspend);
-
 void mt_power_gs_dump_dpidle(void)
 {
-	if (slp_chk_golden_dpidle) {
-		mt_power_gs_dpidle_compare();
-		slp_chk_golden_dpidle = 0;
-	}
+	mt_power_gs_f_dump_dpidle(GS_ALL);
 }
 EXPORT_SYMBOL(mt_power_gs_dump_dpidle);
-
 void mt_power_gs_dump_sodi3(void)
 {
-	if (slp_chk_golden_sodi3) {
-		mt_power_gs_dump_suspend();
-		slp_chk_golden_sodi3 = 0;
-	}
+	mt_power_gs_f_dump_sodi3(GS_ALL);
 }
 EXPORT_SYMBOL(mt_power_gs_dump_sodi3);
 
@@ -85,6 +191,7 @@ static int __init mt_power_gs_init(void)
 module_param(slp_chk_golden_suspend, bool, 0644);
 module_param(slp_chk_golden_dpidle, bool, 0644);
 module_param(slp_chk_golden_sodi3, bool, 0644);
+module_param(slp_chk_golden_diff_mode, bool, 0644);
 module_init(mt_power_gs_init);
 module_exit(mt_power_gs_exit);
 

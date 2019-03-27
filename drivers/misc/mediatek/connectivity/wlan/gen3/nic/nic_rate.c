@@ -112,6 +112,7 @@ const EMU_MAC_RATE_INFO_T arMcsRate2PhyRate[] = {
 	RATE_INFO(PHY_RATE_MCS9, 0, 0, 1800, 2000, 3900, 4333, 7800, 8667),
 	RATE_INFO(PHY_RATE_MCS32, 0, 0, 60, 67, 0, 0, 0, 0)
 };
+
 const UINT_8 aucHwRate2PhyRate[] = {
 	RATE_1M,		/*1M long */
 	RATE_2M,		/*2M long */
@@ -167,12 +168,14 @@ nicGetPhyRateByMcsRate(
 {
 	return	arMcsRate2PhyRate[ucIdx].u4PhyRate[ucBw][ucGI];
 }
+
 UINT_32
 nicGetHwRateByPhyRate(
 	IN UINT_8 ucIdx)
 {
 	return	aucHwRate2PhyRate[ucIdx]; /* uint : 500 kbps */
 }
+
 WLAN_STATUS
 nicSwIndex2RateIndex(
 	IN UINT_8 ucRateSwIndex,
@@ -237,6 +240,7 @@ WLAN_STATUS nicRateIndex2RateCode(IN UINT_8 ucPreambleOption, IN UINT_8 ucRateIn
 
 	return WLAN_STATUS_SUCCESS;
 }
+
 UINT_32
 nicRateCode2PhyRate(
 	IN UINT_16  u2RateCode,

@@ -142,7 +142,7 @@ static void gic_enable_redist(bool enable)
 			return;	/* No PM support in this redistributor */
 	}
 
-	while (count--) {
+	while (--count) {
 		val = readl_relaxed(rbase + GICR_WAKER);
 		if (enable ^ (val & GICR_WAKER_ChildrenAsleep))
 			break;
@@ -462,9 +462,11 @@ static int gic_populate_rdist(void)
 				u64 offset = ptr - gic_data.redist_regions[i].redist_base;
 				gic_data_rdist_rd_base() = ptr;
 				gic_data_rdist()->phys_base = gic_data.redist_regions[i].phys_base + offset;
+#if 0
 				pr_info("CPU%d: found redistributor %lx region %d:%pa\n",
 					smp_processor_id(), mpidr, i,
 					&gic_data_rdist()->phys_base);
+#endif
 				return 0;
 			}
 
@@ -567,7 +569,7 @@ static struct notifier_block gic_cpu_notifier = {
 static u16 gic_compute_target_list(int *base_cpu, const struct cpumask *mask,
 				   unsigned long cluster_id)
 {
-	int cpu = *base_cpu;
+	int next_cpu, cpu = *base_cpu;
 	unsigned long mpidr = cpu_logical_map(cpu);
 	u16 tlist = 0;
 
@@ -581,9 +583,10 @@ static u16 gic_compute_target_list(int *base_cpu, const struct cpumask *mask,
 
 		tlist |= 1 << (mpidr & 0xf);
 
-		cpu = cpumask_next(cpu, mask);
-		if (cpu >= nr_cpu_ids)
+		next_cpu = cpumask_next(cpu, mask);
+		if (next_cpu >= nr_cpu_ids)
 			goto out;
+		cpu = next_cpu;
 
 		mpidr = cpu_logical_map(cpu);
 
@@ -655,6 +658,9 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	u64 val;
 
 #ifndef CONFIG_MTK_IRQ_NEW_DESIGN
+	if (cpu >= nr_cpu_ids)
+		return -EINVAL;
+
 	if (gic_irq_in_rdist(d))
 		return -EINVAL;
 
@@ -710,21 +716,6 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 		val = gic_mpidr_to_affinity(cpu_logical_map(cpu));
 
 	gic_write_irouter(val, reg);
-
-	/*
-	 * defensive programming here.
-	 * if the val is not GICD_IROUTER_SPI_MODE_ANY or reasonable affinity,
-	 * trigger BUG_ON()
-	 */
-	if ((val != GICD_IROUTER_SPI_MODE_ANY) &&
-	    (val > gic_mpidr_to_affinity(cpu_logical_map(num_possible_cpus()-1)))) {
-#ifdef CONFIG_64BIT
-		pr_err("[GIC] cpu_logical_map(%d) = %llu\n", cpu, cpu_logical_map(cpu));
-#else
-		pr_err("[GIC] cpu_logical_map(%d) = %u\n", cpu, cpu_logical_map(cpu));
-#endif
-		BUG_ON(1);
-	}
 
 	/*
 	 * If the interrupt was enabled, enabled it again. Otherwise,

@@ -21,12 +21,6 @@
 *                    E X T E R N A L   R E F E R E N C E S
 ********************************************************************************
 */
-#if DBG
-extern UINT_8 aucDebugModule[DBG_MODULE_NUM];
-extern UINT_32 u4DebugModule;
-UINT_32 u4DebugModuleTemp;
-#endif /* DBG */
-extern int sprintf(char *buf, const char *fmt, ...);
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -868,8 +862,15 @@ typedef struct _PARAM_SCAN_REQUEST_ADV_T {
 /*! \brief CFG80211 Scheduled Scan Request Container            */
 /*--------------------------------------------------------------*/
 typedef struct _PARAM_SCHED_SCAN_REQUEST_T {
+#if CFG_SUPPORT_SCHED_SCN_SSID_SETS
+	UINT_32 u4SsidNum; /*passed in the probe_reqs*/
+	PARAM_SSID_T arSsid[CFG_SCAN_HIDDEN_SSID_MAX_NUM];
+	UINT_32 u4MatchSsidNum; /*matched for a scan request*/
+	PARAM_SSID_T arMatchSsid[CFG_SCAN_SSID_MATCH_MAX_NUM];
+#else
 	UINT_32 u4SsidNum;
 	PARAM_SSID_T arSsid[CFG_SCAN_SSID_MATCH_MAX_NUM];
+#endif
 	UINT_32 u4IELength;
 	PUINT_8 pucIE;
 	UINT_16 u2ScanInterval;	/* in milliseconds */
@@ -1656,33 +1657,34 @@ wlanoidQueryLteSafeChannel(IN P_ADAPTER_T prAdapter,
 ********************************************************************************
 */
 
-WLAN_STATUS
-wlanoidUpdateFtIes(IN P_ADAPTER_T prAdapter,
-		   IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
-
-WLAN_STATUS
-wlanoidSync11kCapbilities(IN P_ADAPTER_T prAdapter,
-			  IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
-
-WLAN_STATUS
-wlanoidSendNeighborRequest(IN P_ADAPTER_T prAdapter,
-			   IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
-
-WLAN_STATUS wlanoidSendBTMQuery(IN P_ADAPTER_T prAdapter,
-				IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
-
 #ifdef FW_CFG_SUPPORT
 WLAN_STATUS wlanoidQueryCfgRead(IN P_ADAPTER_T prAdapter,
 				IN PVOID pvQueryBuffer, IN UINT_32 u4QueryBufferLen, OUT PUINT_32 pu4QueryInfoLen);
 #endif
-WLAN_STATUS wlanoidTspecOperation(
-	IN  P_ADAPTER_T prAdapter, IN  PVOID pvBuffer, IN  UINT_32 u4BufferLen, OUT PUINT_32 pu4InfoLen);
-
 #if CFG_SUPPORT_EMI_DEBUG
 WLAN_STATUS
 wlanoidSetEnableDumpEMILog(IN P_ADAPTER_T prAdapter,
 				IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
 #endif
+
+WLAN_STATUS
+wlanoidUpdateFtIes(IN P_ADAPTER_T prAdapter,
+			IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
+
+WLAN_STATUS
+wlanoidSync11kCapbilities(IN P_ADAPTER_T prAdapter,
+			IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
+
+WLAN_STATUS
+wlanoidSendNeighborRequest(IN P_ADAPTER_T prAdapter,
+			IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
+
+WLAN_STATUS wlanoidSendBTMQuery(IN P_ADAPTER_T prAdapter,
+			IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
+
+WLAN_STATUS wlanoidTspecOperation(
+	IN  P_ADAPTER_T prAdapter, IN  PVOID pvBuffer, IN  UINT_32 u4BufferLen, OUT PUINT_32 pu4InfoLen);
+
 #endif /* _WLAN_OID_H */
 WLAN_STATUS
 wlanoidSetChipConfig(IN P_ADAPTER_T prAdapter,
@@ -1714,6 +1716,13 @@ WLAN_STATUS wlanoidSetPacketFilter(P_ADAPTER_T prAdapter, UINT_32 u4PacketFilter
 
 WLAN_STATUS wlanoidSetDrvRoamingPolicy(IN P_ADAPTER_T prAdapter,
 			 IN PVOID pvSetBuffer, IN UINT_32 u4SetBufferLen, OUT PUINT_32 pu4SetInfoLen);
+
+WLAN_STATUS wlanoidRadioMeasurementIT(
+	P_ADAPTER_T prAdapter, PVOID pvBuffer, UINT_32 u4BufferLen, PUINT_32 pu4InfoLen);
+
+WLAN_STATUS
+wlanoidDumpUapsdSetting(P_ADAPTER_T prAdapter, PVOID pvBuffer, UINT_32 u4BufferLen,
+									  PUINT_32 pu4InfoLen);
 
 #if CFG_SUPPORT_FCC_POWER_BACK_OFF
 WLAN_STATUS
@@ -1842,6 +1851,8 @@ wlanoidQueryNchoEnable(IN P_ADAPTER_T prAdapter,
 
 #endif /* CFG_SUPPORT_NCHO */
 
-WLAN_STATUS wlanoidRadioMeasurementIT(
-	P_ADAPTER_T prAdapter, PVOID pvBuffer, UINT_32 u4BufferLen, PUINT_32 pu4InfoLen);
+WLAN_STATUS
+wlanoidAbortScan(IN P_ADAPTER_T prAdapter,
+			OUT PVOID pvQueryBuffer, IN UINT_32 u4QueryBufferLen,
+			OUT PUINT_32 pu4QueryInfoLen);
 

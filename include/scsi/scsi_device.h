@@ -175,6 +175,17 @@ struct scsi_device {
 	unsigned no_dif:1;	/* T10 PI (DIF) should be disabled */
 	unsigned broken_fua:1;		/* Don't set FUA bit */
 	unsigned lun_in_cdb:1;		/* Store LUN bits in CDB[1] */
+	unsigned use_rpm_auto:1; /* Enable runtime PM auto suspend */
+
+	/*
+	 * MTK PATCH:
+	 * Add "autosuspend_delay" for runtime PM.
+	 *
+	 * Default value: -1 (disabled).
+	 * It can be configured by LLD driver, such as ->slave_configure().
+	 */
+#define SCSI_DEFAULT_AUTOSUSPEND_DELAY  -1
+	int autosuspend_delay;
 
 	atomic_t disk_events_disable_depth; /* disable depth for disk events */
 
@@ -307,6 +318,7 @@ extern void scsi_remove_device(struct scsi_device *);
 extern int scsi_unregister_device_handler(struct scsi_device_handler *scsi_dh);
 void scsi_attach_vpd(struct scsi_device *sdev);
 
+extern struct scsi_device *scsi_device_from_queue(struct request_queue *q);
 extern int scsi_device_get(struct scsi_device *);
 extern void scsi_device_put(struct scsi_device *);
 extern struct scsi_device *scsi_device_lookup(struct Scsi_Host *,

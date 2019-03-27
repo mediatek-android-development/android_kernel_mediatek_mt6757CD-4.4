@@ -102,7 +102,7 @@ BOOLEAN rsnParseRsnIE(IN P_ADAPTER_T prAdapter, IN P_RSN_INFO_ELEM_T prInfoElem,
 		return FALSE;
 	}
 
-	cp = (PUCHAR) & prInfoElem->u4GroupKeyCipherSuite;
+	cp = (PUCHAR)&prInfoElem->u4GroupKeyCipherSuite;
 	u4RemainRsnIeLen = (INT_32) prInfoElem->ucLength - 2;
 
 	do {
@@ -569,17 +569,16 @@ BOOLEAN rsnIsSuitableBSS(IN P_ADAPTER_T prAdapter, IN P_RSN_INFO_T prBssRsnInfo)
 	DEBUGFUNC("rsnIsSuitableBSS");
 
 	do {
-
 		if ((prAdapter->rWifiVar.rConnSettings.rRsnInfo.u4GroupKeyCipherSuite & 0x000000FF) !=
 		    GET_SELECTOR_TYPE(prBssRsnInfo->u4GroupKeyCipherSuite)) {
-			DBGLOG(RSN, TRACE, "Break by GroupKeyCipherSuite\n");
+			DBGLOG(RSN, WARN, "Break by GroupKeyCipherSuite\n");
 			break;
 		}
 		for (i = 0; i < prBssRsnInfo->u4PairwiseKeyCipherSuiteCount; i++) {
 			if (((prAdapter->rWifiVar.rConnSettings.rRsnInfo.au4PairwiseKeyCipherSuite[0] & 0x000000FF) !=
 			     GET_SELECTOR_TYPE(prBssRsnInfo->au4PairwiseKeyCipherSuite[i]))
 			    && (i == prBssRsnInfo->u4PairwiseKeyCipherSuiteCount - 1)) {
-				DBGLOG(RSN, TRACE, "Break by PairwiseKeyCipherSuite\n");
+				DBGLOG(RSN, WARN, "Break by PairwiseKeyCipherSuite\n");
 				break;
 			}
 		}
@@ -587,7 +586,7 @@ BOOLEAN rsnIsSuitableBSS(IN P_ADAPTER_T prAdapter, IN P_RSN_INFO_T prBssRsnInfo)
 			if (((prAdapter->rWifiVar.rConnSettings.rRsnInfo.au4AuthKeyMgtSuite[0] & 0x000000FF) !=
 			     GET_SELECTOR_TYPE(prBssRsnInfo->au4AuthKeyMgtSuite[i]))
 			    && (i == prBssRsnInfo->u4AuthKeyMgtSuiteCount - 1)) {
-				DBGLOG(RSN, TRACE, "Break by AuthKeyMgtSuite\n");
+				DBGLOG(RSN, WARN, "Break by AuthKeyMgtSuite\n");
 				break;
 			}
 		}
@@ -721,9 +720,10 @@ BOOLEAN rsnPerformPolicySelection(IN P_ADAPTER_T prAdapter, IN P_BSS_DESC_T prBs
 			return FALSE;
 		}
 	} else if (prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2 ||
-		   prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_PSK
-		   || prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT_PSK ||
-		   prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT) {
+		prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_PSK ||
+		prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT_PSK ||
+		prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT) {
+
 		if (prBss->fgIERSN) {
 			prBssRsnInfo = &prBss->rRSNInfo;
 		} else {
@@ -753,10 +753,15 @@ BOOLEAN rsnPerformPolicySelection(IN P_ADAPTER_T prAdapter, IN P_BSS_DESC_T prBs
 	}
 
 	if (!rsnIsSuitableBSS(prAdapter, prBssRsnInfo)) {
-		DBGLOG(RSN, WARN, "RSN info check no matched\n");
+		DBGLOG(RSN, WARN, "RSN info check no matched, RSN Score support[%d]\n", CFG_SUPPORT_RSN_SCORE);
+#if CFG_SUPPORT_RSN_SCORE
+		prBss->fgIsRSNSuitableBss = FALSE;
+	} else
+		prBss->fgIsRSNSuitableBss = TRUE;
+#else
 		return FALSE;
 	}
-
+#endif
 	if (prBssRsnInfo->u4PairwiseKeyCipherSuiteCount == 1 &&
 	    GET_SELECTOR_TYPE(prBssRsnInfo->au4PairwiseKeyCipherSuite[0]) == CIPHER_SUITE_NONE) {
 		/*
@@ -1256,6 +1261,7 @@ VOID rsnGenerateRSNIE(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo)
 		authAddRSNIE(prAdapter, prMsduInfo);
 		return;
 	}
+
 	if (
 #if CFG_ENABLE_WIFI_DIRECT
 		   ((prAdapter->fgIsP2PRegistered) &&
@@ -1266,9 +1272,9 @@ VOID rsnGenerateRSNIE(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo)
 #endif
 		   (eNetworkId == NETWORK_TYPE_AIS_INDEX /* prCurrentBss->fgIERSN */  &&
 		    ((prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2) ||
-		     (prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_PSK)
-			|| prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT_PSK ||
-			prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT))) {
+		     (prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_PSK) ||
+			 (prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT_PSK) ||
+			 (prAdapter->rWifiVar.rConnSettings.eAuthMode == AUTH_MODE_WPA2_FT)))) {
 		/* Construct a RSN IE for association request frame. */
 		RSN_IE(pucBuffer)->ucElemId = ELEM_ID_RSN;
 		RSN_IE(pucBuffer)->ucLength = ELEM_ID_RSN_LEN_FIXED;
@@ -2617,13 +2623,15 @@ BOOLEAN rsnParseOsenIE(P_ADAPTER_T prAdapter, struct IE_WFA_OSEN *prInfoElem, P_
 	return TRUE;
 }
 #endif
+
 UINT_32 rsnCalculateFTIELen(P_ADAPTER_T prAdapter,
 	ENUM_NETWORK_TYPE_INDEX_T eNetTypeIndex, P_STA_RECORD_T prStaRec)
 {
 	ENUM_PARAM_AUTH_MODE_T eAuthMode = prAdapter->rWifiVar.rConnSettings.eAuthMode;
 	struct FT_IES *prFtIEs = &prAdapter->prGlueInfo->rFtIeForTx;
 
-	if (!prFtIEs->prFTIE || (eAuthMode != AUTH_MODE_WPA2_FT && eAuthMode != AUTH_MODE_WPA2_FT_PSK))
+	if (!IS_BSS_INDEX_VALID(eNetTypeIndex) || !IS_BSS_AIS(GET_BSS_INFO_BY_INDEX(prAdapter, eNetTypeIndex)) ||
+		!prFtIEs->prFTIE || (eAuthMode != AUTH_MODE_WPA2_FT && eAuthMode != AUTH_MODE_WPA2_FT_PSK))
 		return 0;
 	return IE_SIZE(prFtIEs->prFTIE);
 }
@@ -2634,10 +2642,13 @@ VOID rsnGenerateFTIE(IN P_ADAPTER_T prAdapter, IN OUT P_MSDU_INFO_T prMsduInfo)
 	struct FT_IES *prFtIEs = &prAdapter->prGlueInfo->rFtIeForTx;
 	PUINT_8 pucBuffer = (PUINT_8)prMsduInfo->prPacket + prMsduInfo->u2FrameLength;
 	UINT_32 ucFtIeSize = 0;
+	UINT_8 ucBssIdx = prMsduInfo->ucNetworkType;
 
-	if (!prFtIEs->prFTIE || (eAuthMode != AUTH_MODE_WPA2_FT && eAuthMode != AUTH_MODE_WPA2_FT_PSK))
+	if (!IS_BSS_INDEX_VALID(ucBssIdx) || !IS_BSS_AIS(GET_BSS_INFO_BY_INDEX(prAdapter, ucBssIdx)) ||
+		!prFtIEs->prFTIE || (eAuthMode != AUTH_MODE_WPA2_FT && eAuthMode != AUTH_MODE_WPA2_FT_PSK))
 		return;
 	ucFtIeSize = IE_SIZE(prFtIEs->prFTIE);
 	prMsduInfo->u2FrameLength += ucFtIeSize;
 	kalMemCopy(pucBuffer, prFtIEs->prFTIE, ucFtIeSize);
 }
+

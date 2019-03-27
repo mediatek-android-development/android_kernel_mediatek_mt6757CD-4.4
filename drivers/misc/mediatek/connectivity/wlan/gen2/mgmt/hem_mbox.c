@@ -227,11 +227,10 @@ static MSG_HNDL_ENTRY_T arMsgMapTable[] = {
 	{MID_MNY_CNM_SCAN_CONTINUE, scnFsmMsgStart},
 	{MID_WNM_AIS_BSS_TRANSITION, aisFsmRunEventBssTransition},
 	{MID_OID_WMM_TSPEC_OPERATE, wmmRunEventTSOperate},
+	{MID_RLM_RM_SCHEDULE, rlmRunEventProcessNextRm},
 #if CFG_SUPPORT_NCHO
 	{MID_MNY_AIS_NCHO_ACTION_FRAME, aisFsmRunEventNchoActionFrameTx},
 #endif
-	{MID_RLM_RM_SCHEDULE, rlmRunEventProcessNextRm},
-
 };
 
 /*******************************************************************************
@@ -370,7 +369,7 @@ mboxSendMsg(IN P_ADAPTER_T prAdapter,
 	ASSERT(prAdapter);
 #if CFG_DBG_MGT_BUF
 	prBufInfo = &prAdapter->rMgtBufInfo;
-	DBGLOG(CNM, INFO, "MSG [%d],freeCnt:%d,AllocCnt:%d\n", prMsg->eMsgId
+	DBGLOG(CNM, TRACE, "MSG [%d],freeCnt:%d,AllocCnt:%d\n", prMsg->eMsgId
 		, prBufInfo->u4FreeCount, prBufInfo->u4AllocCount);
 #endif
 	prMbox = &(prAdapter->arMbox[eMboxId]);

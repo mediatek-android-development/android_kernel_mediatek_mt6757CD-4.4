@@ -43,7 +43,7 @@
 #define WMT_LOUD_FUNC(fmt, arg...) \
 do { \
 	if (gWmtDbgLvl >= WMT_LOG_LOUD) \
-		osal_dbg_print(DFT_TAG "[L]%s:"  fmt, __func__, ##arg); \
+		osal_warn_print(DFT_TAG "[L]%s:"  fmt, __func__, ##arg); \
 } while (0)
 #define WMT_INFO_FUNC(fmt, arg...)  \
 do { \
@@ -63,12 +63,12 @@ do { \
 #define WMT_DBG_FUNC(fmt, arg...) \
 do { \
 	if (gWmtDbgLvl >= WMT_LOG_DBG) \
-		osal_dbg_print(DFT_TAG "[D]%s:"  fmt, __func__, ##arg); \
+		osal_warn_print(DFT_TAG "[D]%s:"  fmt, __func__, ##arg); \
 } while (0)
 #define WMT_TRC_FUNC(f) \
 do { \
 	if (gWmtDbgLvl >= WMT_LOG_DBG) \
-		osal_dbg_print(DFT_TAG "<%s> <%d>\n", __func__, __LINE__); \
+		osal_warn_print(DFT_TAG "<%s> <%d>\n", __func__, __LINE__); \
 } while (0)
 
 #endif
@@ -84,7 +84,6 @@ extern OSAL_BIT_OP_VAR gBtWifiGpsState;
 extern OSAL_BIT_OP_VAR gGpsFmState;
 extern UINT32 gWifiProbed;
 extern MTK_WCN_BOOL g_pwr_off_flag;
-extern UINT32 g_IsNeedDoChipReset;
 /*******************************************************************************
 *                              C O N S T A N T S
 ********************************************************************************
@@ -184,6 +183,9 @@ typedef enum _SDIO_PS_OP {
 } SDIO_PS_OP;
 
 typedef INT32(*PF_WMT_SDIO_PSOP) (SDIO_PS_OP);
+typedef INT32(*PF_WMT_SDIO_DEEP_SLEEP)(MTK_WCN_BOOL);
+typedef INT32(*PF_WMT_SDIO_DEBUG)(INT32, INT32, UINT32, UINT32);
+
 
 typedef enum _ENUM_WMTCHIN_TYPE_T {
 	WMTCHIN_CHIPID = 0x0,
@@ -368,6 +370,8 @@ extern MTK_WCN_BOOL mtk_wcn_wmt_assert(ENUM_WMTDRV_TYPE_T type, UINT32 reason);
 
 extern MTK_WCN_BOOL mtk_wcn_wmt_assert_timeout(ENUM_WMTDRV_TYPE_T type, UINT32 reason, INT32 timeout);
 
+extern MTK_WCN_BOOL mtk_wcn_wmt_do_reset(ENUM_WMTDRV_TYPE_T type);
+
 extern INT32 mtk_wcn_wmt_msgcb_reg(ENUM_WMTDRV_TYPE_T eType, PF_WMT_CB pCb);
 
 extern INT32 mtk_wcn_wmt_msgcb_unreg(ENUM_WMTDRV_TYPE_T eType);
@@ -395,6 +399,10 @@ extern ENUM_WMT_FLASH_PATCH_STATUS mtk_wcn_wmt_flash_patch_ctrl(ENUM_WMT_FLASH_P
 		PUINT32 version, UINT32 checksum);
 
 #endif
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+extern INT32 mtk_wcn_wmt_sdio_deep_sleep_flag_cb_reg(PF_WMT_SDIO_DEEP_SLEEP flag_cb);
+#endif
+extern INT32 mtk_wcn_wmt_sdio_rw_cb_reg(PF_WMT_SDIO_DEBUG reg_rw_cb);
 
 #ifdef CONFIG_MTK_COMBO_ANT
 extern ENUM_WMT_ANT_RAM_STATUS mtk_wcn_wmt_ant_ram_ctrl(ENUM_WMT_ANT_RAM_CTRL ctrlId, PUINT8 pBuf,
@@ -412,6 +420,8 @@ extern VOID mtk_wcn_wmt_exp_init(VOID);
 extern VOID mtk_wcn_wmt_exp_deinit(VOID);
 #endif
 extern INT8 mtk_wcn_wmt_co_clock_flag_get(VOID);
+extern INT32 mtk_wcn_wmt_wifi_fem_cfg_report(PVOID pvInfoBuf);
+extern VOID mtk_wcn_wmt_dump_wmtd_backtrace(VOID);
 /*******************************************************************************
 *                              F U N C T I O N S
 ********************************************************************************

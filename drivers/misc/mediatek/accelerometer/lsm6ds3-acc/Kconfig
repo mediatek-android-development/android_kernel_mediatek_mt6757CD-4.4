@@ -1,4 +1,0 @@
-
-config MTK_LSM6DS3_ACC
-	bool "STMicroelectronics LSM6DS3 accelerometer for MediaTek package"
-	default y

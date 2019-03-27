@@ -11,11 +11,11 @@
  */
 
 / {
-	rt5081_pmu_dts {
+	rt5081_pmu: rt5081_pmu_dts {
 		interrupt-controller;
 		#interrupt-cells = <1>;
-		rt,intr_gpio_num = <101>; /* direct defined GPIO num */
-		rt,intr_gpio = <&pio 101 0x0>; /* GPIO */
+		rt,intr_gpio_num = <3>; /* direct defined GPIO num */
+		rt,intr_gpio = <&pio 3 0x0>; /* GPIO */
 		core {
 			compatible = "richtek,rt5081_pmu_core";
 			interrupt-names = "otp", "vdda_ovp", "vdda_uv";
@@ -24,13 +24,12 @@
 			mrstb_en; /* external reset pin enable */
 			mrstb_tmr = <3>; /* 0: 0.75ms, 1: 1ms, 2: 1.25ms, 3: 1.5ms */
 			/* 4: 1.75ms, 5: 2ms, 6: 2.25ms, 7: 2.5ms */
-			int_wdt = <0>; /* 0: disable, 1: 250ms, 2: 500ms, 3: 1s */
+			int_wdt = <1>; /* 0: disable, 1: 250ms, 2: 500ms, 3: 1s */
 			int_deg = <0>; /* interrupt deglitch, 0: 1ms, 1: 2ms, 2: 5ms, 3: 10ms */
 		};
 		charger {
 			compatible = "richtek,rt5081_pmu_charger";
-			interrupt-names = "adc_donei", "chg_mivr",
-				"chg_aiclmeasi", "pumpx_donei", "attachi",
+			interrupt-names = "chg_mivr", "chg_aiclmeasi", "attachi",
 				"ovpctrl_uvp_d_evt", "chg_wdtmri", "chg_vbusov",
 				"chg_tmri", "chg_treg";
 			charger_name = "primary_chg";
@@ -38,7 +37,7 @@
 			ichg = <2000000>;	/* uA */
 			aicr = <500000>;	/* uA */
 			mivr = <4400000>;	/* uV */
-			cv = <4400000>;		/* uA */	/* [lidebiao] Modify battery charging CV */
+			cv = <4350000>;		/* uA */
 			ieoc = <150000>;	/* uA */
 			safety_timer = <12>;	/* hour */
 			dc_wdt = <4000000>;	/* us */
@@ -90,7 +89,7 @@
 					  "isink2_open", "isink1_open";
 			/* name cnt must be 4 */
 			rt,led_name = "rt5081_pmu_led1", "rt5081_pmu_led2",
-				      "button-backlight", "rt5081_pmu_led4";
+				      "rt5081_pmu_led3", "rt5081_pmu_led4";
 			/* trigger cnt must be 4, mode can be selected as */
 			/* cc_mode -> const current mode */
 			/* pwm_mode -> pwm dimming mode */
@@ -115,15 +114,15 @@
 			rt,bled_ramptime = <3>; /* 0, 500us, 750us, 1ms, 2ms, 5ms, 10ms, 20ms */
 						/* 50ms, 100ms, 250ms, 800ms, 1s, 2s, 4s, 8s */
 			rt,bled_flash_ramp = <1>; /* 0, 500us, 750us, 1ms, 2ms, 5ms */
-			rt,max_bled_brightness = <683>; /* we have 11 bit resolution, quantize in driver */
-							 /* maximum 2047 */ /* [liliwen] Change max_bled_brightness */
+			rt,max_bled_brightness = <512>; /* we have 11 bit resolution, quantize in driver */
+							 /* maximum 2047 */
 		};
 		dsv {
 			compatible = "richtek,rt5081_pmu_dsv";
 			interrupt-names = "dsv_vneg_ocp", "dsv_vpos_ocp",
 					  "dsv_bst_ocp", "dsv_vneg_scp",
 					  "dsv_vpos_scp";
-			db_ext_en = <1>;  /* 0 = i2c ctrl; 1 = ext pin */ /* [liliwen] use ext pin mode */
+			db_ext_en = <0>;  /* 0 = i2c ctrl; 1 = ext pin */
 			db_periodic_fix = <0>; /* 1 = prevent from voltage drop when db is restart */
 			db_single_pin = <0>; /* 0 => VOS & VNEG are ctrled by DB_ENP & DB_ENN; 1 : single pin ctrl*/
 			db_freq_pm = <0>; /*  0 = 20Hz ; 1 = 33Hz; valid if db_period_mode = 1 */

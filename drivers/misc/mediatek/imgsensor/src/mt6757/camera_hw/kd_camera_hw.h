@@ -24,7 +24,6 @@
 #define VOL1220 1220000
 #define VOL1000 1000000
 #define VOL1100 1100000
-#define VOL1050 1050000
 
 typedef enum {
 	VDD_None,
@@ -47,7 +46,6 @@ typedef enum {
 	Vol_Low = 0,
 	Vol_High = 1,
 	Vol_1000 = VOL1000,
-        Vol_1050 = VOL1050,
 	Vol_1100 = VOL1100,
 	Vol_1200 = VOL1200,
 	Vol_1210 = VOL1210,
@@ -77,11 +75,11 @@ typedef enum {
 #define CAMERA_CMPDN2_PIN_M_GPIO    0
 
 
-/*#define GPIO_OUT_ONE 1*/
-/*#define GPIO_OUT_ZERO 0*/
-/*#define GPIO_UNSUPPORTED 0xff*/
+#define GPIO_OUT_ONE 1
+#define GPIO_OUT_ZERO 0
+#define GPIO_UNSUPPORTED 0xff
 #define GPIO_SUPPORTED 0
-/*#define GPIO_MODE_GPIO 0*/
+#define GPIO_MODE_GPIO 0
 
 #endif
 
@@ -121,7 +119,4 @@ extern void ISP_MCLK2_EN(BOOL En);
 int mtkcam_gpio_set(int PinIdx, int PwrType, int Val);
 int mtkcam_gpio_init(struct platform_device *pdev);
 
-extern int mt_set_gpio_mode(unsigned long pin, unsigned long mode);
-extern int mt_set_gpio_dir(unsigned long pin, unsigned long dir);
-extern int mt_set_gpio_out(unsigned long pin, unsigned long output);
 

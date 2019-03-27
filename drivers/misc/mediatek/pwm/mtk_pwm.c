@@ -35,24 +35,17 @@
 #include <linux/atomic.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
-#ifdef CONFIG_OF
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/of_irq.h>
-#endif
+#include <linux/clk.h>
 
 #include <mt-plat/mtk_pwm.h>
+#include <mach/mtk_pwm_prv.h>
 #include <mt-plat/mtk_pwm_hal_pub.h>
 #include <mach/mtk_pwm_hal.h>
 
-#if !defined(CONFIG_MTK_CLKMGR)
-#include <linux/clk.h>
-#endif
-
-
-#ifdef CONFIG_OF
 void __iomem *pwm_base;
-#endif
 
 struct pwm_device {
 	const char	  *name;
@@ -590,12 +583,6 @@ s32 mt_set_pwm_buf0_addr(u32 pwm_no, dma_addr_t addr)
 	if (pwm_no >= PWM_MAX) {
 		PWMDBG("pwm number excesses PWM_MAX\n");
 		return -EEXCESSPWMNO;
-	}
-
-	if (addr > 0xFFFFFFFF) {
-		PWMDBG("buf addr 0x%lx  > 4GB boundary!!\n", (unsigned long) addr);
-		PWMDBG("please follow guide to allocate low-end memory(< 0xffff_ffff) for buf addr!!\n");
-		return -EEXCESS4GADDR;
 	}
 
 	spin_lock_irqsave(&dev->lock, flags);
@@ -1244,7 +1231,7 @@ s32 pwm_set_spec_config(struct pwm_spec_config *conf)
 {
 
 	if (conf->pwm_no >= PWM_MAX) {
-		PWMDBG("pwm number excess PWM_MAX\n");
+		PWMDBG("pwm number(%d) excess PWM_MAX(%d)\n", conf->pwm_no, PWM_MAX);
 		return -EEXCESSPWMNO;
 	}
 
@@ -1306,6 +1293,7 @@ s32 pwm_set_spec_config(struct pwm_spec_config *conf)
 		break;
 	case PWM_MODE_MEMORY:
 		PWMDBG("PWM_MODE_MEMORY\n");
+		mt_pwm_26M_clk_enable_hal(1);
 		mt_set_pwm_con_oldmode(conf->pwm_no, OLDMODE_DISABLE);
 		mt_set_pwm_con_datasrc(conf->pwm_no, MEMORY);
 		mt_set_pwm_con_mode(conf->pwm_no, PERIOD);
@@ -1730,34 +1718,47 @@ static ssize_t pwm_debug_show(struct device *dev, struct device_attribute *attr,
 
 static DEVICE_ATTR(pwm_debug, 0644, pwm_debug_show, pwm_debug_store);
 
+
+static irqreturn_t mt_pwm_irq(int irq, void *dev_id)
+{
+	int i;
+	u32 sts;
+
+	for (i = 0; i < PWM_MAX*2; i++) {
+		sts = mt_get_intr_status(i);
+		if (sts) {
+			mt_set_intr_ack(i);
+			pr_err("PWM int!!ch=%x\n", i/2);
+			break;
+		}
+	}
+
+	return IRQ_HANDLED;
+}
+
 static int mt_pwm_probe(struct platform_device *pdev)
 {
-	int ret;
+	int ret, pwm_irqnr;
 
-#ifdef CONFIG_OF
-		pwm_base = of_iomap(pdev->dev.of_node, 0);
-		if (!pwm_base) {
-			PWMDBG("PWM iomap failed\n");
-			return -ENODEV;
-		};
+	mt_pwm_platform_init();
 
-#if 0
-		pwm_irqnr = irq_of_parse_and_map(pdev->dev.of_node, 0);
-		if (!pwm_irqnr) {
-			PWMDBG("PWM get irqnr failed\n");
-			return -ENODEV;
-		}
-		PWMDBG("pwm base: 0x%p	pwm irq: %d\n", pwm_base, pwm_irqnr);
-#endif
-PWMDBG("pwm base: 0x%p\n", pwm_base);
+	pwm_base = of_iomap(pdev->dev.of_node, 0);
+	if (!pwm_base) {
+		PWMDBG("PWM iomap failed\n");
+		return -ENODEV;
+	};
 
-#endif
+	pwm_irqnr = irq_of_parse_and_map(pdev->dev.of_node, 0);
+	if (!pwm_irqnr) {
+		PWMDBG("PWM get irqnr failed\n");
+		return -ENODEV;
+	}
+	PWMDBG("pwm base: 0x%p	pwm irq: %d\n", pwm_base, pwm_irqnr);
 
-#if !defined(CONFIG_MTK_CLKMGR)
+
 	ret = mt_get_pwm_clk_src(pdev);
 	if (ret != 0)
 		PWMDBG("[%s]: Fail :%d\n", __func__, ret);
-#endif	/* !defined(CONFIG_MTK_CLKMGR) */
 
 	platform_set_drvdata(pdev, pwm_dev);
 
@@ -1765,22 +1766,18 @@ PWMDBG("pwm base: 0x%p\n", pwm_base);
 	if (ret)
 		PWMDBG("error creating sysfs files: pwm_debug\n");
 
-#ifdef CONFIG_OF
-/* r = request_irq(pwm_irqnr, mt_pwm_irq, IRQF_TRIGGER_LOW, PWM_DEVICE, NULL); */
-#else
-/* request_irq(69, mt_pwm_irq, IRQF_TRIGGER_LOW, "mt6589_pwm", NULL); */
-#endif
+	/* ret = request_irq(pwm_irqnr, mt_pwm_irq, IRQF_TRIGGER_LOW, PWM_DEVICE, NULL); */
+	pwm_irqnr = platform_get_irq(pdev, 0);
+	if (pwm_irqnr <= 0)
+		return -EINVAL;
 
-#if 0 /* for support gpio pinctrl standardization */
-	struct pinctrl *pinctrl;
-
-	pinctrl = devm_pinctrl_get_select(&pdev->dev, "state_pwm2");
-	if (IS_ERR(pinctrl)) {
-		ret = PTR_ERR(pinctrl);
-		dev_err(&pdev->dev, "Cannot find pwm pinctrl!\n");
-		return -1;
+	ret = devm_request_irq(&pdev->dev, pwm_irqnr, mt_pwm_irq,
+		IRQF_TRIGGER_LOW, PWM_DEVICE, NULL);
+	if (ret < 0) {
+		dev_err(&pdev->dev,
+			"[PWM]Request IRQ %d failed-------\n", pwm_irqnr);
+		return ret;
 	}
-#endif
 
 	return RSUCCESS;
 }
@@ -1802,12 +1799,10 @@ static void mt_pwm_shutdown(struct platform_device *pdev)
 	PWMDBG("mt_pwm_shutdown\n");
 }
 
-#ifdef CONFIG_OF
 static const struct of_device_id pwm_of_match[] = {
 	{.compatible = "mediatek,pwm",},
 	{},
 };
-#endif
 
 struct platform_driver pwm_plat_driver = {
 	.probe = mt_pwm_probe,
@@ -1815,22 +1810,14 @@ struct platform_driver pwm_plat_driver = {
 	.shutdown = mt_pwm_shutdown,
 	.driver = {
 		.name = "mt-pwm",
-#ifdef CONFIG_OF
 		.of_match_table = pwm_of_match,
-#endif
 	},
 };
 
 static int __init mt_pwm_init(void)
 {
 	int ret;
-#ifndef CONFIG_OF
-	ret = platform_device_register(&pwm_plat_dev);
-	if (ret < 0) {
-		PWMDBG("platform_device_register error\n");
-		goto out;
-	}
-#endif
+
 	ret = platform_driver_register(&pwm_plat_driver);
 	if (ret < 0) {
 		PWMDBG("platform_driver_register error\n");
@@ -1844,9 +1831,6 @@ out:
 
 static void __exit mt_pwm_exit(void)
 {
-#ifndef CONFIG_OF
-	platform_device_unregister(&pwm_plat_dev);
-#endif
 	platform_driver_unregister(&pwm_plat_driver);
 }
 

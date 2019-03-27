@@ -886,6 +886,7 @@ VOID qmMoveStaTxQueue(P_STA_RECORD_T prSrcStaRec, P_STA_RECORD_T prDstStaRec);
 *                              F U N C T I O N S
 ********************************************************************************
 */
+
 VOID qmHandleDelTspec(P_ADAPTER_T prAdapter, ENUM_NETWORK_TYPE_INDEX_T eNetType,
 	P_STA_RECORD_T prStaRec, ENUM_ACI_T eAci);
 

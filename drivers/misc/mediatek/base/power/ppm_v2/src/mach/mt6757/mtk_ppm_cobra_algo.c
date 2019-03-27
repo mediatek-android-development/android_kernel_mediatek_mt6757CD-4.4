@@ -25,6 +25,7 @@ struct ppm_cobra_data cobra_tbl;
 struct ppm_cobra_lookup cobra_lookup_data;
 
 static int Core_limit[NR_PPM_CLUSTERS] = {CORE_NUM_LL, CORE_NUM_L};
+static int cobra_init_done;
 #if PPM_COBRA_NEED_OPP_MAPPING
 static int freq_idx_mapping_tbl_fy[COBRA_OPP_NUM] = {0, 2, 4, 7, 9, 11, 13, 15};
 static int freq_idx_mapping_tbl_fy_r[DVFS_OPP_NUM] = {0, 1, 1, 2, 2, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
@@ -58,6 +59,7 @@ static int get_delta_pwr_LxLL(unsigned int L_core, unsigned int LL_core, unsigne
 		ppm_err("%s: Invalid input: L_core=%d, LL_core=%d, opp=%d\n",
 			__func__, L_core, LL_core, opp);
 		WARN_ON(1);
+		return 0;
 	}
 
 #if PPM_COBRA_RUNTIME_CALC_DELTA
@@ -100,11 +102,13 @@ void ppm_cobra_update_core_limit(unsigned int cluster, int limit)
 	if (cluster >= NR_PPM_CLUSTERS) {
 		ppm_err("%s: Invalid cluster id = %d\n", __func__, cluster);
 		WARN_ON(1);
+		return;
 	}
 
 	if (limit < 0 || limit > get_cluster_max_cpu_core(cluster)) {
 		ppm_err("%s: Invalid core limit for cluster%d = %d\n", __func__, cluster, limit);
 		WARN_ON(1);
+		return;
 	}
 
 	Core_limit[cluster] = limit;
@@ -133,7 +137,7 @@ void ppm_cobra_update_limit(enum ppm_power_state new_state, void *user_req)
 	struct ppm_cluster_status cl_status[NR_PPM_CLUSTERS];
 
 	/* skip if DVFS is not ready (we cannot get current freq...) */
-	if (!ppm_main_info.client_info[PPM_CLIENT_DVFS].limit_cb)
+	if (!ppm_main_info.client_info[PPM_CLIENT_DVFS].limit_cb || !cobra_init_done)
 		return;
 
 	if (!user_req)
@@ -411,8 +415,11 @@ void ppm_cobra_init(void)
 			int *perf_ref_tbl = ppm_get_perf_idx_ref_tbl(i/4);
 			unsigned char core = (i % 4) + 1;
 
-			if (!perf_ref_tbl)
+			if (!perf_ref_tbl) {
+				ppm_err("perf_ref_tbl is NULL!\n");
 				WARN_ON(1);
+				return;
+			}
 
 			cobra_tbl.basic_pwr_tbl[i][j].power_idx =
 				pwr_ref_tbl.pwr_idx_ref_tbl[i/4].core_total_power[j] * core +
@@ -496,7 +503,9 @@ void ppm_cobra_init(void)
 	}
 #endif
 
-	ppm_info("ET init done!\n");
+	cobra_init_done = 1;
+
+	ppm_info("COBRA init done!\n");
 }
 
 

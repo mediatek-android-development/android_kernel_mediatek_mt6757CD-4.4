@@ -28,13 +28,13 @@
 
 int __weak do_wlan_drv_init(int chip_id)
 {
-	WMT_DETECT_ERR_FUNC("Can not find wlan module for chip: %d !\n", chip_id);
+	WMT_DETECT_ERR_FUNC("wlan is not enabled on chip %04x!\n", chip_id);
 	return 0;
 }
 
 int __weak do_ant_drv_init(int chip_id)
 {
-	WMT_DETECT_DBG_FUNC("Chip: %d can not support ANT !\n", chip_id);
+	WMT_DETECT_DBG_FUNC("ANT is not enabled on chip %04x!\n", chip_id);
 	return 0;
 }
 
@@ -61,13 +61,11 @@ int do_connectivity_driver_init(int chip_id)
 	if (tmp_ret)
 		WMT_DETECT_ERR_FUNC("do common driver init failed, ret:%d\n", tmp_ret);
 
-        //[qinxiaosong start]
-	/*tmp_ret = do_fm_drv_init(chip_id);
+	tmp_ret = do_fm_drv_init(chip_id);
 	i_ret += tmp_ret;
 	if (tmp_ret)
 		WMT_DETECT_ERR_FUNC("do fm module init failed, ret:%d\n", tmp_ret);
-        */
-        //[qinxiaosong end]
+
 	tmp_ret = do_wlan_drv_init(chip_id);
 	i_ret += tmp_ret;
 	if (tmp_ret)

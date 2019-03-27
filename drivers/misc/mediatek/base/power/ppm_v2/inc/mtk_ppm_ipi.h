@@ -18,53 +18,55 @@
 #include "mtk_ppm_platform.h"
 
 
-#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
-#define PPM_PMCU_SUPPORT	(1)
-#endif
-
-#define OPT		(1) /* reserve for extensibility */
 #define PPM_D_LEN	(7) /* # of cmd + arg0 + arg1 + ... */
 
 /* IPI Msg type */
 enum {
 	PPM_IPI_INIT,
-	PPM_IPI_UPDATE_ACT_CORE,
 	PPM_IPI_UPDATE_LIMIT,
+	PPM_IPI_THERMAL_LIMIT_TEST,
+	PPM_IPI_PTPOD_TEST,
 
 	NR_PPM_IPI,
 };
 
 /* IPI Msg data structure */
 struct ppm_ipi_data {
-	unsigned char cmd;
-	unsigned char cluster_num;
+	/* 1 int for opcode */
+	unsigned int cmd;
+	/* 6 int for ipi data */
 	union {
 		struct {
 			unsigned int efuse_val;
-			unsigned int ratio;
+			unsigned int cobra_tbl_addr;
 			unsigned int dvfs_tbl_type;
 		} init;
-		unsigned char act_core[NR_PPM_CLUSTERS];
 		struct {
-			unsigned short min_pwr_bgt;
 			struct {
-				char min_cpufreq_idx;
-				char max_cpufreq_idx;
-				unsigned char min_cpu_core;
+				unsigned char min_cpufreq_idx;
+				unsigned char max_cpufreq_idx;
 				unsigned char max_cpu_core;
-
-				bool has_advise_freq;
-				char advise_cpufreq_idx;
+				unsigned char advise_cpufreq_idx;
 			} cluster_limit[NR_PPM_CLUSTERS];
 		} update_limit;
+		struct {
+			unsigned int budget;
+		} thermal_limit_test;
+		struct {
+			unsigned int activate;
+		} ptpod_test;
+		/* padding to 6 int */
+		struct {
+			unsigned int ppm_data[6];
+		};
 	} u;
 };
 
-#ifdef PPM_PMCU_SUPPORT
-extern void ppm_ipi_init(unsigned int efuse_val, unsigned int ratio);
-extern void ppm_ipi_update_act_core(struct ppm_cluster_status *cluster_status,
-					unsigned int cluster_num);
+#ifdef PPM_SSPM_SUPPORT
+extern void ppm_ipi_init(unsigned int efuse_val, unsigned int cobra_tbl_addr);
 extern void ppm_ipi_update_limit(struct ppm_client_req req);
+extern void ppm_ipi_thermal_limit_test(unsigned int budget);
+extern void ppm_ipi_ptpod_test(unsigned int activate);
 #endif
 
 #endif

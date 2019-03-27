@@ -195,6 +195,7 @@
 
 #if (CFG_SUPPORT_TDLS == 1)
 #include "tdls_extr.h"
+#include "tdls.h"
 #endif
 #include "debug.h"
 
@@ -382,6 +383,7 @@ struct FT_IES {
 	PUINT_8 pucIEBuf;
 	UINT_32 u4IeLength;
 };
+
 /*
 * type definition of pointer to p2p structure
 */
@@ -451,9 +453,6 @@ struct _GLUE_INFO_T {
 
 	/* Indicated media state */
 	ENUM_PARAM_MEDIA_STATE_T eParamMediaStateIndicated;
-
-	/* Device power state D0~D3 */
-	PARAM_DEVICE_POWER_STATE ePowerState;
 
 	struct completion rScanComp;	/* indicate scan complete */
 	struct completion rHaltComp;	/* indicate main thread halt complete */
@@ -572,6 +571,15 @@ struct _GLUE_INFO_T {
 	UINT_32 u4LinkSpeedCache;
 
 #if (CFG_SUPPORT_TDLS == 1)
+	/* record TX rate used to be a reference for TDLS setup */
+	ULONG ulLastUpdate;
+	/* The last one of STA_HASH_SIZE is used as target sta */
+	struct ksta_info *prStaHash[STA_HASH_SIZE + 1];
+	INT_32 i4TdlsLastRx;
+	INT_32 i4TdlsLastTx;
+	enum MTK_TDLS_STATUS eTdlsStatus;
+	ENUM_NETWORK_TYPE_INDEX_T eTdlsNetworkType;
+
 	TDLS_INFO_T rTdlsLink;
 
 	UINT8 aucTdlsHtPeerMac[6];
@@ -621,6 +629,12 @@ struct _GLUE_INFO_T {
 	struct cfg80211_ft_event_params rFtEventParam;
 	UINT_32 i4Priority;
 
+	enum ENUM_BUILD_VARIANT_E rBuildVarint;
+
+	/* FW Roaming */
+	/* store the FW roaming enable state which FWK determines */
+	/* if it's = 0, ignore the black/whitelists settings from FWK */
+	UINT_32 u4FWRoamingEnable;
 };
 
 typedef irqreturn_t(*PFN_WLANISR) (int irq, void *dev_id, struct pt_regs *regs);

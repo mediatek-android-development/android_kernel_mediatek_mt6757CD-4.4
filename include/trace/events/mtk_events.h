@@ -82,7 +82,7 @@ TRACE_EVENT(irq_entry,
 	),
 
 	TP_printk("irq=%d name=%s", __entry->irq, __get_str(name))
- );
+);
 
 TRACE_EVENT(irq_exit,
 
@@ -143,6 +143,53 @@ TRACE_EVENT(ppm_update,
 
 	TP_printk("(0x%x)(%d)(%d)%s", __entry->mask, __entry->budget,
 		__entry->root, __get_str(limits))
+);
+
+TRACE_EVENT(ppm_hica,
+
+	TP_PROTO(const char *cur_state,
+		 const char *target_state,
+		 long usage,
+		 long capacity,
+		 int big_tsk_L,
+		 int big_tsk_B,
+		 int heavy_tsk,
+		 int freq,
+		 int result),
+
+	TP_ARGS(cur_state, target_state, usage, capacity, big_tsk_L,
+		big_tsk_B, heavy_tsk, freq, result),
+
+	TP_STRUCT__entry(
+		__string(cur, cur_state)
+		__string(target, target_state)
+		__field(long, usage)
+		__field(long, capacity)
+		__field(int, big_tsk_L)
+		__field(int, big_tsk_B)
+		__field(int, heavy_tsk)
+		__field(int, freq)
+		__field(int, result)
+	),
+
+	TP_fast_assign(
+		__assign_str(cur, cur_state);
+		__assign_str(target, target_state);
+		__entry->usage = usage;
+		__entry->capacity = capacity;
+		__entry->big_tsk_L = big_tsk_L;
+		__entry->big_tsk_B = big_tsk_B;
+		__entry->heavy_tsk = heavy_tsk;
+		__entry->freq = freq;
+		__entry->result = result;
+	),
+
+	TP_printk("%s->%s(%s), usage=%ld, capacity=%ld, big_tsk=%d/%d, heavy_tsk=%d, freq=%d",
+		__get_str(cur), __get_str(target),
+		(__entry->result) ? "O" : "X",
+		__entry->usage, __entry->capacity,
+		__entry->big_tsk_L, __entry->big_tsk_B,
+		__entry->heavy_tsk, __entry->freq)
 );
 
 TRACE_EVENT(ppm_overutil_update,
@@ -248,6 +295,88 @@ TRACE_EVENT(hps_update,
 		__entry->cur_iowait, __get_str(hvytsk), __get_str(limit), __get_str(base),
 		__entry->up_avg, __entry->down_avg, __entry->tlp_avg, __entry->rush_cnt,
 		__get_str(target))
+);
+
+#if 0
+TRACE_EVENT(sched_update,
+
+	TP_PROTO(
+		unsigned int cpu_id,
+		unsigned int sched_info_cpu0,
+		unsigned int sched_info_cpu1,
+		unsigned int sched_info_cpu2,
+		unsigned int sched_info_cpu3
+	),
+
+	TP_ARGS(cpu_id, sched_info_cpu0, sched_info_cpu1,
+		sched_info_cpu2, sched_info_cpu3),
+
+	TP_STRUCT__entry(
+		__field(unsigned int, root_cpu)
+		__field(unsigned int, sched_info_0)
+		__field(unsigned int, sched_info_1)
+		__field(unsigned int, sched_info_2)
+		__field(unsigned int, sched_info_3)
+	),
+
+	TP_fast_assign(
+		__entry->root_cpu = cpu_id;
+		__entry->sched_info_0 = sched_info_cpu0;
+		__entry->sched_info_1 = sched_info_cpu1;
+		__entry->sched_info_2 = sched_info_cpu2;
+		__entry->sched_info_3 = sched_info_cpu3;
+	),
+
+	TP_printk("(%d)(0x%x)(0x%x)(0x%x)(0x%x)", __entry->root_cpu, __entry->sched_info_0,
+		__entry->sched_info_1, __entry->sched_info_2, __entry->sched_info_3)
+);
+#else
+TRACE_EVENT(sched_update,
+
+	TP_PROTO(
+		unsigned int cluster,
+		unsigned int sched_info_cluster
+	),
+
+	TP_ARGS(cluster, sched_info_cluster),
+
+	TP_STRUCT__entry(
+		__field(unsigned int, cluster_id)
+		__field(unsigned int, sched_info)
+	),
+
+	TP_fast_assign(
+		__entry->cluster_id = cluster;
+		__entry->sched_info = sched_info_cluster;
+	),
+
+	TP_printk("(%d)(0x%x)", __entry->cluster_id, __entry->sched_info)
+);
+#endif
+
+TRACE_EVENT(sspm_ipi,
+
+	TP_PROTO(
+		int start,
+		int ipi_id,
+		int ipi_opt
+	),
+
+	TP_ARGS(start, ipi_id, ipi_opt),
+
+	TP_STRUCT__entry(
+		__field(int, start)
+		__field(int, ipi_id)
+		__field(int, ipi_opt)
+	),
+
+	TP_fast_assign(
+		__entry->start = start;
+		__entry->ipi_id = ipi_id;
+		__entry->ipi_opt = ipi_opt;
+	),
+
+	TP_printk("start=%d, id=%d, opt=%d", __entry->start, __entry->ipi_id, __entry->ipi_opt)
 );
 
 #endif /* _TRACE_MTK_EVENTS_H */

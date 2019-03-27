@@ -254,7 +254,8 @@ VOID StatsEnvTxTime2Hif(IN P_ADAPTER_T prAdapter, IN P_MSDU_INFO_T prMsduInfo)
 	}
 }
 
-static VOID statsParsePktInfo(PUINT_8 pucPkt, struct sk_buff *skb, UINT_8 status, UINT_8 eventType)
+static VOID
+statsParsePktInfo(P_ADAPTER_T prAdapter, PUINT_8 pucPkt, struct sk_buff *skb, UINT_8 status, UINT_8 eventType)
 {
 	/* get ethernet protocol */
 	UINT_16 u2EtherType = (pucPkt[ETH_TYPE_LEN_OFFSET] << 8) | (pucPkt[ETH_TYPE_LEN_OFFSET + 1]);
@@ -357,10 +358,62 @@ static VOID statsParsePktInfo(PUINT_8 pucPkt, struct sk_buff *skb, UINT_8 status
 		}
 		break;
 	}
+	case ETH_P_IPV6:
+	{
+		UINT_8 ucIpv6Proto = pucEthBody[IPV6_HDR_LEN]; /* IPv6 header without options */
+		UINT_8 ucIpVersion = (pucEthBody[0] & IPVH_VERSION_MASK) >> IPVH_VERSION_OFFSET;
+
+		if (ucIpVersion != IP_VERSION_6)
+			break;
+		switch (ucIpv6Proto) {
+		case ICMPV6_TYPE_ROUTER_SOLICITATION:
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG(RX, INFO, "<RX><IPv6> Router Solicitation\n");
+				break;
+			case EVENT_TX:
+				DBGLOG(TX, INFO, "<TX><IPv6> Router Solicitation\n");
+				break;
+			}
+			break;
+		case ICMPV6_TYPE_ROUTER_ADVERTISEMENT:
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG(RX, INFO, "<RX><IPv6> Router Advertisement\n");
+				break;
+			case EVENT_TX:
+				DBGLOG(TX, INFO, "<TX><IPv6> Router Advertisement\n");
+				break;
+			}
+			break;
+		case ICMPV6_TYPE_NEIGHBOR_SOLICITATION:
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG_LIMITED(RX, INFO, "<RX><IPv6> Neighbor Solicitation\n");
+				break;
+			case EVENT_TX:
+				DBGLOG_LIMITED(TX, INFO, "<TX><IPv6> Neighbor Solicitation\n");
+				break;
+			}
+			break;
+		case ICMPV6_TYPE_NEIGHBOR_ADVERTISEMENT:
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG_LIMITED(RX, INFO, "<RX><IPv6> Neighbor Advertisement\n");
+				break;
+			case EVENT_TX:
+				DBGLOG_LIMITED(TX, INFO, "<TX><IPv6> Neighbor Advertisement\n");
+				break;
+			}
+			break;
+		}
+		break;
+	}
 	case ETH_P_1X:
 	{
 		PUINT_8 pucEapol = pucEthBody;
 		UINT_8 ucEapolType = pucEapol[1];
+		UINT_8 ucAisBssIndex;
 
 		switch (ucEapolType) {
 		case 0: /* eap packet */
@@ -368,6 +421,15 @@ static VOID statsParsePktInfo(PUINT_8 pucPkt, struct sk_buff *skb, UINT_8 status
 			case EVENT_RX:
 				DBGLOG(RX, INFO, "<RX> EAP Packet: code %d, id %d, type %d\n",
 						pucEapol[4], pucEapol[5], pucEapol[7]);
+				if (pucEapol[4] != 0x4)
+					break;
+				ucAisBssIndex = prAdapter->prAisBssInfo->ucBssIndex;
+				if (GLUE_GET_PKT_BSS_IDX(skb) == ucAisBssIndex)
+					break;
+				DBGLOG(RX, INFO, "<RX> P2P:WSC: EAP-FAILURE: code %d, id %d, type %d\n",
+					pucEapol[4], pucEapol[5], pucEapol[7]);
+				prAdapter->prP2pInfo->fgWaitEapFailure = FALSE;
+
 				break;
 			case EVENT_TX:
 				DBGLOG(TX, INFO, "<TX> EAP Packet: code %d, id %d, type %d\n",
@@ -444,7 +506,7 @@ static VOID statsParsePktInfo(PUINT_8 pucPkt, struct sk_buff *skb, UINT_8 status
 * \retval None
 */
 /*----------------------------------------------------------------------------*/
-VOID StatsRxPktInfoDisplay(P_SW_RFB_T prSwRfb)
+VOID StatsRxPktInfoDisplay(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb)
 {
 	PUINT_8 pPkt = NULL;
 	struct sk_buff *skb = NULL;
@@ -460,7 +522,7 @@ VOID StatsRxPktInfoDisplay(P_SW_RFB_T prSwRfb)
 	if (!skb)
 		return;
 
-	statsParsePktInfo(pPkt, skb, 0, EVENT_RX);
+	statsParsePktInfo(prAdapter, pPkt, skb, 0, EVENT_RX);
 }
 
 /*----------------------------------------------------------------------------*/
@@ -477,8 +539,7 @@ VOID StatsTxPktInfoDisplay(UINT_8 *pPkt)
 	UINT_16 u2EtherTypeLen;
 
 	u2EtherTypeLen = (pPkt[ETH_TYPE_LEN_OFFSET] << 8) | (pPkt[ETH_TYPE_LEN_OFFSET + 1]);
-	statsParsePktInfo(pPkt, NULL, 0, EVENT_TX);
-
+	statsParsePktInfo(NULL, pPkt, NULL, 0, EVENT_TX);
 }
 
 #endif /* CFG_SUPPORT_STATISTICS */

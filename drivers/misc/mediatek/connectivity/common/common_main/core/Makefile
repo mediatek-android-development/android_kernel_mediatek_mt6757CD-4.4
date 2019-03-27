@@ -2,11 +2,11 @@ ifeq ($(CONFIG_MTK_COMBO),y)
 
 ccflags-y += \
 	-I$(src)/../linux/include \
+	-I$(src)/../platform/include \
 	-I$(src)/../core/include \
 	-I$(src)/../include \
 	-I$(src)/../../common_detect \
 	-I$(srctree)/drivers/misc/mediatek/btif/common/inc \
-	-I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM) \
 
 obj-y += wmt_core.o wmt_ctrl.o  wmt_func.o  wmt_lib.o wmt_conf.o wmt_exp.o
 obj-y	+= wmt_ic_6620.o

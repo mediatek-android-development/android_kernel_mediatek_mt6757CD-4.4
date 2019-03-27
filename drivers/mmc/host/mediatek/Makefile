@@ -24,6 +24,10 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/$(MTK_PLATFORM)
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/base/power/include
 #obj-$(CONFIG_MMC_MTK_PRO) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
 
+ifeq ($(CONFIG_MTK_HW_FDE_AES),y)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/fde_aes/$(MTK_PLATFORM)
+endif
+
 ifeq ($(CONFIG_TRUSTONIC_TEE_SUPPORT),y)
 include $(srctree)/drivers/misc/mediatek/gud/Makefile.include
 ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/rpmb/drrpmb/public
@@ -34,24 +38,44 @@ endif
 ccflags-y += -I$(srctree)
 #workaround for include mmc/card/queue.h and mmc/core/core.h
 ccflags-y += -I$(srctree)/drivers
+
+
+ifeq ($(CONFIG_MTK_PLATFORM), "mt6739")
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA/mt6739
+obj-$(CONFIG_MMC_MTK_PRO) += ComboA/
+
+else ifeq ($(CONFIG_MTK_PLATFORM), "mt6799")
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA/mt6799
+obj-$(CONFIG_MMC_MTK_PRO) += ComboA/
+
+else ifeq ($(CONFIG_MTK_PLATFORM), "mt6763")
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/ComboA/mt6763
+obj-$(CONFIG_MMC_MTK_PRO) += mt6763/
+
+else ifeq ($(CONFIG_MTK_PLATFORM), "mt6757")
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6757
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6757/mt6757
+obj-$(CONFIG_MMC_MTK_PRO) += mt6757/
+
+else ifeq ($(CONFIG_MTK_PLATFORM), "mt6758")
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6758
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6758/mt6758
+obj-$(CONFIG_MMC_MTK_PRO) += mt6758/
+
+else ifeq ($(CONFIG_MTK_PLATFORM), "mt6759")
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6759
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6759/mt6759
+obj-$(CONFIG_MMC_MTK_PRO) += mt6759/
+
+else ifeq ($(CONFIG_MTK_PLATFORM), "mt3886")
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt3886
+ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt3886/mt3886
+obj-$(CONFIG_MMC_MTK_PRO) += mt3886/
+
+else
 ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/$(MTK_PLATFORM)
-
-ifeq ($(CONFIG_MTK_PLATFORM), "mt6757")
-ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6757
-ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6757/$(MTK_PLATFORM)
-obj-$(CONFIG_MMC_MTK_PRO) += mt6757/
+obj-$(CONFIG_MMC_MTK_PRO) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
 endif
-
-ifeq ($(CONFIG_MTK_PLATFORM), "mt6798")
-ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6798
-ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6798/$(MTK_PLATFORM)
-obj-$(CONFIG_MMC_MTK_PRO) += mt6798/
-endif
-
-ifeq ($(CONFIG_MTK_PLATFORM), "kiboplus")
-ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6757
-ccflags-y += -I$(srctree)/drivers/mmc/host/mediatek/mt6757/$(MTK_PLATFORM)
-obj-$(CONFIG_MMC_MTK_PRO) += mt6757/
-endif
-
-obj-$(CONFIG_MMC_MTK_PRO) += emmc_rpmb.o

@@ -39,11 +39,6 @@ int __attribute__((weak)) soidle_enter(int cpu)
 	return 1;
 }
 
-int __attribute__((weak)) mcsodi_enter(int cpu)
-{
-	return 1;
-}
-
 int __attribute__((weak)) mcidle_enter(int cpu)
 {
 	return 1;
@@ -75,12 +70,6 @@ static int mtk_soidle_enter(struct cpuidle_device *dev,
 			      struct cpuidle_driver *drv, int index)
 {
 	return soidle_enter(smp_processor_id());
-}
-
-static int mtk_mcsodi_enter(struct cpuidle_device *dev,
-			      struct cpuidle_driver *drv, int index)
-{
-	return mcsodi_enter(smp_processor_id());
 }
 
 static int mtk_mcidle_enter(struct cpuidle_device *dev,
@@ -135,16 +124,6 @@ static struct cpuidle_driver mt67xx_v2_cpuidle_driver = {
 		.desc             = "SODI",
 	},
 	.states[3] = {
-		.enter            = mtk_mcsodi_enter,
-		.exit_latency     = 2000,            /* 2 ms */
-		.target_residency = 1,
-#ifdef USING_TICK_BROADCAST
-		.flags            = CPUIDLE_FLAG_TIMER_STOP,
-#endif
-		.name             = "MCSODI",
-		.desc             = "MCSODI",
-	},
-	.states[4] = {
 		.enter            = mtk_mcidle_enter,
 		.exit_latency     = 2000,            /* 2 ms */
 		.target_residency = 1,
@@ -154,21 +133,21 @@ static struct cpuidle_driver mt67xx_v2_cpuidle_driver = {
 		.name             = "MCDI",
 		.desc             = "MCDI",
 	},
-	.states[5] = {
+	.states[4] = {
 		.enter            = mtk_slidle_enter,
 		.exit_latency     = 2000,            /* 2 ms */
 		.target_residency = 1,
 		.name             = "slidle",
 		.desc             = "slidle",
 	},
-	.states[6] = {
+	.states[5] = {
 		.enter            = mtk_rgidle_enter,
 		.exit_latency     = 2000,            /* 2 ms */
 		.target_residency = 1,
 		.name             = "rgidle",
 		.desc             = "WFI",
 	},
-	.state_count = 7,
+	.state_count = 6,
 	.safe_state_index = 0,
 };
 

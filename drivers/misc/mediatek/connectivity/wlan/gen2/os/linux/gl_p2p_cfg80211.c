@@ -525,16 +525,10 @@ int mtk_p2p_cfg80211_set_power_mgmt(struct wiphy *wiphy, struct net_device *dev,
 
 	ASSERT(wiphy);
 
-    /* [yangqing start] Add support for smart power save mode */
-	if (enabled) {
-		if (timeout == -1)
-			value = Param_PowerModeFast_PSP;
-		else
-			value = Param_PowerModeMAX_PSP;
-	} else {
-		value = Param_PowerModeCAM;
-	}
-    /* [yangqing end] */
+	if (enabled)
+		value = 2;
+	else
+		value = 0;
 	prGlueInfo = *((P_GLUE_INFO_T *) wiphy_priv(wiphy));
 	DBGLOG(P2P, INFO, "mtk_p2p_cfg80211_set_power_mgmt ps=%d.\n", enabled);
 
@@ -621,7 +615,7 @@ int mtk_p2p_cfg80211_start_ap(struct wiphy *wiphy, struct net_device *dev, struc
 
 		COPY_SSID(prP2pStartAPMsg->aucSsid, prP2pStartAPMsg->u2SsidLen, settings->ssid, settings->ssid_len);
 
-		prP2pStartAPMsg->eHiddenSsidType = settings->hidden_ssid;
+		prP2pStartAPMsg->ucHiddenSsidType = settings->hidden_ssid;
 
 		prP2pStartAPMsg->fgIsPrivacy = settings->privacy;
 
@@ -810,7 +804,7 @@ int mtk_p2p_cfg80211_remain_on_channel(struct wiphy *wiphy,
 			break;
 		}
 
-		DBGLOG(P2P, INFO, "mtk_p2p_cfg80211_remain_on_channel\n");
+		DBGLOG(P2P, INFO, "mtk_p2p_cfg80211_remain_on_channel, cookie: 0x%llx\n", *cookie);
 
 		prChnlReqMsg->rMsgHdr.eMsgId = MID_MNY_P2P_CHNL_REQ;
 		prChnlReqMsg->u8Cookie = *cookie;
@@ -878,7 +872,7 @@ int mtk_p2p_cfg80211_cancel_remain_on_channel(struct wiphy *wiphy,
 			break;
 		}
 
-		DBGLOG(P2P, INFO, "mtk_p2p_cfg80211_cancel_remain_on_channel\n");
+		DBGLOG(P2P, INFO, "mtk_p2p_cfg80211_cancel_remain_on_channel, cookie: 0x%llx\n", cookie);
 
 		prMsgChnlAbort->rMsgHdr.eMsgId = MID_MNY_P2P_CHNL_ABORT;
 		prMsgChnlAbort->u8Cookie = cookie;
@@ -982,11 +976,14 @@ int mtk_p2p_cfg80211_mgmt_tx(struct wiphy *wiphy,
 				*cookie);
 
 			/* Indicate mgmt_tx status return. */
-			if ((prMsgTxReq != NULL) && (prMsgTxReq->prMgmtMsduInfo != NULL)) {
-				kalP2PIndicateMgmtTxStatus(prGlueInfo,
-							   *cookie,
-							   false,
-							   prMgmtFrame->prPacket, (UINT_32) prMgmtFrame->u2FrameLength);
+			if (prMgmtFrame != NULL) {
+				if (prMgmtFrame->prPacket != NULL) {
+					kalP2PIndicateMgmtTxStatus(prGlueInfo,
+								   *cookie,
+								   false,
+								   prMgmtFrame->prPacket,
+								   (UINT_32) prMgmtFrame->u2FrameLength);
+				}
 			}
 			/*dump mailbox info from FW*/
 			HAL_MCR_RD(prGlueInfo->prAdapter, MCR_D2HRM2R, &u4NextRegValue);
@@ -1017,7 +1014,8 @@ int mtk_p2p_cfg80211_change_bss(struct wiphy *wiphy, struct net_device *dev, str
 
 	prGlueInfo = *((P_GLUE_INFO_T *) wiphy_priv(wiphy));
 
-	DBGLOG(P2P, INFO, "--> %s()\n", __func__);
+	DBGLOG(P2P, INFO, "--> %s() CTS:%d,ShortPramble:%d\n"
+		, __func__, params->use_cts_prot, params->use_short_preamble);
 
 	switch (params->use_cts_prot) {
 	case -1:
@@ -1101,7 +1099,10 @@ int mtk_p2p_cfg80211_del_station(struct wiphy *wiphy, struct net_device *dev, st
 
 		prDisconnectMsg->rMsgHdr.eMsgId = MID_MNY_P2P_CONNECTION_ABORT;
 		COPY_MAC_ADDR(prDisconnectMsg->aucTargetID, mac);
-		prDisconnectMsg->u2ReasonCode = REASON_CODE_DEAUTH_LEAVING_BSS;
+		if (params->reason_code == 0)
+			prDisconnectMsg->u2ReasonCode = REASON_CODE_DEAUTH_LEAVING_BSS;
+		else
+			prDisconnectMsg->u2ReasonCode = params->reason_code;
 		prDisconnectMsg->fgSendDeauth = TRUE;
 
 		DBGLOG(P2P, INFO, "mtk_p2p_cfg80211_del_station ReasonCode = %d\n", prDisconnectMsg->u2ReasonCode);
@@ -1893,7 +1894,7 @@ int mtk_p2p_cfg80211_testmode_get_best_channel(IN struct wiphy *wiphy, IN void *
 	RF_CHANNEL_INFO_T aucChannelList[MAX_2G_BAND_CHN_NUM];
 	UINT_8 ucNumOfChannel, i, ucIdx;
 	UINT_16 u2APNumScore = 0, u2UpThreshold = 0, u2LowThreshold = 0, ucInnerIdx = 0;
-	UINT_32 u4BufLen, u4LteSafeChnBitMask_2G = 0;
+	UINT_32 u4BufLen, u4LteSafeChnBitMask_2G = 0x7FFE;
 	UINT_32 u4AcsChnReport[5];
 
 	P_PARAM_GET_CHN_INFO prGetChnLoad, prQueryLteChn;
@@ -2002,6 +2003,11 @@ int mtk_p2p_cfg80211_testmode_get_best_channel(IN struct wiphy *wiphy, IN void *
 
 		kalMemFree(prQueryLteChn, VIR_MEM_TYPE, sizeof(PARAM_GET_CHN_INFO));
 	}
+
+#if CFG_TC10_FEATURE
+	/* Restrict 2.4G band channel selection range to 1~11 per customer's request */
+	u4LteSafeChnBitMask_2G &= 0x0FFE;
+#endif
 
 	/* 4. Find out the best channel, skip LTE unsafe channels */
 	for (i = 0; i < ucNumOfChannel; i++) {

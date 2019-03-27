@@ -1156,9 +1156,11 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 		in6_dev->if_flags |= IF_RA_RCVD;
 	}
 
+#ifdef CONFIG_MTK_IPV6_VZW_REQ6378
 	/*add for VzW feature : remove IF_RS_VZW_SENT flag*/
 	if (in6_dev->if_flags & IF_RS_VZW_SENT)
 		in6_dev->if_flags &= ~IF_RS_VZW_SENT;
+#endif
 	/*
 	 * Remember the managed/otherconf flags from most recently
 	 * received RA message (RFC 2462) -- yoshfuji
@@ -1262,7 +1264,6 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 				__func__, rt, lifetime);
 		}
 	}
-
 	if (in6_dev->cnf.accept_ra_min_hop_limit < 256 &&
 	    ra_msg->icmph.icmp6_hop_limit) {
 		if (in6_dev->cnf.accept_ra_min_hop_limit <= ra_msg->icmph.icmp6_hop_limit) {
@@ -1376,6 +1377,8 @@ skip_linkparms:
 			if (ri->prefix_len == 0 &&
 			    !in6_dev->cnf.accept_ra_defrtr)
 				continue;
+			if (ri->prefix_len < in6_dev->cnf.accept_ra_rt_info_min_plen)
+				continue;
 			if (ri->prefix_len > in6_dev->cnf.accept_ra_rt_info_max_plen)
 				continue;
 			rt6_route_rcv(skb->dev, (u8 *)p, (p->nd_opt_len) << 3,
@@ -1427,11 +1430,11 @@ skip_routeinfo:
 	}
 
 	if (in6_dev->if_flags & IF_RA_OTHERCONF) {
-		pr_debug("receive RA with o bit!\n");
+		pr_info("[mtk_net]receive RA with o bit!\n");
 		in6_dev->cnf.ra_info_flag = 1;
 	}
 	if (in6_dev->if_flags & IF_RA_MANAGED) {
-		pr_debug("receive RA with m bit!\n");
+		pr_info("[mtk_net]receive RA with m bit!\n");
 		in6_dev->cnf.ra_info_flag = 2;
 	}
 
@@ -1443,8 +1446,8 @@ skip_routeinfo:
 			ndisc_ra_useropt(skb, p);
 
 			/* only clear ra_info_flag when O bit is set */
-			 if (p->nd_opt_type == ND_OPT_RDNSS && in6_dev->if_flags & IF_RA_OTHERCONF) {
-				pr_debug("RDNSS, ignore RA with o bit!\n");
+			 if ((p->nd_opt_type == ND_OPT_RDNSS) && (in6_dev->cnf.ra_info_flag == 1)) {
+				pr_info("[mtk_net]RDNSS, ignore RA with o bit!\n");
 				in6_dev->cnf.ra_info_flag = 0;
 			}
 

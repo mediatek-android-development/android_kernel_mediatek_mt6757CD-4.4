@@ -146,7 +146,7 @@ void msdc_set_bad_card_and_remove(struct msdc_host *host)
 		ERR_MSG("Cannot get gpio %d level", cd_gpio);
 #else
 		if (!(host->mmc->caps & MMC_CAP_NONREMOVABLE)) {
-			ERR_MSG("Schedule mmc_rescan");
+			ERR_MSG("Schedule remove card");
 			mmc_detect_change(host->mmc, msecs_to_jiffies(200));
 		} else
 #endif
@@ -276,15 +276,15 @@ int sdcard_reset_tuning(struct mmc_host *mmc)
 		} else {
 			remove_cap = "none";
 		}
-		pr_err("msdc%d: remove %s mode then reinit card\n", host->id,
+		pr_info("msdc%d: remove %s mode then reinit card\n", host->id,
 			remove_cap);
 	} else if (mmc_card_hs(mmc->card)) {
 		if (mmc->card->sw_caps.hs_max_dtr >= HIGH_SPEED_MAX_DTR / 4)
 			mmc->card->sw_caps.hs_max_dtr /= 2;
-		pr_err("msdc%d: set hs speed %dhz then reinit card\n", host->id,
+		pr_info("msdc%d: set hs speed %dhz then reinit card\n", host->id,
 			mmc->card->sw_caps.hs_max_dtr);
 	} else {
-		pr_err("msdc%d: ds card just reinit card\n", host->id);
+		pr_info("msdc%d: ds card just reinit card\n", host->id);
 	}
 
 	mmc->ios.timing = MMC_TIMING_LEGACY;
@@ -295,11 +295,11 @@ int sdcard_reset_tuning(struct mmc_host *mmc)
 	if (ret) {
 		if (++host->power_cycle_cnt > 3)
 			host->block_bad_card = 1;
-		pr_err("msdc%d power reset (%d) failed, block_bad_card = %d\n",
+		pr_info("msdc%d power reset (%d) failed, block_bad_card = %d\n",
 			host->id, host->power_cycle_cnt, host->block_bad_card);
 	} else {
 		host->power_cycle_cnt = 0;
-		pr_err("msdc%d power reset success\n", host->id);
+		pr_info("msdc%d power reset success\n", host->id);
 	}
 	return ret;
 }

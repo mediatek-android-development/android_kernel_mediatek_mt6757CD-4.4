@@ -80,7 +80,7 @@ int tscpu_bank_ts[THERMAL_BANK_NUM][TS_ENUM_MAX];
 int tscpu_bank_ts_r[THERMAL_BANK_NUM][TS_ENUM_MAX];
 
 /* chip dependent */
-bank_t tscpu_g_bank[THERMAL_BANK_NUM] = {
+struct bank_t tscpu_g_bank[THERMAL_BANK_NUM] = {
 	[0] = {
 	       .ts = {TS_FILL(TS_MCU1)},
 	       .ts_number = 1},
@@ -151,7 +151,7 @@ int tscpu_polling_factor2 = 4;
 */
 int fast_polling_trip_temp = 60000;
 int fast_polling_trip_temp_high = 60000; /* deprecaed */
-int fast_polling_factor = 4;
+int fast_polling_factor = 2;
 int tscpu_cur_fp_factor = 1;
 int tscpu_next_fp_factor = 1;
 #endif
@@ -166,7 +166,7 @@ int tscpu_prev_cpu_temp = 0, tscpu_prev_gpu_temp = 0;
 int tscpu_curr_cpu_temp = 0, tscpu_curr_gpu_temp = 0;
 #endif
 
-thermal_bank_name g_currentBank = THERMAL_BANK0;
+enum thermal_bank_name g_currentBank = THERMAL_BANK0;
 
 static int tscpu_curr_max_ts_temp;
 
@@ -174,8 +174,8 @@ static int tscpu_curr_max_ts_temp;
  * Local function declartation
  *=============================================================
  */
-static __s32 temperature_to_raw_room(__u32 ret, ts_e ts_name);
-static void set_tc_trigger_hw_protect(int temperature, int temperature2, thermal_bank_name bank);
+static __s32 temperature_to_raw_room(__u32 ret, enum thermal_sensor ts_name);
+static void set_tc_trigger_hw_protect(int temperature, int temperature2, enum thermal_bank_name bank);
 /*=============================================================
  *Weak functions
  *=============================================================
@@ -255,7 +255,7 @@ int tscpu_thermal_clock_off(void)
 }
 
 /* TODO: FIXME */
-void get_thermal_slope_intercept(struct TS_PTPOD *ts_info, thermal_bank_name ts_bank)
+void get_thermal_slope_intercept(struct TS_PTPOD *ts_info, enum thermal_bank_name ts_bank)
 {
 	unsigned int temp0, temp1, temp2;
 	struct TS_PTPOD ts_ptpod;
@@ -415,42 +415,19 @@ void tscpu_thermal_cal_prepare(void)
 
 	/*
 	*   chip dependent
-	*   ADC_GE_T    [9:0] *(0x10206184)[31:22]
-	*   ADC_OE_T    [9:0] *(0x10206184)[21:12]
 	*/
 	g_adc_ge_t = ((temp0 & _BITMASK_(31:22)) >> 22);
 	g_adc_oe_t = ((temp0 & _BITMASK_(21:12)) >> 12);
-
-	/*
-	*   O_VTSMCU1    (9b) *(0x10206180)[25:17]
-	*   O_VTSMCU2    (9b) *(0x10206180)[16:8]
-	*   O_VTSMCU3    (9b) *(0x10206184)[8:0]
-	*   O_VTSMCU4    (9b) *(0x10206188)[31:23]
-	*   O_VTSMCU5    (9b) *(0x10206188)[13:5]
-	*   O_VTSABB     (9b) *(0x10206188)[22:14]
-	*/
 	g_o_vtsmcu1 = ((temp1 & _BITMASK_(25:17)) >> 17);
 	g_o_vtsmcu2 = ((temp1 & _BITMASK_(16:8)) >> 8);
 	g_o_vtsmcu3 = (temp0 & _BITMASK_(8:0));
 	g_o_vtsmcu4 = ((temp2 & _BITMASK_(31:23)) >> 23);
 	g_o_vtsmcu5 = ((temp2 & _BITMASK_(13:5)) >> 5);
 	g_o_vtsabb = ((temp2 & _BITMASK_(22:14)) >> 14);
-
-	/*
-	*   DEGC_cali    (6b) *(0x10206180)[6:1]
-	*   ADC_CALI_EN_T(1b) *(0x10206180)[0]
-	*/
 	g_degc_cali = ((temp1 & _BITMASK_(6:1)) >> 1);
 	g_adc_cali_en_t = (temp1 & _BIT_(0));
-
-	/*
-	*   O_SLOPE_SIGN (1b) *(0x10206180)[7]
-	*   O_SLOPE      (6b) *(0x10206180)[31:26]
-	*/
 	g_o_slope_sign = ((temp1 & _BIT_(7)) >> 7);
 	g_o_slope = ((temp1 & _BITMASK_(31:26)) >> 26);
-
-	/*ID           (1b) *(0x10206184)[9] */
 	g_id = ((temp0 & _BIT_(9)) >> 9);
 
 	/*
@@ -521,7 +498,7 @@ void tscpu_thermal_cal_prepare_2(__u32 ret)
 }
 
 #if THERMAL_CONTROLLER_HW_TP
-static __s32 temperature_to_raw_room(__u32 ret, ts_e ts_name)
+static __s32 temperature_to_raw_room(__u32 ret, enum thermal_sensor ts_name)
 {
 	/* Ycurr = [(Tcurr - DEGC_cali/2)*(1528+O_slope*10)/10*(18/15)*(1/10000)+X_roomtabb]*Gain*4096 + OE */
 
@@ -553,7 +530,7 @@ static __s32 temperature_to_raw_room(__u32 ret, ts_e ts_name)
 }
 #endif
 
-static __s32 raw_to_temperature_roomt(__u32 ret, ts_e ts_name)
+static __s32 raw_to_temperature_roomt(__u32 ret, enum thermal_sensor ts_name)
 {
 	__s32 t_current = 0;
 	__s32 y_curr = ret;
@@ -887,11 +864,11 @@ static void thermal_reset_and_initial(void)
 /**
  *  temperature2 to set the middle threshold for interrupting CPU. -275000 to disable it.
  */
-static void set_tc_trigger_hw_protect(int temperature, int temperature2, thermal_bank_name bank)
+static void set_tc_trigger_hw_protect(int temperature, int temperature2, enum thermal_bank_name bank)
 {
 	int temp = 0;
 	int raw_high;
-	ts_e ts_name;
+	enum thermal_sensor ts_name;
 
 	/* temperature2=80000;  test only */
 	tscpu_dprintk("set_tc_trigger_hw_protect t1=%d t2=%d\n", temperature, temperature2);
@@ -914,30 +891,22 @@ static void set_tc_trigger_hw_protect(int temperature, int temperature2, thermal
 }
 
 
-static int read_tc_raw_and_temp(volatile u32 *tempmsr_name, ts_e ts_name,
+static int read_tc_raw_and_temp(u32 *tempmsr_name, enum thermal_sensor ts_name,
 				int *ts_raw)
 {
 	int temp = 0, raw = 0;
 
-	raw = (tempmsr_name != 0) ? (readl((tempmsr_name)) & 0x0fff) : 0;
+	raw = (tempmsr_name != 0) ? (readl(tempmsr_name) & 0x0fff) : 0;
 	temp = (tempmsr_name != 0) ? raw_to_temperature_roomt(raw, ts_name) : 0;
 
 	*ts_raw = raw;
 	tscpu_dprintk("read_tc_raw_temp,ts_raw=%d,temp=%d\n", *ts_raw, temp * 100);
 
-	/*fake temperature for testing*/
-	if ((tscpu_fake_temp_enable == 1) && (tscpu_fake_temp != 0x7FFFFFFF)) {
-		/*printk_ratelimited(TSCPU_LOG_TAG "tscpu_fake_temp=%d enable=%d\n",
-		*	tscpu_fake_temp, tscpu_fake_temp_enable);
-		*/
-		return tscpu_fake_temp;
-	}
-
 	return temp * 100;
 }
 
 
-void tscpu_thermal_read_bank_temp(thermal_bank_name bank, ts_e type, int order)
+void tscpu_thermal_read_bank_temp(enum thermal_bank_name bank, enum thermal_sensor type, int order)
 {
 
 	tscpu_dprintk("%s bank %d type %d order %d\n", __func__, bank, type, order);
@@ -945,7 +914,7 @@ void tscpu_thermal_read_bank_temp(thermal_bank_name bank, ts_e type, int order)
 	switch (order) {
 	case 0:
 		tscpu_bank_ts[bank][type] =
-		    read_tc_raw_and_temp((volatile u32 *)TEMPMSR0, type,
+		    read_tc_raw_and_temp(TEMPMSR0, type,
 					 &tscpu_bank_ts_r[bank][type]);
 		tscpu_dprintk("%s order %d bank %d type %d tscpu_bank_ts %d tscpu_bank_ts_r %d\n",
 			      __func__, order, bank, type, tscpu_bank_ts[bank][type],
@@ -953,7 +922,7 @@ void tscpu_thermal_read_bank_temp(thermal_bank_name bank, ts_e type, int order)
 		break;
 	case 1:
 		tscpu_bank_ts[bank][type] =
-		    read_tc_raw_and_temp((volatile u32 *)TEMPMSR1, type,
+		    read_tc_raw_and_temp(TEMPMSR1, type,
 					 &tscpu_bank_ts_r[bank][type]);
 		tscpu_dprintk("%s order %d bank %d type %d tscpu_bank_ts %d tscpu_bank_ts_r %d\n",
 			      __func__, order, bank, type, tscpu_bank_ts[bank][type],
@@ -961,7 +930,7 @@ void tscpu_thermal_read_bank_temp(thermal_bank_name bank, ts_e type, int order)
 		break;
 	case 2:
 		tscpu_bank_ts[bank][type] =
-		    read_tc_raw_and_temp((volatile u32 *)TEMPMSR2, type,
+		    read_tc_raw_and_temp(TEMPMSR2, type,
 					 &tscpu_bank_ts_r[bank][type]);
 		tscpu_dprintk("%s order %d bank %d type %d tscpu_bank_ts %d tscpu_bank_ts_r %d\n",
 			      __func__, order, bank, type, tscpu_bank_ts[bank][type],
@@ -969,7 +938,7 @@ void tscpu_thermal_read_bank_temp(thermal_bank_name bank, ts_e type, int order)
 		break;
 	case 3:
 		tscpu_bank_ts[bank][type] =
-		    read_tc_raw_and_temp((volatile u32 *)TEMPMSR3, type,
+		    read_tc_raw_and_temp(TEMPMSR3, type,
 					 &tscpu_bank_ts_r[bank][type]);
 		tscpu_dprintk("%s order %d bank %d type %d tscpu_bank_ts %d tscpu_bank_ts_r %d\n",
 			      __func__, order, bank, type, tscpu_bank_ts[bank][type],
@@ -977,7 +946,7 @@ void tscpu_thermal_read_bank_temp(thermal_bank_name bank, ts_e type, int order)
 		break;
 	default:
 		tscpu_bank_ts[bank][type] =
-		    read_tc_raw_and_temp((volatile u32 *)TEMPMSR0, type,
+		    read_tc_raw_and_temp(TEMPMSR0, type,
 					 &tscpu_bank_ts_r[bank][type]);
 		tscpu_dprintk("%s order %d bank %d type %d tscpu_bank_ts %d tscpu_bank_ts_r %d\n",
 			      __func__, order, bank, type, tscpu_bank_ts[bank][type],
@@ -1080,7 +1049,7 @@ int tscpu_thermal_fast_init(void)
 	return 0;
 }
 
-int tscpu_switch_bank(thermal_bank_name bank)
+int tscpu_switch_bank(enum thermal_bank_name bank)
 {
 	/* tscpu_dprintk( "tscpu_switch_bank =bank=%d\n",bank); */
 
@@ -1114,7 +1083,7 @@ int tscpu_switch_bank(thermal_bank_name bank)
 	return 0;
 }
 
-int tscpu_thermal_ADCValueOfMcu(enum thermal_sensor_enum type)
+int tscpu_thermal_ADCValueOfMcu(enum thermal_sensor type)
 {
 	switch (type) {
 	case TS_MCU1:
@@ -1181,7 +1150,7 @@ void tscpu_thermal_initial_all_bank(void)
 void tscpu_config_tc_sw_protect(int highoffset, int lowoffset)
 {
 	int raw_highoffset = 0, raw_lowoffsett = 0, temp = 0;
-	ts_e ts_name;
+	enum thermal_sensor ts_name;
 	unsigned long flags;
 
 

@@ -380,6 +380,7 @@ struct _STA_RECORD_T {
 	BOOLEAN fgIsWmmSupported;	/* If the peer supports WMM, set to TRUE (for association) */
 	BOOLEAN fgIsUapsdSupported;	/* Set according to the scan result (for association) */
 	BOOLEAN afgAcmRequired[ACI_NUM];
+
 	/*------------------------------------------------------------------------------------------*/
 	/* P2P related fields                                                                       */
 	/*------------------------------------------------------------------------------------------*/
@@ -503,6 +504,9 @@ struct _STA_RECORD_T {
 	UINT_16 u2MaxIdlePeriod;
 	UINT_8 ucIdleOption;
 	BOOLEAN fgSupportBTM; /* flag to indicate Capbility for Bss Transition Management */
+
+	/* For Infra/GC Mode, a timer used to avoid the Deauth frame not be sent */
+	TIMER_T rDeauthTxDoneTimer;
 };
 
 #if 0

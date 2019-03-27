@@ -1,3 +1,16 @@
+/*
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
+
 /**********************************************
  *MT6757 MSDC DTSI File
 ********************************************/
@@ -37,10 +50,9 @@
 	pinctl_ddr50 = <&mmc1_pins_ddr50>;
 	register_setting = <&mmc1_register_setting_default>;
 	host_function = /bits/ 8 <MSDC_SD>;
-	/* [fengyunliang start] change to high */
-	cd_level = /bits/ 8 <MSDC_CD_HIGH>;
-	/* [fengyunliang end] */
+	cd_level = /bits/ 8 <MSDC_CD_LOW>;
 	cd-gpios = <&pio 3 0>;
+	cd-debounce = <1>;
 	status = "okay";
 	vmmc-supply = <&mt_pmic_vmch_ldo_reg>;
 	vqmmc-supply = <&mt_pmic_vmc_ldo_reg>;
@@ -61,7 +73,11 @@
 	pinctl = <&mmc2_pins_default>;
 	register_setting = <&mmc2_register_setting_default>;
 	host_function = /bits/ 8 <MSDC_SDIO>;
+#ifdef CONFIG_MTK_COMBO_COMM
+	status = "okay";
+#else
 	status = "disable";
+#endif
 };
 
 &pio {
@@ -88,9 +104,9 @@
 		datwrddly      = /bits/ 8 <0>;
 		cmdrrddly      = /bits/ 8 <0>;
 		cmdrddly       = /bits/ 8 <0>;
-		cmd_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
-		rdata_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
-		wdata_edge = /bits/ 8 <MSDC_SMPL_FALLING>;
+		cmd_edge = /bits/ 8 <MSDC_SMPL_RISING>;
+		rdata_edge = /bits/ 8 <MSDC_SMPL_RISING>;
+		wdata_edge = /bits/ 8 <MSDC_SMPL_RISING>;
 	};
 
 	mmc1_pins_default: mmc1@default {

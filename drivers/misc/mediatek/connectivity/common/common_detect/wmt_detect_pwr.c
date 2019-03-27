@@ -12,7 +12,12 @@
 * If not, see <http://www.gnu.org/licenses/>.
 */
 
+/* ALPS header files */
+#ifndef CONFIG_RTC_DRV_MT6397
 #include <mtk_rtc.h>
+#else
+#include <linux/mfd/mt6397/rtc_misc.h>
+#endif
 
 #ifdef DFT_TAG
 #undef DFT_TAG
@@ -52,8 +57,8 @@ int _wmt_detect_output_low(unsigned int id)
 {
 	if (gpio_ctrl_info.gpio_ctrl_state[id].gpio_num != INVALID_PIN_ID) {
 		gpio_direction_output(gpio_ctrl_info.gpio_ctrl_state[id].gpio_num, 0);
-		WMT_DETECT_DBG_FUNC("WMT-DETECT: set GPIO%d to output %d\n",
-				gpio_ctrl_info.gpio_ctrl_state[id].gpio_num,
+		WMT_DETECT_INFO_FUNC("WMT-DETECT: set GPIO%d to output %d\n",
+				gpio_ctrl_info.gpio_ctrl_state[id].gpio_num-280,
 				gpio_get_value(gpio_ctrl_info.gpio_ctrl_state[id].gpio_num));
 	}
 
@@ -64,8 +69,8 @@ int _wmt_detect_output_high(unsigned int id)
 {
 	if (gpio_ctrl_info.gpio_ctrl_state[id].gpio_num != INVALID_PIN_ID) {
 		gpio_direction_output(gpio_ctrl_info.gpio_ctrl_state[id].gpio_num, 1);
-		WMT_DETECT_DBG_FUNC("WMT-DETECT: set GPIO%d to output %d\n",
-				gpio_ctrl_info.gpio_ctrl_state[id].gpio_num,
+		WMT_DETECT_INFO_FUNC("WMT-DETECT: set GPIO%d to output %d\n",
+				gpio_ctrl_info.gpio_ctrl_state[id].gpio_num-280,
 				gpio_get_value(gpio_ctrl_info.gpio_ctrl_state[id].gpio_num));
 	}
 
@@ -96,17 +101,31 @@ int _wmt_detect_read_gpio_input(unsigned int id)
 static int wmt_detect_chip_pwr_on(void)
 {
 	int retval = -1;
+
 	/*setting validiation check*/
 	if ((gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMU_EN_PIN].gpio_num == INVALID_PIN_ID) ||
-		(gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_num == INVALID_PIN_ID) ||
 		(gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num == INVALID_PIN_ID)) {
-		WMT_DETECT_ERR_FUNC("WMT-DETECT: either PMU(%d) or RST(%d) or WIFI_EINT(%d) is not set\n",
+		WMT_DETECT_ERR_FUNC("WMT-DETECT: either PMU(%d) or WIFI_EINT(%d) is not set\n",
 				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_PMU_EN_PIN].gpio_num,
-				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_num,
 				gpio_ctrl_info.gpio_ctrl_state[GPIO_WIFI_EINT_PIN].gpio_num);
 
 		return retval;
 	}
+	if (gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_num == INVALID_PIN_ID) {
+		WMT_DETECT_WARN_FUNC("WMT-DETECT: RST(%d) is not set, if it`s not 6632 project, please check it\n",
+				gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_RST_PIN].gpio_num);
+
+	}
+	if (gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_URXD_PIN].gpio_state[GPIO_PULL_DIS]) {
+		pinctrl_select_state(gpio_ctrl_info.pinctrl_info,
+							 gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_URXD_PIN].
+							 gpio_state[GPIO_PULL_DIS]);
+	} else
+		pr_err("wmt_gpio:set GPIO_COMBO_URXD_PIN to GPIO_PULL_DIS fail, is NULL!\n");
+
+	WMT_DETECT_DBG_FUNC("WMT-DETECT: GPIO_COMBO_URXD_PIN out 0\n");
+	_wmt_detect_output_low(GPIO_COMBO_URXD_PIN);
+
 	/*set LDO/PMU/RST to output 0, no pull*/
 	if (gpio_ctrl_info.gpio_ctrl_state[GPIO_COMBO_LDO_EN_PIN].gpio_num != INVALID_PIN_ID)
 		_wmt_detect_output_low(GPIO_COMBO_LDO_EN_PIN);
@@ -166,7 +185,6 @@ static int wmt_detect_chip_pwr_on(void)
 	/*RST output high, and sleep for power on stable time */
 	_wmt_detect_output_high(GPIO_COMBO_RST_PIN);
 	msleep(MAX_ON_STABLE_TIME);
-
 	retval = 0;
 	return retval;
 }

@@ -68,6 +68,8 @@ static int accdet_remove(struct platform_device *dev)
 	mt_accdet_remove();
 	return 0;
 }
+
+
 #ifdef CONFIG_PM
 static int accdet_suspend(struct device *device)
 {				/* wake up */
@@ -81,6 +83,7 @@ static int accdet_resume(struct device *device)
 	return 0;
 }
 #endif
+
 /*
  * add for IPO-H need update headset state when resume
  */
@@ -108,6 +111,8 @@ const struct of_device_id accdet_of_match[] = {
 	{ .compatible = "mediatek,mt8127-accdet", },
 	{ .compatible = "mediatek,mt6797-accdet", },
 	{ .compatible = "mediatek,elbrus-accdet", },
+	{ .compatible = "mediatek,pmic-accdet", },
+	{ .compatible = "mediatek,mt8167-accdet", },
 	{},
 };
 
@@ -153,16 +158,6 @@ static void accdet_mod_exit(void)
 
 	ACCDET_DEBUG_DRV("[Accdet]accdet_mod_exit Done!\n");
 }
-
-/* Patch for CR ALPS00804150 & ALPS00804802 PMIC temp not correct issue */
-int accdet_cable_type_state(void)
-{
-	/* ACCDET_DEBUG("[ACCDET] accdet_cable_type_state=%d\n",accdet_get_cable_type()); */
-	return accdet_get_cable_type();
-}
-EXPORT_SYMBOL(accdet_cable_type_state);
-/* Patch for CR ALPS00804150 & ALPS00804802 PMIC temp not correct issue */
-
 module_init(accdet_mod_init);
 module_exit(accdet_mod_exit);
 

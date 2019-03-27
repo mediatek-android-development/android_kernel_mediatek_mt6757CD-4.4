@@ -34,7 +34,7 @@ static bool pep20_is_connect;
 static bool pep20_is_enabled = true;
 
 
-static pep20_profile_t pep20_profile[] = {
+static struct _pep20_profile pep20_profile[] = {
 	{3400, VBAT3400_VBUS},
 	{3500, VBAT3500_VBUS},
 	{3600, VBAT3600_VBUS},
@@ -199,12 +199,11 @@ static int pep20_set_ta_vchr(u32 chr_volt)
 		vchr_delta = abs(vchr_after - chr_volt);
 
 		/* It is successful
-		 * if difference to target is less than 500mV
+		 * if difference to target is less than 500mA
 		 */
-		if (vchr_delta < 500 && ret >= 0) {
-			battery_log(BAT_LOG_CRTI,
-				"%s: OK, vchr = (%d, %d, %d), ret = %d\n",
-				__func__, vchr_before, vchr_after, chr_volt, ret);
+		if (vchr_delta < 500 && ret == 0) {
+			battery_log(BAT_LOG_CRTI, "%s: OK, vchr = (%d, %d), vchr_target = %d\n",
+				__func__, vchr_before, vchr_after, chr_volt);
 			return ret;
 		}
 

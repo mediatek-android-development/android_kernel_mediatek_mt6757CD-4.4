@@ -110,9 +110,11 @@ int cl_cam_dualcam_off(void)
 	}
 
 
+
 	mtk_cooler_cam_dprintk("Tj:%d TTj:%d Tj jump thd:%d Tj_hys:%d, %d\n",
 		curr_tj, curr_ttj, dualcam_Tj_jump_threshold, dualcam_Tj_hysteresis,
 		(curr_ttj + ttj_offset - dualcam_Tj_jump_threshold - dualcam_Tj_hysteresis));
+
 
 	return 0;/*dual cam*/
 
@@ -235,6 +237,9 @@ static ssize_t _cl_cam_status_write(struct file *filp, const char __user *buf, s
 static int _cl_cam_status_read(struct seq_file *m, void *v)
 {
 	seq_printf(m, "%d\n", _cl_cam_status);
+
+	if (_cl_cam_status)
+		mtk_cooler_cam_dprintk_always("%s: %d\n", __func__, _cl_cam_status);
 
 	return 0;
 }

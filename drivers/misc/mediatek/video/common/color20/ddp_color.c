@@ -17,18 +17,26 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <disp_drv_platform.h>
-#if defined(CONFIG_ARCH_MT6755) || defined(CONFIG_ARCH_MT6797) || \
+#if defined(CONFIG_MACH_MT6755) || defined(CONFIG_MACH_MT6797) || \
 	defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
-	defined(CONFIG_MACH_MT6799)
+	defined(CONFIG_MACH_MT6799) || defined(CONFIG_MACH_MT6759) || \
+	defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758) || \
+	defined(CONFIG_MACH_MT6739)
 #include <disp_helper.h>
 #endif
 
-#if defined(CONFIG_MTK_CLKMGR) || defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MTK_CLKMGR) || defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 #include <mach/mt_clkmgr.h>
-#elif defined(CONFIG_ARCH_MT6755) || defined(CONFIG_ARCH_MT6797) || \
+#elif defined(CONFIG_MACH_MT6755) || defined(CONFIG_MACH_MT6797) || \
 	defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
-	defined(CONFIG_MACH_MT6799)
+	defined(CONFIG_MACH_MT6799) || defined(CONFIG_MACH_MT6759) || \
+	defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758) || \
+	defined(CONFIG_MACH_MT6739)
 #include "ddp_clkmgr.h"
+#endif
+
+#if defined(CONFIG_MACH_MT6799)
+#include <primary_display.h>
 #endif
 
 #include "ddp_reg.h"
@@ -37,12 +45,13 @@
 #include "ddp_color.h"
 #include "cmdq_def.h"
 
-#if defined(CONFIG_MACH_MT6757)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_MT6799)
 #include "mt-plat/mtk_chip.h"
 #endif
 
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
-	defined(CONFIG_MACH_MT6799)
+#if defined(CONFIG_MACH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
+	defined(CONFIG_MACH_MT6799) || defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758) || \
+	defined(CONFIG_MACH_MT6739)
 #define COLOR_SUPPORT_PARTIAL_UPDATE
 #endif
 
@@ -1027,8 +1036,10 @@ static ddp_module_notify g_color_cb;
 static struct DISPLAY_TDSHP_T g_TDSHP_Index;
 
 static unsigned int g_split_en;
-static unsigned int g_split_window_x = 0xFFFF0000;
-static unsigned int g_split_window_y = 0xFFFF0000;
+static unsigned int g_split_window_x_start;
+static unsigned int g_split_window_y_start;
+static unsigned int g_split_window_x_end = 0xFFFF;
+static unsigned int g_split_window_y_end = 0xFFFF;
 
 #if defined(COLOR_2_1)
 	static unsigned long g_color_window = 0x40185E57;
@@ -1041,39 +1052,56 @@ static unsigned long g_color0_dst_h;
 static unsigned long g_color1_dst_w;
 static unsigned long g_color1_dst_h;
 
+#if defined(CONFIG_MACH_MT6799)
+static unsigned int g_color_pos_x;
+#define DISP_COLOR_POS_MAIN_OFFSET (0x484)
+#define DISP_COLOR_POS_MAIN_POS_X_MASK (0x0000FFFF)
+#define DISP_COLOR_POS_MAIN_POS_Y_MASK (0xFFFF0000)
+#endif
+
 static struct MDP_COLOR_CAP mdp_color_cap;
 
-#if defined(CONFIG_FPGA_EARLY_PORTING) || defined(DISP_COLOR_OFF)
-static int g_color_bypass = 1;
-#else
-static int g_color_bypass;
-#endif
 static int g_tdshp_flag;	/* 0: normal, 1: tuning mode */
 int ncs_tuning_mode;
 int tdshp_index_init;
+static bool g_get_va_flag;
 
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(DISP_COLOR_ON)
+#define COLOR_MODE			(1)
+#elif defined(MDP_COLOR_ON)
+#define COLOR_MODE			(2)
+#elif defined(DISP_MDP_COLOR_ON)
+#define COLOR_MODE			(3)
+#else
+#define COLOR_MODE			(0)	/*color feature off */
+#endif
+
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 #define TDSHP_PA_BASE   0x14009000
 #define TDSHP1_PA_BASE  0x1400A000
 static unsigned long g_tdshp1_va;
-#elif defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
-	defined(CONFIG_MACH_MT6799)
+#elif defined(CONFIG_MACH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
+	defined(CONFIG_MACH_MT6799) || defined(CONFIG_MACH_MT6739)
 #define TDSHP_PA_BASE   0x14009000
+#elif defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758)
+#define TDSHP_PA_BASE   0x14007000
 #else
 #define TDSHP_PA_BASE   0x14006000
 #endif
 
-#ifdef DISP_MDP_COLOR_ON
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
+#if defined(DISP_MDP_COLOR_ON) || defined(MDP_COLOR_ON)
+#if defined(CONFIG_MACH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
 	defined(CONFIG_MACH_MT6799)
 #define MDP_COLOR_PA_BASE 0x1400A000
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758)
+#define MDP_COLOR_PA_BASE 0x1400E000
 #else
 #define MDP_COLOR_PA_BASE 0x14007000
 #endif
 static unsigned long g_mdp_color_va;
 #endif
 
-#if defined(CONFIG_ARCH_MT6797)
+#if defined(SUPPORT_ULTRA_RESOLUTION)
 #define MDP_RSZ0_PA_BASE 0x14003000
 static unsigned long g_mdp_rsz0_va;
 #define MDP_RSZ1_PA_BASE 0x14004000
@@ -1081,6 +1109,14 @@ static unsigned long g_mdp_rsz1_va;
 #define MDP_RSZ2_PA_BASE 0x14005000
 static unsigned long g_mdp_rsz2_va;
 #endif
+
+#if defined(SUPPORT_HDR)
+#define MDP_RDMA0_PA_BASE 0x14001000
+static unsigned long g_mdp_rdma0_va;
+#define MDP_HDR_OFFSET 0x00000800
+#endif
+
+#define TRANSLATION(origin, shift) ((origin >= shift) ? (origin - shift) : 0)
 
 static unsigned long g_tdshp_va;
 
@@ -1094,12 +1130,55 @@ static bool g_config_color21;
 static bool g_config_color30;
 #endif
 
+#if defined(CONFIG_MACH_MT6799)
+#define COLOR_TOTAL_MODULE_NUM (2)
+#define index_of_color(module) ((module == DISP_MODULE_COLOR0) ? 0 : 1)
+
+#if defined(CONFIG_FPGA_EARLY_PORTING) || defined(DISP_COLOR_OFF)
+static int g_color_bypass[COLOR_TOTAL_MODULE_NUM] = {1, 1};
+#else
+static int g_color_bypass[COLOR_TOTAL_MODULE_NUM];
+#endif
+
+static atomic_t g_color_is_clock_on[COLOR_TOTAL_MODULE_NUM] = { ATOMIC_INIT(0), ATOMIC_INIT(0) };
+#else
+#define COLOR_TOTAL_MODULE_NUM (1)
+#define index_of_color(module) (0)
+
+#if defined(CONFIG_FPGA_EARLY_PORTING) || defined(DISP_COLOR_OFF)
+static int g_color_bypass[COLOR_TOTAL_MODULE_NUM] = {1};
+#else
+static int g_color_bypass[COLOR_TOTAL_MODULE_NUM];
+#endif
+
+static atomic_t g_color_is_clock_on[COLOR_TOTAL_MODULE_NUM] = { ATOMIC_INIT(0)};
+#endif
+
+bool disp_color_reg_get(enum DISP_MODULE_ENUM module, unsigned long addr, unsigned int *value)
+{
+	if (COLOR_MODE == 2) {
+		COLOR_DBG("color is not in DISP path");
+		*value = 0;
+		return true;
+	}
+
+	if (atomic_read(&g_color_is_clock_on[index_of_color(module)]) != 1) {
+		COLOR_DBG("clock off .. skip reg set");
+		return false;
+	}
+
+	*value = DISP_REG_GET(addr);
+	return true;
+}
+
 void disp_color_set_window(unsigned int sat_upper, unsigned int sat_lower,
 			   unsigned int hue_upper, unsigned int hue_lower)
 {
 	g_color_window = (sat_upper << 24) | (sat_lower << 16) | (hue_upper << 8) | (hue_lower);
 }
 
+static void ddp_color_cal_split_window(enum DISP_MODULE_ENUM module, unsigned int *p_split_window_x,
+			unsigned int *p_split_window_y);
 
 /*
 *g_Color_Param
@@ -1162,16 +1241,21 @@ void DpEngine_COLORonInit(enum DISP_MODULE_ENUM module, void *__cmdq)
 	/* pr_debug("===================init COLOR =======================\n"); */
 	int offset = C0_OFFSET;
 	void *cmdq = __cmdq;
+#ifndef CONFIG_FPGA_EARLY_PORTING
+	unsigned int split_window_x, split_window_y;
+#endif
 
-	if (module == DISP_MODULE_COLOR1)
-		offset = C1_OFFSET;
+	offset = color_get_offset(module);
 
 #ifndef CONFIG_FPGA_EARLY_PORTING
-	COLOR_DBG("DpEngine_COLORonInit(), en[%d],  x[0x%x], y[0x%x]\n", g_split_en,
-		g_split_window_x, g_split_window_y);
+	ddp_color_cal_split_window(module, &split_window_x, &split_window_y);
+
+	COLOR_DBG("DpEngine_COLORonInit(), module[%d], en[%d],  x[0x%x], y[0x%x]\n",
+		module, g_split_en, split_window_x, split_window_y);
+
 	_color_reg_mask(cmdq, DISP_COLOR_DBG_CFG_MAIN + offset, g_split_en << 3, 0x00000008);
-	_color_reg_set(cmdq, DISP_COLOR_WIN_X_MAIN + offset, g_split_window_x);
-	_color_reg_set(cmdq, DISP_COLOR_WIN_Y_MAIN + offset, g_split_window_y);
+	_color_reg_set(cmdq, DISP_COLOR_WIN_X_MAIN + offset, split_window_x);
+	_color_reg_set(cmdq, DISP_COLOR_WIN_Y_MAIN + offset, split_window_y);
 #endif
 
 	/* enable interrupt */
@@ -1181,13 +1265,6 @@ void DpEngine_COLORonInit(enum DISP_MODULE_ENUM module, void *__cmdq)
 	/* Set 10bit->8bit Rounding */
 	_color_reg_mask(cmdq, DISP_COLOR_OUT_SEL + offset, 0x333, 0x00000333);
 #endif
-
-#if defined(CONFIG_MTK_AAL_SUPPORT)
-	/* c-boost ??? */
-	_color_reg_set(cmdq, DISP_COLOR_C_BOOST_MAIN + offset, 0xFF402280);
-	_color_reg_set(cmdq, DISP_COLOR_C_BOOST_MAIN_2 + offset, 0x00000000);
-#endif
-
 }
 
 void DpEngine_COLORonConfig(enum DISP_MODULE_ENUM module, void *__cmdq)
@@ -1206,12 +1283,14 @@ void DpEngine_COLORonConfig(enum DISP_MODULE_ENUM module, void *__cmdq)
 #endif
 	int wide_gamut_en = 0;
 
-	if (module == DISP_MODULE_COLOR1) {
+	if (is_color1_module(module)) {
 		offset = C1_OFFSET;
 		pq_param_p = &g_Color_Param[COLOR_ID_1];
 	}
 
-	if (pq_param_p->u4SatGain >= COLOR_TUNING_INDEX ||
+	if (pq_param_p->u4Brightness >= BRIGHTNESS_SIZE ||
+	    pq_param_p->u4Contrast >= CONTRAST_SIZE ||
+	    pq_param_p->u4SatGain >= GLOBAL_SAT_SIZE ||
 	    pq_param_p->u4HueAdj[PURP_TONE] >= COLOR_TUNING_INDEX ||
 	    pq_param_p->u4HueAdj[SKIN_TONE] >= COLOR_TUNING_INDEX ||
 	    pq_param_p->u4HueAdj[GRASS_TONE] >= COLOR_TUNING_INDEX ||
@@ -1225,7 +1304,7 @@ void DpEngine_COLORonConfig(enum DISP_MODULE_ENUM module, void *__cmdq)
 	}
 	/* COLOR_ERR("DpEngine_COLORonConfig(%d)", module); */
 
-	if (g_color_bypass == 0) {
+	if (g_color_bypass[index_of_color(module)] == 0) {
 #if defined(COLOR_2_1)
 		if (g_config_color21 == true) {
 			_color_reg_mask(cmdq, DISP_COLOR_CFG_MAIN + offset, (1 << 21)
@@ -1247,7 +1326,7 @@ void DpEngine_COLORonConfig(enum DISP_MODULE_ENUM module, void *__cmdq)
 		} else {
 			_color_reg_mask(cmdq, DISP_COLOR_CM1_EN + offset, 0x01, 0x01);
 		}
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 		_color_reg_mask(cmdq, DISP_COLOR_CM2_EN + offset, 0x01, 0x11);
 #else
 		_color_reg_mask(cmdq, DISP_COLOR_CM2_EN + offset, 0x11, 0x11); /* also set no rounding on Y2R */
@@ -1281,13 +1360,13 @@ void DpEngine_COLORonConfig(enum DISP_MODULE_ENUM module, void *__cmdq)
 				, 0x00FF00FF);
 	}
 
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_ARCH_MT6755)
+#if defined(CONFIG_MACH_MT6797) || defined(CONFIG_MACH_MT6755) || defined(CONFIG_MACH_MT6799)
 	_color_reg_mask(cmdq, DISP_COLOR_C_BOOST_MAIN + offset, 0x80 << 16, 0x00FF0000);
 #endif
 
 	if (g_config_color21 == false)
 		_color_reg_mask(cmdq, DISP_COLOR_C_BOOST_MAIN + offset, 0 << 13, 0x00002000);
-	else if (g_config_color21 == true)
+	else
 		_color_reg_mask(cmdq, DISP_COLOR_C_BOOST_MAIN_2 + offset, 0x40 << 24, 0xFF000000);
 
 	/* Partial Saturation Function */
@@ -1566,10 +1645,10 @@ static void color_write_hw_reg(enum DISP_MODULE_ENUM module,
 #endif
 	int wide_gamut_en = 0;
 
-	if (module == DISP_MODULE_COLOR1)
-		offset = C1_OFFSET;
+	offset = color_get_offset(module);
 
-	if (g_color_bypass == 0) {
+
+	if (g_color_bypass[index_of_color(module)] == 0) {
 #if defined(COLOR_2_1)
 		if (g_config_color21 == true) {
 			_color_reg_mask(cmdq, DISP_COLOR_CFG_MAIN + offset, (1 << 21)
@@ -1592,7 +1671,7 @@ static void color_write_hw_reg(enum DISP_MODULE_ENUM module,
 			_color_reg_mask(cmdq, DISP_COLOR_CM1_EN + offset, 0x01, 0x01);
 		}
 
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 		_color_reg_mask(cmdq, DISP_COLOR_CM2_EN + offset, 0x01, 0x11);
 #else
 		_color_reg_mask(cmdq, DISP_COLOR_CM2_EN + offset, 0x11, 0x11); /* also set no rounding on Y2R */
@@ -1623,13 +1702,13 @@ static void color_write_hw_reg(enum DISP_MODULE_ENUM module,
 			(color_reg->PARTIAL_Y[2 * index + 1] << 16)), 0x00FF00FF);
 	}
 
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_ARCH_MT6755)
+#if defined(CONFIG_MACH_MT6797) || defined(CONFIG_MACH_MT6755) || defined(CONFIG_MACH_MT6799)
 	_color_reg_mask(cmdq, DISP_COLOR_C_BOOST_MAIN + offset, 0x80 << 16, 0x00FF0000);
 #endif
 
 	if (g_config_color21 == false)
 		_color_reg_mask(cmdq, DISP_COLOR_C_BOOST_MAIN + offset, 0 << 13, 0x00002000);
-	else if (g_config_color21 == true)
+	else
 		_color_reg_mask(cmdq, DISP_COLOR_C_BOOST_MAIN_2 + offset, 0x40 << 24, 0xFF000000);
 
 	/* Partial Saturation Function */
@@ -1869,8 +1948,9 @@ static void ddp_color_bypass_color(enum DISP_MODULE_ENUM module, int bypass, voi
 	int offset = C0_OFFSET;
 	void *cmdq = __cmdq;
 
-	if (module == DISP_MODULE_COLOR1)
-		offset = C1_OFFSET;
+	g_color_bypass[index_of_color(module)] = bypass;
+
+	offset = color_get_offset(module);
 
 	if (bypass)
 		_color_reg_mask(cmdq, DISP_COLOR_CFG_MAIN + offset, (1 << 7), 0x000000FF);	/* bypass all */
@@ -1878,42 +1958,119 @@ static void ddp_color_bypass_color(enum DISP_MODULE_ENUM module, int bypass, voi
 		_color_reg_mask(cmdq, DISP_COLOR_CFG_MAIN + offset, (0 << 7), 0x000000FF);	/* resume all */
 }
 
-static void ddp_color_set_window(struct DISP_PQ_WIN_PARAM *win_param, void *__cmdq)
+static void ddp_color_set_window(enum DISP_MODULE_ENUM module, struct DISP_PQ_WIN_PARAM *win_param, void *__cmdq)
 {
-	const int offset = C0_OFFSET;
+	int offset = C0_OFFSET;
 	void *cmdq = __cmdq;
+	unsigned int split_window_x, split_window_y;
+
+	offset = color_get_offset(module);
 
 	/* save to global, can be applied on following PQ param updating. */
 	if (win_param->split_en) {
 		g_split_en = 1;
-#ifdef LCM_PHYSICAL_ROTATION_180
-		g_split_window_x = ((g_color0_dst_w - win_param->start_x) << 16) | (g_color0_dst_w - win_param->end_x);
-		g_split_window_y = ((g_color0_dst_h - win_param->start_y) << 16) | (g_color0_dst_h - win_param->end_y);
-		COLOR_DBG("ddp_color_set_window(), LCM_PHYSICAL_ROTATION_180\n");
-#else
-		g_split_window_x = (win_param->end_x << 16) | win_param->start_x;
-		g_split_window_y = (win_param->end_y << 16) | win_param->start_y;
-#endif
+		g_split_window_x_start = win_param->start_x;
+		g_split_window_y_start = win_param->start_y;
+		g_split_window_x_end = win_param->end_x;
+		g_split_window_y_end = win_param->end_y;
 	} else {
 		g_split_en = 0;
-		g_split_window_x = 0xFFFF0000;
-		g_split_window_y = 0xFFFF0000;
+		g_split_window_x_start = 0x0000;
+		g_split_window_y_start = 0x0000;
+		g_split_window_x_end = 0xFFFF;
+		g_split_window_y_end = 0xFFFF;
 	}
 
-	COLOR_DBG("ddp_color_set_window(), en[%d],  x[0x%x], y[0x%x]\n", g_split_en,
-		  g_split_window_x, g_split_window_y);
+	COLOR_DBG("ddp_color_set_window(), input: module[%d], en[%d], x[0x%x], y[0x%x]\n",
+		module, g_split_en, ((win_param->end_x << 16) | win_param->start_x),
+		((win_param->end_y << 16) | win_param->start_y));
+
+
+	ddp_color_cal_split_window(module, &split_window_x, &split_window_y);
+
+	COLOR_DBG("ddp_color_set_window(), output: x[0x%x], y[0x%x]\n", split_window_x, split_window_y);
 
 	_color_reg_mask(cmdq, DISP_COLOR_DBG_CFG_MAIN + offset, (g_split_en << 3), 0x00000008);	/* split enable */
-	_color_reg_set(cmdq, DISP_COLOR_WIN_X_MAIN + offset, g_split_window_x);
-	_color_reg_set(cmdq, DISP_COLOR_WIN_Y_MAIN + offset, g_split_window_y);
+	_color_reg_set(cmdq, DISP_COLOR_WIN_X_MAIN + offset, split_window_x);
+	_color_reg_set(cmdq, DISP_COLOR_WIN_Y_MAIN + offset, split_window_y);
 }
 
+static void ddp_color_cal_split_window(enum DISP_MODULE_ENUM module, unsigned int *p_split_window_x,
+								unsigned int *p_split_window_y)
+{
+	unsigned int split_window_x = 0xFFFF0000;
+	unsigned int split_window_y = 0xFFFF0000;
+#if defined(CONFIG_MACH_MT6799)
+	int pipeStatus = primary_display_get_pipe_status();
+#endif
+
+	/* save to global, can be applied on following PQ param updating. */
+	if (g_color0_dst_w == 0 || g_color0_dst_h == 0) {
+		COLOR_DBG("g_color0_dst_w or g_color0_dst_h not init, return default settings\n");
+	} else if (g_split_en) {
+#ifdef LCM_PHYSICAL_ROTATION_180
+#if defined(CONFIG_MACH_MT6799)
+		if (pipeStatus == SINGLE_PIPE) {
+			split_window_x = ((g_color0_dst_w - g_split_window_x_start) << 16) |
+								(g_color0_dst_w - g_split_window_x_end);
+		} else if (pipeStatus == DUAL_PIPE) {
+			if (module == DISP_MODULE_COLOR0) {
+				split_window_x = ((g_color0_dst_w - g_split_window_x_start) << 16) |
+				(g_color0_dst_w - g_split_window_x_end);
+			} else if (is_color1_module(module)) {
+				split_window_x = (TRANSLATION((g_color0_dst_w - g_split_window_x_start),
+				g_color0_dst_w) << 16) | TRANSLATION((g_color0_dst_w - g_split_window_x_end),
+				g_color0_dst_w);
+			}
+
+		}
+
+		COLOR_DBG("ddp_color_cal_split_window(), pipeStatus [%d]\n", pipeStatus);
+#else
+		split_window_x = ((g_color0_dst_w - g_split_window_x_start) << 16) |
+							(g_color0_dst_w - g_split_window_x_end);
+#endif /* #if defined(CONFIG_MACH_MT6799) */
+		split_window_y = ((g_color0_dst_h - g_split_window_y_start) << 16) |
+							(g_color0_dst_h - g_split_window_y_end);
+		COLOR_DBG("ddp_color_cal_split_window(), LCM_PHYSICAL_ROTATION_180\n");
+#else
+		split_window_y = (g_split_window_y_end << 16) | g_split_window_y_start;
+#ifdef LCM_PHYSICAL_ROTATION_270
+#if defined(CONFIG_MACH_MT6799)
+#else
+		split_window_x = ((g_split_window_y_end) << 16) | g_split_window_y_start;
+		split_window_y = ((g_color0_dst_h - g_split_window_x_start) << 16) |
+			(g_color0_dst_h - g_split_window_x_end);
+		COLOR_DBG("ddp_color_set_window(), LCM_PHYSICAL_ROTATION_270\n");
+#endif /* #if defined(CONFIG_MACH_MT6799) */
+#else
+#if defined(CONFIG_MACH_MT6799)
+		if (pipeStatus == SINGLE_PIPE) {
+			split_window_x = (g_split_window_x_end << 16) | g_split_window_x_start;
+		} else if (pipeStatus == DUAL_PIPE) {
+			if (module == DISP_MODULE_COLOR0) {
+				split_window_x = (g_split_window_x_end << 16) | g_split_window_x_start;
+			} else if (is_color1_module(module)) {
+				split_window_x = (TRANSLATION(g_split_window_x_end, g_color0_dst_w) << 16)
+					| TRANSLATION(g_split_window_x_start, g_color0_dst_w);
+			}
+		}
+#else
+		split_window_x = (g_split_window_x_end << 16) | g_split_window_x_start;
+#endif /* #if defined(CONFIG_MACH_MT6799) */
+#endif /* #ifdef LCM_PHYSICAL_ROTATION_270 */
+#endif /* #ifdef LCM_PHYSICAL_ROTATION_180 */
+	}
+
+	*p_split_window_x = split_window_x;
+	*p_split_window_y = split_window_y;
+}
 
 static unsigned long color_get_TDSHP_VA(void)
 {
 	unsigned long VA;
 	struct device_node *node = NULL;
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795) || defined(CONFIG_MACH_MT6739)
 	node = of_find_compatible_node(NULL, NULL, "mediatek,mdp_tdshp0");
 #else
 	node = of_find_compatible_node(NULL, NULL, "mediatek,mdp_tdshp");
@@ -1924,7 +2081,7 @@ static unsigned long color_get_TDSHP_VA(void)
 	return VA;
 }
 
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 static unsigned long color_get_TDSHP1_VA(void)
 {
 	unsigned long VA;
@@ -1938,7 +2095,7 @@ static unsigned long color_get_TDSHP1_VA(void)
 }
 #endif
 
-#ifdef DISP_MDP_COLOR_ON
+#if defined(DISP_MDP_COLOR_ON) || defined(MDP_COLOR_ON)
 static unsigned long color_get_MDP_COLOR_VA(void)
 {
 	unsigned long VA;
@@ -1952,7 +2109,7 @@ static unsigned long color_get_MDP_COLOR_VA(void)
 }
 #endif
 
-#if defined(CONFIG_ARCH_MT6797)
+#if defined(SUPPORT_ULTRA_RESOLUTION)
 static unsigned long color_get_MDP_RSZ0_VA(void)
 {
 	unsigned long VA;
@@ -1990,14 +2147,66 @@ static unsigned long color_get_MDP_RSZ2_VA(void)
 }
 #endif
 
+#if defined(SUPPORT_HDR)
+static unsigned long color_get_MDP_RDMA0_VA(void)
+{
+	unsigned long VA;
+	struct device_node *node = NULL;
+
+	node = of_find_compatible_node(NULL, NULL, "mediatek,mdp_rdma0");
+	VA = (unsigned long)of_iomap(node, 0);
+	COLOR_DBG("MDP_RDMA0 VA: 0x%lx\n", VA);
+
+	return VA;
+}
+#endif
+
+static void _color_get_VA(void)
+{
+	/* check if va address initialized*/
+	if (g_get_va_flag == false) {
+		g_tdshp_va = color_get_TDSHP_VA();
+#if defined(DISP_MDP_COLOR_ON) || defined(MDP_COLOR_ON)
+		g_mdp_color_va = color_get_MDP_COLOR_VA();
+#endif
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
+		g_tdshp1_va = color_get_TDSHP1_VA();
+#endif
+#if defined(SUPPORT_ULTRA_RESOLUTION)
+		g_mdp_rsz0_va = color_get_MDP_RSZ0_VA();
+		g_mdp_rsz1_va = color_get_MDP_RSZ1_VA();
+		g_mdp_rsz2_va = color_get_MDP_RSZ2_VA();
+#endif
+
+#if defined(SUPPORT_HDR)
+		g_mdp_rdma0_va = color_get_MDP_RDMA0_VA();
+#endif
+		g_get_va_flag = true;
+	}
+}
+
+
 static unsigned int color_is_reg_addr_valid(unsigned long addr)
 {
 	unsigned int i = 0;
+
+	if (addr == 0) {
+		COLOR_ERR("color_is_reg_addr_valid, addr is NULL\n");
+		return 0;
+	}
 
 	if ((addr & 0x3) != 0) {
 		COLOR_ERR("color_is_reg_addr_valid, addr is not 4-byte aligned!\n");
 		return 0;
 	}
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763) \
+	|| defined(CONFIG_MACH_MT6739)
+	i = is_reg_addr_valid(1, addr);
+	if (i) {
+		COLOR_DBG("addr valid, addr=0x%lx, module=%s!\n", addr, ddp_get_module_name(i));
+		return 1;
+	}
+#else
 
 	for (i = 0; i < DISP_REG_NUM; i++) {
 		if ((addr >= dispsys_reg[i]) && (addr < (dispsys_reg[i] + 0x1000)) && (dispsys_reg[i] != 0))
@@ -2008,9 +2217,10 @@ static unsigned int color_is_reg_addr_valid(unsigned long addr)
 		COLOR_DBG("addr valid, addr=0x%lx, module=%s!\n", addr, ddp_get_reg_module_name(i));
 		return 1;
 	}
+#endif
 
 	/*Check if MDP color base address*/
-#ifdef DISP_MDP_COLOR_ON
+#if defined(DISP_MDP_COLOR_ON) || defined(MDP_COLOR_ON)
 	if ((addr >= g_mdp_color_va) && (addr < (g_mdp_color_va + 0x1000))) {			/* MDP COLOR */
 		COLOR_DBG("addr valid, addr=0x%lx, module=%s!\n", addr, "MDP_COLOR");
 		return 2;
@@ -2019,7 +2229,7 @@ static unsigned int color_is_reg_addr_valid(unsigned long addr)
 
 
 	/*Check if MDP RSZ base address*/
-#if defined(CONFIG_ARCH_MT6797)
+#if defined(SUPPORT_ULTRA_RESOLUTION)
 		if ((addr >= g_mdp_rsz0_va) && (addr < (g_mdp_rsz0_va + 0x1000))) {			/* MDP RSZ0 */
 			COLOR_DBG("addr valid, addr=0x%lx, module=%s!\n", addr, "MDP_RSZ0");
 			return 2;
@@ -2032,12 +2242,22 @@ static unsigned int color_is_reg_addr_valid(unsigned long addr)
 		}
 #endif
 
+	/*Check if MDP HDR base address*/
+#if defined(SUPPORT_HDR)
+		if ((addr >= g_mdp_rdma0_va + MDP_HDR_OFFSET) && (addr < (g_mdp_rdma0_va + 0x1000))) {
+			/* MDP RSZ0 */
+			COLOR_DBG("addr valid, addr=0x%lx, module=%s!\n", addr, "MDP_RDMA0");
+			return 2;
+		}
+#endif
+
+
 	/* check if TDSHP base address */
 	if ((addr >= g_tdshp_va) && (addr < (g_tdshp_va + 0x1000))) {			/* TDSHP0 */
 		COLOR_DBG("addr valid, addr=0x%lx, module=%s!\n", addr, "TDSHP0");
 		return 2;
 	}
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 	else if ((addr >= g_tdshp1_va) && (addr < (g_tdshp1_va + 0x1000))) {	/* TDSHP1 */
 		COLOR_DBG("addr valid, addr=0x%lx, module=%s!\n", addr, "TDSHP1");
 		return 2;
@@ -2053,7 +2273,18 @@ static unsigned long color_pa2va(unsigned int addr)
 {
 	unsigned int i = 0;
 
+	_color_get_VA();
+
 	/* check disp module */
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763) \
+	|| defined(CONFIG_MACH_MT6739)
+	i = is_reg_addr_valid(0, addr);
+	if (i) {
+		COLOR_DBG("color_pa2va(), COLOR PA:0x%x, PABase[0x%x], VABase[0x%lx]\n",
+				  addr, (unsigned int)ddp_get_module_pa(i), ddp_get_module_va(i));
+		return ddp_get_module_va(i) + (addr - ddp_get_module_pa(i));
+	}
+#else
 	for (i = 0; i < DISP_REG_NUM; i++) {
 		if ((addr >= ddp_reg_pa_base[i]) && (addr < (ddp_reg_pa_base[i] + 0x1000))) {
 			COLOR_DBG("color_pa2va(), COLOR PA:0x%x, PABase[0x%x], VABase[0x%lx]\n",
@@ -2061,6 +2292,7 @@ static unsigned long color_pa2va(unsigned int addr)
 			return dispsys_reg[i] + (addr - ddp_reg_pa_base[i]);
 		}
 	}
+#endif
 
 	/* TDSHP */
 	if ((addr >= TDSHP_PA_BASE) && (addr < (TDSHP_PA_BASE + 0x1000))) {
@@ -2068,7 +2300,7 @@ static unsigned long color_pa2va(unsigned int addr)
 			  TDSHP_PA_BASE, g_tdshp_va);
 		return g_tdshp_va + (addr - TDSHP_PA_BASE);
 	}
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 	/* TDSHP1 */
 	if ((addr >= TDSHP1_PA_BASE) && (addr < (TDSHP1_PA_BASE + 0x1000))) {
 		COLOR_DBG("color_pa2va(), TDSHP1 PA:0x%x, PABase[0x%x], VABase[0x%lx]\n", addr,
@@ -2077,7 +2309,7 @@ static unsigned long color_pa2va(unsigned int addr)
 	}
 #endif
 
-#ifdef DISP_MDP_COLOR_ON
+#if defined(DISP_MDP_COLOR_ON) || defined(MDP_COLOR_ON)
 	/* MDP_COLOR */
 	if ((addr >= MDP_COLOR_PA_BASE) && (addr < (MDP_COLOR_PA_BASE + 0x1000))) {
 		COLOR_DBG("color_pa2va(), MDP_COLOR PA:0x%x, PABase[0x%x], VABase[0x%lx]\n", addr,
@@ -2086,8 +2318,8 @@ static unsigned long color_pa2va(unsigned int addr)
 	}
 #endif
 
-#if defined(CONFIG_ARCH_MT6797)
-		/* MDP_COLOR */
+#if defined(SUPPORT_ULTRA_RESOLUTION)
+		/* MDP_RSZ */
 		if ((addr >= MDP_RSZ0_PA_BASE) && (addr < (MDP_RSZ0_PA_BASE + 0x1000))) {
 			COLOR_DBG("color_pa2va(), MDP_RSZ0 PA:0x%x, PABase[0x%x], VABase[0x%lx]\n", addr,
 				  MDP_RSZ0_PA_BASE, g_mdp_rsz0_va);
@@ -2103,9 +2335,22 @@ static unsigned long color_pa2va(unsigned int addr)
 		}
 #endif
 
+#if defined(SUPPORT_HDR)
+		/* MDP_HDR */
+		if ((addr >= MDP_RDMA0_PA_BASE + MDP_HDR_OFFSET) && (addr < (MDP_RDMA0_PA_BASE + 0x1000))) {
+			COLOR_DBG("color_pa2va(), MDP_RDMA0 PA:0x%x, PABase[0x%x], VABase[0x%lx]\n", addr,
+					MDP_RDMA0_PA_BASE, g_mdp_rdma0_va);
+			return g_mdp_rdma0_va + (addr - MDP_RDMA0_PA_BASE);
+		}
+#endif
+
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763) \
+	 || defined(CONFIG_MACH_MT6739)
+	COLOR_ERR("color_pa2va(), NO FOUND VA!! PA:0x%x\n", addr);
+#else
 	COLOR_ERR("color_pa2va(), NO FOUND VA!! PA:0x%x, PABase[0x%x], VABase[0x%lx]\n", addr,
 		  (unsigned int)ddp_reg_pa_base[0], dispsys_reg[0]);
-
+#endif
 	return 0;
 }
 #if defined(CONFIG_MACH_MT6757)
@@ -2133,9 +2378,12 @@ static unsigned int color_read_sw_reg(unsigned int reg_id)
 	switch (reg_id) {
 	case SWREG_COLOR_BASE_ADDRESS:
 		{
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795) || defined(CONFIG_ARCH_ELBRUS) \
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795) || defined(CONFIG_MACH_ELBRUS) \
 	|| defined(CONFIG_MACH_MT6757)  || defined(CONFIG_MACH_KIBOPLUS) || defined(CONFIG_MACH_MT6799)
 			ret = ddp_reg_pa_base[DISP_REG_COLOR0];
+#elif defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763) \
+	 || defined(CONFIG_MACH_MT6739)
+			ret = ddp_get_module_pa(DISP_MODULE_COLOR0);
 #else
 			ret = ddp_reg_pa_base[DISP_REG_COLOR];
 #endif
@@ -2144,19 +2392,28 @@ static unsigned int color_read_sw_reg(unsigned int reg_id)
 
 	case SWREG_GAMMA_BASE_ADDRESS:
 		{
-#if defined(CONFIG_ARCH_ELBRUS) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_MT6799)
+#if defined(CONFIG_MACH_ELBRUS) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_MT6799)
 			ret = ddp_reg_pa_base[DISP_REG_GAMMA0];
+#elif defined(CONFIG_MACH_MT6759)
+			ret = ddp_get_module_pa(DISP_MODULE_GAMMA);
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6739)
+			ret = ddp_get_module_pa(DISP_MODULE_GAMMA0);
+
 #else
-		/* ret = ddp_reg_pa_base[DISP_REG_GAMMA]; */
+			ret = ddp_reg_pa_base[DISP_REG_GAMMA];
 #endif
 			break;
 		}
 
 	case SWREG_AAL_BASE_ADDRESS:
 		{
-#if defined(CONFIG_ARCH_ELBRUS) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
+#if defined(CONFIG_MACH_ELBRUS) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
 	defined(CONFIG_MACH_MT6799)
 			ret = ddp_reg_pa_base[DISP_REG_AAL0];
+#elif defined(CONFIG_MACH_MT6759)
+			ret = ddp_get_module_pa(DISP_MODULE_AAL);
+#elif defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763)  || defined(CONFIG_MACH_MT6739)
+			ret = ddp_get_module_pa(DISP_MODULE_AAL0);
 #else
 			ret = ddp_reg_pa_base[DISP_REG_AAL];
 #endif
@@ -2166,9 +2423,14 @@ static unsigned int color_read_sw_reg(unsigned int reg_id)
 #if defined(CCORR_SUPPORT)
 	case SWREG_CCORR_BASE_ADDRESS:
 		{
-#if defined(CONFIG_ARCH_ELBRUS) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
+#if defined(CONFIG_MACH_ELBRUS) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
 	defined(CONFIG_MACH_MT6799)
 			ret = ddp_reg_pa_base[DISP_REG_CCORR0];
+#elif defined(CONFIG_MACH_MT6759)
+			ret = ddp_get_module_pa(DISP_MODULE_CCORR);
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758)  || defined(CONFIG_MACH_MT6739)
+			ret = ddp_get_module_pa(DISP_MODULE_CCORR0);
+
 #else
 			ret = ddp_reg_pa_base[DISP_REG_CCORR];
 #endif
@@ -2181,7 +2443,7 @@ static unsigned int color_read_sw_reg(unsigned int reg_id)
 			ret = TDSHP_PA_BASE;
 			break;
 		}
-#ifdef DISP_MDP_COLOR_ON
+#if defined(DISP_MDP_COLOR_ON) || defined(MDP_COLOR_ON)
 	case SWREG_MDP_COLOR_BASE_ADDRESS:
 		{
 			ret = MDP_COLOR_PA_BASE;
@@ -2194,13 +2456,21 @@ static unsigned int color_read_sw_reg(unsigned int reg_id)
 			break;
 		}
 
-#if defined(CONFIG_ARCH_MT6797)
 	case SWREG_RSZ_BASE_ADDRESS:
 		{
+#if defined(SUPPORT_ULTRA_RESOLUTION)
 			ret = MDP_RSZ0_PA_BASE;
+#endif
 			break;
 		}
+
+	case SWREG_MDP_RDMA_BASE_ADDRESS:
+		{
+#if defined(SUPPORT_HDR)
+			ret = MDP_RDMA0_PA_BASE;
 #endif
+			break;
+		}
 
 	case SWREG_TDSHP_TUNING_MODE:
 		{
@@ -2312,13 +2582,22 @@ static void color_write_sw_reg(unsigned int reg_id, unsigned int value)
 
 static int _color_clock_on(enum DISP_MODULE_ENUM module, void *cmq_handle)
 {
-#if defined(CONFIG_ARCH_MT6755)
+	atomic_set(&g_color_is_clock_on[index_of_color(module)], 1);
+
+#if defined(CONFIG_MACH_MT6755)
 	/* color is DCM , do nothing */
 	return 0;
 #endif
+
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763) \
+	 || defined(CONFIG_MACH_MT6739)
+	ddp_clk_prepare_enable(ddp_get_module_clk_id(module));
+	return 0;
+#else
+
 #ifdef ENABLE_CLK_MGR
 #ifdef CONFIG_MTK_CLKMGR
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 	if (module == DISP_MODULE_COLOR0) {
 		enable_clock(MT_CG_DISP0_DISP_COLOR0, "DDP");
 		COLOR_DBG("color[0]_clock_on CG 0x%x\n",
@@ -2333,23 +2612,42 @@ static int _color_clock_on(enum DISP_MODULE_ENUM module, void *cmq_handle)
 	COLOR_DBG("color[0]_clock_on CG 0x%x\n", DISP_REG_GET(DISP_REG_CONFIG_MMSYS_CG_CON0));
 #endif
 #else
+#if defined(CONFIG_MACH_MT6799)
+	if (module == DISP_MODULE_COLOR0)
+		ddp_clk_enable(DISP0_DISP_COLOR0);
+	else if (is_color1_module(module))
+		ddp_clk_enable(DISP0_DISP_COLOR1);
+#else
 	ddp_clk_enable(DISP0_DISP_COLOR);
+#endif
 	COLOR_DBG("color[0]_clock_on CG 0x%x\n", DISP_REG_GET(DISP_REG_CONFIG_MMSYS_CG_CON0));
 #endif
 #endif
 
 	return 0;
+#endif
+
 }
 
 static int _color_clock_off(enum DISP_MODULE_ENUM module, void *cmq_handle)
 {
-#if defined(CONFIG_ARCH_MT6755)
+	atomic_set(&g_color_is_clock_on[index_of_color(module)], 0);
+
+#if defined(CONFIG_MACH_MT6755)
 	/* color is DCM , do nothing */
 	return 0;
 #endif
+
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763) \
+	 || defined(CONFIG_MACH_MT6739)
+	ddp_clk_disable_unprepare(ddp_get_module_clk_id(module));
+	return 0;
+#else
+
+
 #ifdef ENABLE_CLK_MGR
 #ifdef CONFIG_MTK_CLKMGR
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 	if (module == DISP_MODULE_COLOR0) {
 		COLOR_DBG("color[0]_clock_off\n");
 		disable_clock(MT_CG_DISP0_DISP_COLOR0, "DDP");
@@ -2362,33 +2660,43 @@ static int _color_clock_off(enum DISP_MODULE_ENUM module, void *cmq_handle)
 	disable_clock(MT_CG_DISP0_DISP_COLOR, "DDP");
 #endif
 #else
-	ddp_clk_disable(DISP0_DISP_COLOR);
+#if defined(CONFIG_MACH_MT6799)
+	if (module == DISP_MODULE_COLOR0)
+		ddp_clk_disable(DISP0_DISP_COLOR0);
+	else if (is_color1_module(module))
+		ddp_clk_disable(DISP0_DISP_COLOR1);
+#else
+		ddp_clk_disable(DISP0_DISP_COLOR);
+#endif
+
 #endif
 #endif
+
 	return 0;
+#endif
 }
 
 static int _color_init(enum DISP_MODULE_ENUM module, void *cmq_handle)
 {
+#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6739)
 	_color_clock_on(module, cmq_handle);
+#endif
 
-	g_tdshp_va = color_get_TDSHP_VA();
-#ifdef DISP_MDP_COLOR_ON
-	g_mdp_color_va = color_get_MDP_COLOR_VA();
-#endif
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
-	g_tdshp1_va = color_get_TDSHP1_VA();
-#endif
-#if defined(CONFIG_ARCH_MT6797)
-	g_mdp_rsz0_va = color_get_MDP_RSZ0_VA();
-	g_mdp_rsz1_va = color_get_MDP_RSZ1_VA();
-	g_mdp_rsz2_va = color_get_MDP_RSZ2_VA();
-#endif
+	_color_get_VA();
+
 #if defined(CONFIG_MACH_MT6757)
 	if (mt_get_chip_hw_ver() >= 0xCB00)
 		g_config_color30 = true;
 	else
 		g_config_color21 = false;
+#endif
+#if defined(CONFIG_MACH_MT6799)
+	if (mt_get_chip_sw_ver() == 0x0001) { /* E2 */
+		g_config_color30 = true;
+	}
+#endif
+#if defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6758)
+	g_config_color30 = true;
 #endif
 
 	return 0;
@@ -2396,7 +2704,9 @@ static int _color_init(enum DISP_MODULE_ENUM module, void *cmq_handle)
 
 static int _color_deinit(enum DISP_MODULE_ENUM module, void *cmq_handle)
 {
+#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6739)
 	_color_clock_off(module, cmq_handle);
+#endif
 	return 0;
 }
 
@@ -2414,9 +2724,9 @@ static int _color_config(enum DISP_MODULE_ENUM module, struct disp_ddp_path_conf
 	} else {
 		g_color1_dst_w = pConfig->dst_w;
 		g_color1_dst_h = pConfig->dst_h;
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
-#ifndef CONFIG_FOR_SOURCE_PQ
 		offset = C1_OFFSET;
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
+#ifndef CONFIG_FOR_SOURCE_PQ
 		_color_reg_mask(cmdq, DISP_COLOR_INTERNAL_IP_WIDTH + offset, pConfig->dst_w
 			, 0x00003FFF);  /* wrapper width */
 		_color_reg_mask(cmdq, DISP_COLOR_INTERNAL_IP_HEIGHT + offset, pConfig->dst_h
@@ -2466,8 +2776,8 @@ static int _color_config(enum DISP_MODULE_ENUM module, struct disp_ddp_path_conf
 
 static int _color_start(enum DISP_MODULE_ENUM module, void *cmdq)
 {
-	if (module == DISP_MODULE_COLOR1) {
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+	if (is_color1_module(module)) {
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 #ifndef CONFIG_FOR_SOURCE_PQ
 		/* set bypass to COLOR1 */
 		{
@@ -2487,7 +2797,7 @@ static int _color_start(enum DISP_MODULE_ENUM module, void *cmdq)
 
 	mutex_lock(&g_color_reg_lock);
 	if (g_color_reg_valid) {
-		color_write_hw_reg(DISP_MODULE_COLOR0, &g_color_reg, cmdq);
+		color_write_hw_reg(module, &g_color_reg, cmdq);
 		mutex_unlock(&g_color_reg_lock);
 	} else {
 		mutex_unlock(&g_color_reg_lock);
@@ -2517,9 +2827,9 @@ static int _color_partial_update(enum DISP_MODULE_ENUM module, void *arg, void *
 	} else {
 		g_color1_dst_w = width;
 		g_color1_dst_h = height;
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
-#ifndef CONFIG_FOR_SOURCE_PQ
 		offset = C1_OFFSET;
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
+#ifndef CONFIG_FOR_SOURCE_PQ
 		_color_reg_mask(cmdq, DISP_COLOR_INTERNAL_IP_WIDTH + offset, width
 			, 0x00003FFF);  /* wrapper width */
 		_color_reg_mask(cmdq, DISP_COLOR_INTERNAL_IP_HEIGHT + offset, height
@@ -2553,13 +2863,21 @@ static int color_ioctl(enum DISP_MODULE_ENUM module, void *handle,
 
 static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, void *cmdq)
 {
+	/* legacy chip use driver .cmd to call _color_io */
+	/* After mt6763 directly call ioctl_function from ddp_manager */
+	return disp_color_ioctl(module, msg, arg, cmdq);
+}
+
+int disp_color_ioctl(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, void *cmdq)
+{
+
 	int ret = 0;
 	int value = 0;
 	struct DISP_PQ_PARAM *pq_param;
 	struct DISPLAY_PQ_T *pq_index;
 	struct DISPLAY_TDSHP_T *tdshp_index;
 
-	COLOR_DBG("_color_io: msg %x", msg);
+	COLOR_DBG("ioctl_function: module %d, msg %x", module, msg);
 	/* COLOR_ERR("_color_io: GET_PQPARAM %lx\n", DISP_IOCTL_GET_PQPARAM); */
 	/* COLOR_ERR("_color_io: SET_PQPARAM %lx\n", DISP_IOCTL_SET_PQPARAM); */
 	/* COLOR_ERR("_color_io: READ_REG %lx\n", DISP_IOCTL_READ_REG); */
@@ -2578,10 +2896,10 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 
 		if (ncs_tuning_mode == 0) {
 			/* normal mode */
-			DpEngine_COLORonInit(DISP_MODULE_COLOR0, cmdq);
-			DpEngine_COLORonConfig(DISP_MODULE_COLOR0, cmdq);
+			DpEngine_COLORonInit(module, cmdq);
+			DpEngine_COLORonConfig(module, cmdq);
 
-			color_trigger_refresh(DISP_MODULE_COLOR0);
+			color_trigger_refresh(module);
 
 			COLOR_DBG("SET_PQ_PARAM(0)\n");
 		} else {
@@ -2633,11 +2951,11 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 			return -EFAULT;
 		}
 
-		color_write_hw_reg(DISP_MODULE_COLOR0, &g_color_reg, cmdq);
+		color_write_hw_reg(module, &g_color_reg, cmdq);
 		g_color_reg_valid = 1;
 		mutex_unlock(&g_color_reg_lock);
 
-		color_trigger_refresh(DISP_MODULE_COLOR0);
+		color_trigger_refresh(module);
 
 		break;
 
@@ -2720,7 +3038,7 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 
 			ncs_tuning_mode = 0;
 			COLOR_DBG("ncs_tuning_mode = 0\n");
-			color_trigger_refresh(DISP_MODULE_COLOR0);
+			color_trigger_refresh(module);
 		} else {
 			COLOR_ERR("DISP_IOCTL_MUTEX_CONTROL invalid control\n");
 			return -EFAULT;
@@ -2742,6 +3060,16 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 			}
 
 			pa = (unsigned int)rParams.reg;
+#if defined(CONFIG_MACH_MT6799)
+			/*handle capture coordinate of dual pipe tool tuning*/
+			COLOR_ERR("DISP_IOCTL_READ_REG, g_color_pos_x = %x , g_color0_dst_w = %lx\n",
+					g_color_pos_x, g_color0_dst_w);
+
+			if (primary_display_get_pipe_status() == DUAL_PIPE && g_color_pos_x > g_color0_dst_w
+				&& (pa & 0xFFFFF000) == ddp_reg_pa_base[DISP_REG_COLOR0]) {
+				pa = (pa & 0x00000FFF) | ddp_reg_pa_base[DISP_REG_COLOR1];
+			}
+#endif
 			va = color_pa2va(pa);
 
 			if (color_is_reg_addr_valid(va) == 0) {
@@ -2774,6 +3102,45 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 			}
 
 			pa = (unsigned int)wParams.reg;
+#if defined(CONFIG_MACH_MT6799)
+{
+			bool isCaptureCmd = (pa == (DISP_COLOR_POS_MAIN_OFFSET | ddp_reg_pa_base[DISP_REG_COLOR0]) ||
+				pa == (DISP_COLOR_POS_MAIN_OFFSET | ddp_reg_pa_base[DISP_REG_COLOR1])) ? true : false;
+
+			/*keep capture x-coordinate for dual pipe tool tuning*/
+			if (isCaptureCmd) {
+				g_color_pos_x = (wParams.val & DISP_COLOR_POS_MAIN_POS_X_MASK);
+				COLOR_ERR("DISP_IOCTL_WRITE_REG, g_color_pos_x = %x , wParams.val = %x\n",
+						g_color_pos_x, wParams.val);
+
+			}
+
+			if (module == DISP_MODULE_COLOR1) {
+				/*handle capture coordinate of dual pipe tool tuning*/
+				if (primary_display_get_pipe_status() == DUAL_PIPE && isCaptureCmd) {
+					if (g_color_pos_x <= g_color0_dst_w)
+						/*it's pipe0 x_pos, force pipe1 to write a over-bound x_pos*/
+						wParams.val |= 0xFFFF;
+					else
+						wParams.val = ((wParams.val & DISP_COLOR_POS_MAIN_POS_Y_MASK)
+										| (g_color_pos_x - g_color0_dst_w));
+				}
+
+				if ((pa & 0xFFFFF000) == ddp_reg_pa_base[DISP_REG_COLOR0])
+					pa = (pa & 0x00000FFF) | ddp_reg_pa_base[DISP_REG_COLOR1];
+				else if ((pa & 0xFFFFF000) == ddp_reg_pa_base[DISP_REG_CCORR0])
+					pa = (pa & 0x00000FFF) | ddp_reg_pa_base[DISP_REG_CCORR1];
+				else if ((pa & 0xFFFFF000) == ddp_reg_pa_base[DISP_REG_AAL0])
+					pa = (pa & 0x00000FFF) | ddp_reg_pa_base[DISP_REG_AAL1];
+				else if ((pa & 0xFFFFF000) == ddp_reg_pa_base[DISP_REG_GAMMA0])
+					pa = (pa & 0x00000FFF) | ddp_reg_pa_base[DISP_REG_GAMMA1];
+				else {
+					COLOR_DBG("DISP_IOCTL_WRITE_REG, not disp dual pipe PQ module\n");
+					break;
+				}
+			}
+}
+#endif
 			va = color_pa2va(pa);
 
 			ret = color_is_reg_addr_valid(va);
@@ -2787,7 +3154,7 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 				if (cmdq == NULL) {
 					mt_reg_sync_writel((unsigned int)(INREG32(va) &
 									  ~(wParams.
-									    mask)) | (wParams.val),
+										mask)) | (wParams.val),
 							   (unsigned long *)(va));
 				} else {
 					cmdqRecWrite(cmdq, pa, wParams.val, wParams.mask);
@@ -2814,10 +3181,10 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 				return -EFAULT;
 			}
 			if (rParams.reg > DISP_COLOR_SWREG_END
-			    || rParams.reg < DISP_COLOR_SWREG_START) {
+				|| rParams.reg < DISP_COLOR_SWREG_START) {
 				COLOR_ERR
-				    ("sw reg read, addr invalid, addr min=0x%x, max=0x%x, addr=0x%x\n",
-				     DISP_COLOR_SWREG_START, DISP_COLOR_SWREG_END, rParams.reg);
+					("sw reg read, addr invalid, addr min=0x%x, max=0x%x, addr=0x%x\n",
+					 DISP_COLOR_SWREG_START, DISP_COLOR_SWREG_END, rParams.reg);
 				return -EFAULT;
 			}
 
@@ -2843,10 +3210,10 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 
 
 			if (wParams.reg > DISP_COLOR_SWREG_END
-			    || wParams.reg < DISP_COLOR_SWREG_START) {
+				|| wParams.reg < DISP_COLOR_SWREG_START) {
 				COLOR_ERR
-				    ("sw reg write, addr invalid, addr min=0x%x, max=0x%x, addr=0x%x\n",
-				     DISP_COLOR_SWREG_START, DISP_COLOR_SWREG_END, wParams.reg);
+					("sw reg write, addr invalid, addr min=0x%x, max=0x%x, addr=0x%x\n",
+					 DISP_COLOR_SWREG_START, DISP_COLOR_SWREG_END, wParams.reg);
 				return -EFAULT;
 			}
 
@@ -2864,8 +3231,8 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 			return -EFAULT;
 		}
 
-		ddp_color_bypass_color(DISP_MODULE_COLOR0, value, cmdq);
-		color_trigger_refresh(DISP_MODULE_COLOR0);
+		ddp_color_bypass_color(module, value, cmdq);
+		color_trigger_refresh(module);
 
 		break;
 
@@ -2878,11 +3245,12 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 				return -EFAULT;
 			}
 
-			COLOR_DBG
-			    ("DISP_IOCTL_PQ_SET_WINDOW, before set... en[%d], x[0x%x], y[0x%x]\n",
-			     g_split_en, g_split_window_x, g_split_window_y);
-			ddp_color_set_window(&win_param, cmdq);
-			color_trigger_refresh(DISP_MODULE_COLOR0);
+			COLOR_DBG("DISP_IOCTL_PQ_SET_WINDOW, before set... module[%d], en[%d], x[0x%x], y[0x%x]\n",
+				module, g_split_en, ((g_split_window_x_end << 16) | g_split_window_x_start),
+				((g_split_window_y_end << 16) | g_split_window_y_start));
+
+			ddp_color_set_window(module, &win_param, cmdq);
+			color_trigger_refresh(module);
 
 			break;
 		}
@@ -2934,7 +3302,7 @@ static int _color_io(enum DISP_MODULE_ENUM module, int msg, unsigned long arg, v
 
 		break;
 
-#ifdef DISP_MDP_COLOR_ON
+#if defined(DISP_MDP_COLOR_ON) || defined(MDP_COLOR_ON)
 	case DISP_IOCTL_PQ_GET_MDP_COLOR_CAP:
 			if (copy_to_user((void *)arg, &mdp_color_cap, sizeof(struct MDP_COLOR_CAP))) {
 				COLOR_ERR("DISP_IOCTL_PQ_GET_MDP_COLOR_CAP Copy to user failed\n");
@@ -2963,10 +3331,9 @@ void set_color_bypass(enum DISP_MODULE_ENUM module, int bypass, void *cmdq_handl
 	return;
 #endif
 
-	g_color_bypass = bypass;
+	g_color_bypass[index_of_color(module)] = bypass;
 
-	if (module == DISP_MODULE_COLOR1)
-		offset = C1_OFFSET;
+	offset = color_get_offset(module);
 
 	/* DISP_REG_SET(NULL, DISP_COLOR_INTERNAL_IP_WIDTH + offset, srcWidth);  //wrapper width */
 	/* DISP_REG_SET(NULL, DISP_COLOR_INTERNAL_IP_HEIGHT + offset, srcHeight); //wrapper height */
@@ -3007,10 +3374,10 @@ static int _color_bypass(enum DISP_MODULE_ENUM module, int bypass)
 	return -1;
 #endif
 
-	g_color_bypass = bypass;
+	g_color_bypass[index_of_color(module)] = bypass;
 
-	if (module == DISP_MODULE_COLOR1)
-		offset = C1_OFFSET;
+	offset = color_get_offset(module);
+
 
 	/* _color_reg_set(NULL, DISP_COLOR_INTERNAL_IP_WIDTH + offset, srcWidth);  //wrapper width */
 	/* _color_reg_set(NULL, DISP_COLOR_INTERNAL_IP_HEIGHT + offset, srcHeight); //wrapper height */
@@ -3036,7 +3403,7 @@ static int _color_bypass(enum DISP_MODULE_ENUM module, int bypass)
 			_color_reg_mask(NULL, DISP_COLOR_CM1_EN + offset, 0x01, 0x01);
 		}
 
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795)
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795)
 		_color_reg_mask(NULL, DISP_COLOR_CM2_EN + offset, 0x01, 0x11);	/* also set no rounding on Y2R */
 #else
 		_color_reg_mask(NULL, DISP_COLOR_CM2_EN + offset, 0x11, 0x11);	/* also set no rounding on Y2R */
@@ -3057,13 +3424,21 @@ static int _color_build_cmdq(enum DISP_MODULE_ENUM module, void *cmdq_trigger_ha
 
 	/* only get COLOR HIST on primary display */
 	if ((module == DISP_MODULE_COLOR0) && (state == CMDQ_AFTER_STREAM_EOF)) {
-#if defined(CONFIG_ARCH_MT6595) || defined(CONFIG_ARCH_MT6795) || defined(CONFIG_ARCH_ELBRUS) \
+#if defined(CONFIG_MACH_MT6595) || defined(CONFIG_MACH_MT6795) || defined(CONFIG_MACH_ELBRUS) \
 	|| defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || defined(CONFIG_MACH_MT6799)
 		ret =
 		    cmdqRecReadToDataRegister(cmdq_trigger_handle,
 					      ddp_reg_pa_base[DISP_REG_COLOR0] +
 					      (DISP_COLOR_TWO_D_W1_RESULT - DISPSYS_COLOR0_BASE),
 					      CMDQ_DATA_REG_PQ_COLOR);
+#elif defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6763) \
+	|| defined(CONFIG_MACH_MT6739)
+		ret =
+			cmdqRecReadToDataRegister(cmdq_trigger_handle,
+						  ddp_get_module_pa(DISP_MODULE_COLOR0) +
+						  (DISP_COLOR_TWO_D_W1_RESULT - DISPSYS_COLOR0_BASE),
+						  CMDQ_DATA_REG_PQ_COLOR);
+
 #else
 		ret =
 		    cmdqRecReadToDataRegister(cmdq_trigger_handle,

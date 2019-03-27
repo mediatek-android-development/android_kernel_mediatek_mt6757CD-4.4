@@ -41,11 +41,11 @@
  */
 
 /*=============================================================*/
-
 static kuid_t uid = KUIDT_INIT(0);
 static kgid_t gid = KGIDT_INIT(1000);
 static DEFINE_SEMAPHORE(sem_mutex);
 static int isTimerCancelled;
+
 
 static unsigned int interval;	/* seconds, 0 : no auto polling */
 static unsigned int trip_temp[10] = { 120000, 110000, 100000, 90000, 80000, 70000, 65000, 60000, 55000, 50000 };
@@ -433,7 +433,6 @@ static void mtkts_tsx_start_thermal_timer(void)
 {
 	/* pr_debug("mtkts_tsx_start_thermal_timer\n"); */
 	/* resume thermal framework polling when leaving deep idle */
-
 	if (!isTimerCancelled)
 		return;
 
@@ -443,8 +442,8 @@ static void mtkts_tsx_start_thermal_timer(void)
 		return;
 
 	if (thz_dev != NULL && interval != 0)
-		mod_delayed_work(system_freezable_wq, &(thz_dev->poll_queue),
-			round_jiffies(msecs_to_jiffies(1000)));
+		mod_delayed_work(system_freezable_power_efficient_wq,
+				&(thz_dev->poll_queue), round_jiffies(msecs_to_jiffies(1000)));
 
 	up(&sem_mutex);
 }

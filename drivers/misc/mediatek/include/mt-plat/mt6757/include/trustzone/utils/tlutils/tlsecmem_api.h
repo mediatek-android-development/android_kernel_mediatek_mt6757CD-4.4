@@ -1,12 +1,14 @@
 /*
- * Copyright (c) 2013 TRUSTONIC LIMITED
- * All rights reserved
+ * Copyright (C) 2016 MediaTek Inc.
  *
- * The present software is the confidential and proprietary information of
- * TRUSTONIC LIMITED. You shall not disclose the present software and shall
- * use it only in accordance with the terms of the license agreement you
- * entered into with TRUSTONIC LIMITED. This software may be subject to
- * export or import laws in certain countries.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
  */
 
 #ifndef TLSECMEM_H_
@@ -46,43 +48,52 @@
  * @param len Length of the data to process.
  * @param data Data to processed (cleartext or ciphertext).
  */
-typedef struct {
-	tciCommandHeader_t  header;     /**< Command header */
-	uint32_t            len;        /**< Length of data to process or buffer */
-	uint32_t            respLen;    /**< Length of response buffer */
-} tl_cmd_t;
+struct tl_cmd_t {
+	struct tciCommandHeader_t header;     /**< Command header */
+	uint32_t                  len;        /**< Length of data to process or buffer */
+	uint32_t                  respLen;    /**< Length of response buffer */
+};
 
 /*
  * Response structure Trustlet -> Trustlet Connector.
  */
-typedef struct {
-	tciResponseHeader_t header;     /**< Response header */
-	uint32_t            len;
-} tl_rsp_t;
+struct tl_rsp_t {
+	struct tciResponseHeader_t header;     /**< Response header */
+	uint32_t                   len;
+};
 
-typedef struct {
+struct tl_sender_info_t {
 	uint8_t  name[MAX_NAME_SZ];
 	uint32_t id;
-} tl_sender_info_t;
+};
 
 /*
  * TCI message data.
  */
-typedef struct {
+struct tciMessage_t {
 	union {
-		tl_cmd_t     cmd_secmem;
-		tl_rsp_t     rsp_secmem;
+		struct tl_cmd_t     cmd_secmem;
+		struct tl_rsp_t     rsp_secmem;
 	};
+
+#ifdef SECMEM_64BIT_PHYS_SUPPORT
+	uint64_t    alignment;  /* IN */
+	uint64_t    size;       /* IN */
+	uint32_t    refcount;   /* INOUT */
+	uint64_t    sec_handle; /* OUT */
+#else
 	uint32_t    alignment;  /* IN */
 	uint32_t    size;       /* IN */
 	uint32_t    refcount;   /* INOUT */
 	uint32_t    sec_handle; /* OUT */
+#endif /* !SECMEM_64BIT_PHYS_SUPPORT */
+
 	uint32_t    ResultData;
 
 	/* Debugging purpose */
-	tl_sender_info_t sender;
+	struct tl_sender_info_t sender;
 
-} tciMessage_t;
+};
 
 /*
  * Trustlet UUID.

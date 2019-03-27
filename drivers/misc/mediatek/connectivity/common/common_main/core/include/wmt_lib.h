@@ -243,6 +243,8 @@ extern INT32 wmt_lib_tx_raw(PUINT8 data, UINT32 size, PUINT32 writtenSize);
 extern INT32 wmt_lib_rx(PUINT8 buff, UINT32 buffLen, PUINT32 readSize);
 extern VOID wmt_lib_flush_rx(VOID);
 extern UINT32 wmt_lib_co_clock_flag_get(VOID);
+extern INT32 wmt_lib_sdio_reg_rw(INT32 func_num, INT32 direction, UINT32 offset, UINT32 value);
+
 
 #if WMT_PLAT_ALPS
 extern PINT8 wmt_uart_port_desc;	/* defined in mtk_wcn_cmb_stub_alps.cpp */
@@ -259,6 +261,10 @@ extern INT32 wmt_lib_ps_disable(VOID);
 extern VOID wmt_lib_ps_irq_cb(VOID);
 #endif
 extern VOID wmt_lib_ps_set_sdio_psop(PF_WMT_SDIO_PSOP own_cb);
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+extern VOID wmt_lib_sdio_deep_sleep_flag_set_cb_reg(PF_WMT_SDIO_DEEP_SLEEP flag_cb);
+#endif
+extern VOID wmt_lib_sdio_reg_rw_cb(PF_WMT_SDIO_DEBUG reg_rw_cb);
 extern INT32 wmt_lib_register_thermal_ctrl_cb(thermal_query_ctrl_cb thermal_ctrl);
 
 /* LXOP functions: */
@@ -269,7 +275,7 @@ extern MTK_WCN_BOOL wmt_lib_put_act_op(P_OSAL_OP pOp);
 /* extern ENUM_WMTHWVER_TYPE_T wmt_lib_get_hwver (VOID); */
 extern UINT32 wmt_lib_get_icinfo(ENUM_WMT_CHIPINFO_TYPE_T type);
 
-extern MTK_WCN_BOOL wmt_lib_is_therm_ctrl_support(VOID);
+extern MTK_WCN_BOOL wmt_lib_is_therm_ctrl_support(ENUM_WMTTHERM_TYPE_T eType);
 extern MTK_WCN_BOOL wmt_lib_is_dsns_ctrl_support(VOID);
 extern INT32 wmt_lib_trigger_cmd_signal(INT32 result);
 extern PUINT8 wmt_lib_get_cmd(VOID);
@@ -287,7 +293,10 @@ extern INT32 wmt_lib_set_aif(CMB_STUB_AIF_X aif, MTK_WCN_BOOL share);	/* set AUD
 extern INT32 wmt_lib_host_awake_get(VOID);
 extern INT32 wmt_lib_host_awake_put(VOID);
 extern UINT32 wmt_lib_dbg_level_set(UINT32 level);
-
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+extern INT32 wmt_lib_deep_sleep_ctrl(INT32 value);
+extern MTK_WCN_BOOL wmt_lib_deep_sleep_flag_set(MTK_WCN_BOOL flag);
+#endif
 extern INT32 wmt_lib_msgcb_reg(ENUM_WMTDRV_TYPE_T eType, PF_WMT_CB pCb);
 
 extern INT32 wmt_lib_msgcb_unreg(ENUM_WMTDRV_TYPE_T eType);
@@ -314,7 +323,6 @@ extern MTK_WCN_BOOL wmt_lib_stp_is_btif_fullset_mode(VOID);
 extern INT32 wmt_lib_set_current_op(P_DEV_WMT pWmtDev, P_OSAL_OP pOp);
 extern P_OSAL_OP wmt_lib_get_current_op(P_DEV_WMT pWmtDev);
 extern PUINT8 wmt_lib_get_fwinfor_from_emi(UINT8 section, UINT32 offset, PUINT8 buff, UINT32 len);
-extern INT32 wmt_lib_poll_cpupcr(UINT32 count, UINT16 sleep, UINT16 toAee);
 extern INT32 wmt_lib_merge_if_flag_ctrl(UINT32 enable);
 extern INT32 wmt_lib_merge_if_flag_get(UINT32 enable);
 
@@ -322,18 +330,16 @@ extern PUINT8 wmt_lib_get_cpupcr_xml_format(PUINT32 len);
 extern UINT32 wmt_lib_set_host_assert_info(UINT32 type, UINT32 reason, UINT32 en);
 extern INT8 wmt_lib_co_clock_get(VOID);
 extern UINT32 wmt_lib_soc_set_wifiver(UINT32 wifiver);
-extern INT32 wmt_lib_stp_dbg_poll_cpupcr(UINT32 times, UINT32 sleep, UINT32 cmd);
-
+extern VOID wmt_lib_dump_wmtd_backtrace(VOID);
 
 #if CFG_WMT_LTE_COEX_HANDLING
-extern MTK_WCN_BOOL wmt_lib_handle_idc_msg(ipc_ilm_t *idc_infor);
+extern MTK_WCN_BOOL wmt_lib_handle_idc_msg(struct ipc_ilm *idc_infor);
 #endif
-#if WMT_FOR_SDIO_1V_AUTOK
 extern UINT32 wmt_lib_get_drv_status(UINT32 type);
-#endif
 extern INT32 wmt_lib_tm_temp_query(VOID);
 extern INT32 wmt_lib_trigger_reset(VOID);
-extern VOID wmt_lib_read_fw_cpupcr(UINT32 times, UINT32 sleep, UINT32 cmd);
+extern INT32 wmt_lib_trigger_assert(ENUM_WMTDRV_TYPE_T type, UINT32 reason);
+extern INT32 wmt_lib_wifi_fem_cfg_report(PVOID pvInfoBuf);
 #if CFG_WMT_PS_SUPPORT
 extern UINT32 wmt_lib_quick_sleep_ctrl(UINT32 en);
 #endif

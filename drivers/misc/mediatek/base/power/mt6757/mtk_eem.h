@@ -22,53 +22,6 @@
 #define EN_EEM_OD (1) /* enable/disable EEM-OD (SW) */
 /* #define EEM_DVT_TEST */
 
-/**
- * 1: Select VCORE_AO ptpod detector
- * 0: Select VCORE_PDN ptpod detector
- */
-
-/* EEM Structure */
-typedef struct {
-	unsigned int ADC_CALI_EN;
-	unsigned int PTPINITEN;
-	unsigned int PTPMONEN;
-
-	unsigned int MDES;
-	unsigned int BDES;
-	unsigned int DCCONFIG;
-	unsigned int DCMDET;
-	unsigned int DCBDET;
-	unsigned int AGECONFIG;
-	unsigned int AGEM;
-	unsigned int AGEDELTA;
-	unsigned int DVTFIXED;
-	unsigned int VCO;
-	unsigned int MTDES;
-	unsigned int MTS;
-	unsigned int BTS;
-
-	unsigned char FREQPCT0;
-	unsigned char FREQPCT1;
-	unsigned char FREQPCT2;
-	unsigned char FREQPCT3;
-	unsigned char FREQPCT4;
-	unsigned char FREQPCT5;
-	unsigned char FREQPCT6;
-	unsigned char FREQPCT7;
-
-	unsigned int DETWINDOW;
-	unsigned int VMAX;
-	unsigned int VMIN;
-	unsigned int DTHI;
-	unsigned int DTLO;
-	unsigned int VBOOT;
-	unsigned int DETMAX;
-
-	unsigned int DCVOFFSETIN;
-	unsigned int AGEVOFFSETIN;
-} PTP_INIT_T;
-
-
 enum eem_ctrl_id {
 	EEM_CTRL_2L = 0,
 	EEM_CTRL_L = 1,
@@ -151,18 +104,15 @@ extern void aee_rr_rec_ptp_temp(u64 val);
 extern void aee_rr_rec_ptp_status(u8 val);
 extern void aee_rr_rec_eem_pi_offset(u8 val);
 
-extern u32 aee_rr_curr_ptp_60(void);
-extern u32 aee_rr_curr_ptp_64(void);
-extern u32 aee_rr_curr_ptp_68(void);
-extern u32 aee_rr_curr_ptp_6C(void);
-extern u32 aee_rr_curr_ptp_78(void);
-extern u32 aee_rr_curr_ptp_7C(void);
-extern u32 aee_rr_curr_ptp_80(void);
-extern u32 aee_rr_curr_ptp_84(void);
-extern u32 aee_rr_curr_ptp_88(void);
-extern u32 aee_rr_curr_ptp_8C(void);
-extern u32 aee_rr_curr_ptp_9C(void);
-extern u32 aee_rr_curr_ptp_A0(void);
+extern void aee_rr_rec_ptp_e0(u32 val);
+extern void aee_rr_rec_ptp_e1(u32 val);
+extern void aee_rr_rec_ptp_e2(u32 val);
+extern void aee_rr_rec_ptp_e3(u32 val);
+extern void aee_rr_rec_ptp_e4(u32 val);
+extern void aee_rr_rec_ptp_e5(u32 val);
+extern void aee_rr_rec_ptp_e6(u32 val);
+extern void aee_rr_rec_ptp_e7(u32 val);
+extern void aee_rr_rec_ptp_e8(u32 val);
 extern u64 aee_rr_curr_ptp_vboot(void);
 extern u64 aee_rr_curr_ptp_cpu_big_volt(void);
 extern u64 aee_rr_curr_ptp_cpu_big_volt_1(void);

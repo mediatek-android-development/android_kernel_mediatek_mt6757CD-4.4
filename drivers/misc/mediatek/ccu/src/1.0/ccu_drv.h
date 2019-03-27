@@ -196,6 +196,9 @@ typedef struct {
 	spinlock_t SpinLockIrqCnt[CCU_IRQ_TYPE_AMOUNT];
 	spinlock_t SpinLockRTBC;
 	spinlock_t SpinLockClock;
+	spinlock_t SpinLockI2cPower;
+	unsigned int IsI2cPowerDisabling;
+	unsigned int IsI2cPoweredOn;
 	unsigned int IsCcuPoweredOn;
 
 	wait_queue_head_t WaitQueueHead;
@@ -292,6 +295,7 @@ typedef enum ccu_eng_status_e {
 	CCU_ENG_STATUS_INVALID,
 	CCU_ENG_STATUS_FLUSH,
 	CCU_ENG_STATUS_FAILURE,
+	CCU_ENG_STATUS_ERESTARTSYS,
 } ccu_eng_status_t;
 
 /*---------------------------------------------------------------------------*/
@@ -312,7 +316,7 @@ typedef struct ccu_cmd_s {
 #define CCU_IOCTL_FLUSH_COMMAND             _IOW(CCU_MAGICNO,   3, int)
 #define CCU_IOCTL_WAIT_IRQ                  _IOW(CCU_MAGICNO,   9, int)
 #define CCU_IOCTL_SEND_CMD                  _IOWR(CCU_MAGICNO, 10, int)
-#define CCU_IOCTL_SET_RUN                   _IOW(CCU_MAGICNO,  11, int)
+#define CCU_IOCTL_SET_RUN                   _IO(CCU_MAGICNO,   11)
 
 #define CCU_CLEAR_IRQ                       _IOW(CCU_MAGICNO,  12, int)
 #define CCU_REGISTER_IRQ_USER_KEY           _IOR(CCU_MAGICNO,  13, int)

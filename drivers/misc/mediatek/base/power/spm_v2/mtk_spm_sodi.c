@@ -25,7 +25,7 @@
 #endif
 
 #include <mach/mtk_gpt.h>
-#include <mach/mtk_secure_api.h>
+#include <mt-plat/mtk_secure_api.h>
 
 #include <mt-plat/mtk_boot.h>
 #if defined(CONFIG_MTK_SYS_CIRQ)
@@ -186,113 +186,7 @@ static struct pwr_ctrl sodi_ctrl = {
 #endif
 };
 #else
-static struct pwr_ctrl sodi_ctrl = {
-	.wake_src = WAKE_SRC_FOR_SODI,
-
-	.wake_src_md32 = WAKE_SRC_FOR_MD32,
-	.r0_ctrl_en = 1,
-	.r7_ctrl_en = 1,
-	.infra_dcm_lock = 1, /* set to be 1 if SODI 2.5/3.0 */
-
-	.wfi_op = WFI_OP_AND,
-
-	/* SPM_AP_STANDBY_CON */
-	.mp0top_idle_mask = 0,
-	.mp1top_idle_mask = 0,
-	.mcusys_idle_mask = 0,
-	.md_ddr_dbc_en = 0,
-	.md1_req_mask_b = 1,
-	.md2_req_mask_b = 0, /* bit 20 */
-#if defined(CONFIG_ARCH_MT6755)
-	.scp_req_mask_b = 0, /* bit 21 */
-#elif defined(CONFIG_ARCH_MT6797)
-	.scp_req_mask_b = 1, /* bit 21 */
-#endif
-	.lte_mask_b = 0,
-	.md_apsrc1_sel = 0, /* bit 24 */
-	.md_apsrc0_sel = 0, /* bit 25 */
-	.conn_mask_b = 1,
-	.conn_apsrc_sel = 0, /* bit 27 */
-
-	/* SPM_SRC_REQ */
-	.spm_apsrc_req = 0,
-	.spm_f26m_req = 0,
-	.spm_lte_req = 0,
-	.spm_infra_req = 0,
-	.spm_vrf18_req = 0,
-	.spm_dvfs_req = 0,
-	.spm_dvfs_force_down = 0,
-	.spm_ddren_req = 0,
-	.cpu_md_dvfs_sop_force_on = 0,
-
-	/* SPM_SRC_MASK */
-	.ccif0_to_md_mask_b = 1,
-	.ccif0_to_ap_mask_b = 1,
-	.ccif1_to_md_mask_b = 1,
-	.ccif1_to_ap_mask_b = 1,
-	.ccifmd_md1_event_mask_b = 1,
-	.ccifmd_md2_event_mask_b = 1,
-	.vsync_mask_b = 0,	/* 5-bit */
-	.md_srcclkena_0_infra_mask_b = 0, /* bit 12 */
-	.md_srcclkena_1_infra_mask_b = 0, /* bit 13 */
-	.conn_srcclkena_infra_mask_b = 0, /* bit 14 */
-	.md32_srcclkena_infra_mask_b = 0, /* bit 15 */
-	.srcclkeni_infra_mask_b = 0, /* bit 16 */
-	.md_apsrcreq_0_infra_mask_b = 1,
-	.md_apsrcreq_1_infra_mask_b = 0,
-	.conn_apsrcreq_infra_mask_b = 1,
-	.md32_apsrcreq_infra_mask_b = 0,
-	.md_ddr_en_0_mask_b = 1,
-	.md_ddr_en_1_mask_b = 0, /* bit 22 */
-	.md_vrf18_req_0_mask_b = 1,
-	.md_vrf18_req_1_mask_b = 0, /* bit 24 */
-	.emi_bw_dvfs_req_mask = 1,
-	.md_srcclkena_0_dvfs_req_mask_b = 0,
-	.md_srcclkena_1_dvfs_req_mask_b = 0,
-	.conn_srcclkena_dvfs_req_mask_b = 0,
-
-	/* SPM_SRC2_MASK */
-	.dvfs_halt_mask_b = 0x1f, /* 5-bit */
-	.vdec_req_mask_b = 0, /* bit 6 */
-	.gce_req_mask_b = 1, /* bit 7, set to be 1 for SODI */
-	.cpu_md_dvfs_erq_merge_mask_b = 0,
-	.md1_ddr_en_dvfs_halt_mask_b = 0,
-	.md2_ddr_en_dvfs_halt_mask_b = 0,
-	.vsync_dvfs_halt_mask_b = 0, /* 5-bit, bit 11 ~ 15 */
-	.conn_ddr_en_mask_b = 1,
-	.disp_req_mask_b = 1, /* bit 17, set to be 1 for SODI */
-	.disp1_req_mask_b = 1, /* bit 18, set to be 1 for SODI */
-#if defined(CONFIG_ARCH_MT6755)
-	.mfg_req_mask_b = 0, /* bit 19 */
-#elif defined(CONFIG_ARCH_MT6797)
-	.mfg_req_mask_b = 1, /* bit 19, set to be 1 for SODI */
-#endif
-	.c2k_ps_rccif_wake_mask_b = 1,
-	.c2k_l1_rccif_wake_mask_b = 1,
-	.ps_c2k_rccif_wake_mask_b = 1,
-	.l1_c2k_rccif_wake_mask_b = 1,
-	.sdio_on_dvfs_req_mask_b = 0,
-	.emi_boost_dvfs_req_mask_b = 0,
-	.cpu_md_emi_dvfs_req_prot_dis = 0,
-#if defined(CONFIG_ARCH_MT6797)
-	.disp_od_req_mask_b = 1, /* bit 27, set to be 1 for SODI */
-#endif
-	/* SPM_CLK_CON */
-	.srclkenai_mask = 1,
-
-	.mp1_cpu0_wfi_en	= 1,
-	.mp1_cpu1_wfi_en	= 1,
-	.mp1_cpu2_wfi_en	= 1,
-	.mp1_cpu3_wfi_en	= 1,
-	.mp0_cpu0_wfi_en	= 1,
-	.mp0_cpu1_wfi_en	= 1,
-	.mp0_cpu2_wfi_en	= 1,
-	.mp0_cpu3_wfi_en	= 1,
-
-#if SPM_BYPASS_SYSPWREQ
-	.syspwreq_mask = 1,
-#endif
-};
+#error "Not support SODI"
 #endif
 
 /* please put firmware to vendor/mediatek/proprietary/hardware/spm/mtxxxx/ */
@@ -302,24 +196,18 @@ struct spm_lp_scen __spm_sodi = {
 
 static bool gSpm_SODI_mempll_pwr_mode;
 static bool gSpm_sodi_en;
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 static bool gSpm_lcm_vdo_mode;
-#endif
 
 static long int sodi_logout_prev_time;
 static int pre_emi_refresh_cnt;
 static bool memPllCG_prev_status = true;	/* true:CG, false:pwrdn */
 static unsigned int logout_sodi_cnt;
 static unsigned int logout_selfrefresh_cnt;
-#if defined(CONFIG_ARCH_MT6755)
-static int by_ccif1_count;
-#elif defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 static unsigned int last_r12;
 
 #define IS_NOT_FREQUENT_EVENT(evt, curr)	((evt != last_r12) || \
 					 (((curr) - sodi_logout_prev_time) > SODI_LOGOUT_FREQUENT_CRITERIA))
 #define IS_NOT_IGNORE_EVENT(evt)		(((evt)&WAKE_SRC_R12_APXGPT1_EVENT_B) == 0)
-#endif
 
 void spm_trigger_wfi_for_sodi(struct pwr_ctrl *pwrctrl)
 {
@@ -449,13 +337,7 @@ void spm_sodi_pmic_before_wfi(void)
 	u32 val;
 
 	__spm_pmic_pg_force_on();
-#if defined(CONFIG_ARCH_MT6755)
-	pmic_read_interface_nolock(MT6351_PMIC_BUCK_VSRAM_PROC_VOSEL_ON_ADDR,
-					&val,
-					MT6351_PMIC_BUCK_VSRAM_PROC_VOSEL_ON_MASK,
-					MT6351_PMIC_BUCK_VSRAM_PROC_VOSEL_ON_SHIFT);
-	mt_spm_pmic_wrap_set_cmd(PMIC_WRAP_PHASE_DEEPIDLE, IDX_DI_VSRAM_NORMAL, val);
-#elif defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
+#if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 #ifdef SODI_VSRAM_VPROC_SHUTDOWN
 	pmic_read_interface_nolock(MT6351_PMIC_RG_VSRAM_PROC_EN_ADDR, &val, PMIC_VAL_SIZE_MASK, 0);
 	mt_spm_pmic_wrap_set_cmd_full(PMIC_WRAP_PHASE_DEEPIDLE,
@@ -519,66 +401,23 @@ static void spm_sodi_post_process(void)
 	spm_enable_mmu_smi_async();
 }
 
-#if defined(CONFIG_ARCH_MT6797)
-#define is_dvfs_wakeup(r12_ext) ((r12_ext&WAKE_SRC_R12_EXT_VCORE_DVFS_B) != 0)
-static bool spm_sodi_assert(struct wake_status *wakesta)
-{
-	if (likely((wakesta->assert_pc == 0) && (wakesta->r12 != 0)))
-		return false;
-
-	if (is_dvfs_wakeup(wakesta->r12_ext)) {
-		static long int logout_prev_dvfs_time;
-		long int curr_time = spm_get_current_time_ms();
-
-		wakesta->r12 = WAKE_SRC_R12_PCM_TIMER;
-		if ((curr_time - logout_prev_dvfs_time < 20))
-			return false;
-
-		logout_prev_dvfs_time = curr_time;
-	}
-
-	return true;
-}
-#else
 static inline bool spm_sodi_assert(struct wake_status *wakesta)
 {
 	return (wakesta->assert_pc != 0) || (wakesta->r12 == 0);
 }
-#endif
-
 
 static bool spm_sodi_is_not_gpt_event(struct wake_status *wakesta, long int curr_time)
 {
 	bool logout = false;
 
-#if defined(CONFIG_ARCH_MT6755)
-	if ((wakesta->r12 & WAKE_SRC_R12_APXGPT1_EVENT_B) == 0) {
-		if ((wakesta->r12 & WAKE_SRC_R12_CCIF1_EVENT_B)) {
-			if ((by_ccif1_count >= 5) ||
-				((curr_time - sodi_logout_prev_time) > 20U)) {
-				logout = true;
-				by_ccif1_count = 0;
-			} else if (by_ccif1_count == 0) {
-				logout = true;
-			}
-			by_ccif1_count++;
-		}
-	}
-#elif defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 	if (IS_NOT_IGNORE_EVENT(wakesta->r12) && IS_NOT_FREQUENT_EVENT(wakesta->r12, curr_time))
 		logout = true;
-#endif
 	return logout;
 }
 
 static inline bool spm_sodi_abnormal_residency(struct wake_status *wakesta)
 {
-#if defined(CONFIG_ARCH_MT6755)
-	return (wakesta->timer_out <= SODI_LOGOUT_TIMEOUT_CRITERIA) ||
-			(wakesta->timer_out >= SODI_LOGOUT_MAXTIME_CRITERIA);
-#elif defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 	return wakesta->timer_out >= SODI_LOGOUT_MAXTIME_CRITERIA;
-#endif
 }
 
 static inline bool spm_sodi_change_emi_state(struct wake_status *wakesta)
@@ -631,10 +470,10 @@ void spm_sodi_dvfs_status(u32 sodi_flags)
 #endif
 }
 
-wake_reason_t
+unsigned int
 __spm_sodi_output_log(struct wake_status *wakesta, struct pcm_desc *pcmdesc, int vcore_status, u32 flags, int logout)
 {
-	wake_reason_t wr = WR_NONE;
+	unsigned int wr = WR_NONE;
 
 	if ((wakesta->assert_pc != 0) || (wakesta->r12 == 0)) {
 		if (wakesta->assert_pc != 0) {
@@ -669,10 +508,6 @@ __spm_sodi_output_log(struct wake_status *wakesta, struct pcm_desc *pcmdesc, int
 
 			if (wakesta->wake_misc & WAKE_MISC_CPU_WAKE)
 				strncat(buf, " CPU", sizeof(buf) - strlen(buf) - 1);
-#if defined(CONFIG_ARCH_MT6797)
-			if (is_dvfs_wakeup(wakesta->r12_ext))
-				strncat(buf, " vcore dvfs", sizeof(buf) - strlen(buf) - 1);
-#endif
 		}
 		for (i = 1; i < 32; i++) {
 			if (wakesta->r12 & (1U << i)) {
@@ -682,7 +517,7 @@ __spm_sodi_output_log(struct wake_status *wakesta, struct pcm_desc *pcmdesc, int
 		}
 
 		if (unlikely(strlen(buf) >= LOG_BUF_SIZE))
-			strcpy(buf, "None (LOG BUFFER OVERFLOW)");
+			strncpy(buf, "None (LOG BUFFER OVERFLOW)", sizeof(buf));
 
 		so_warn(flags, "wake up by %s, vcore_status = %d, self_refresh = 0x%x, sw_flag = 0x%x, 0x%x, %s, %d, 0x%x, timer_out = %u, r13 = 0x%x, debug_flag = 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, 0x%x, %d\n",
 					    buf, vcore_status, spm_read(SPM_PASR_DPD_0),
@@ -692,16 +527,14 @@ __spm_sodi_output_log(struct wake_status *wakesta, struct pcm_desc *pcmdesc, int
 					    wakesta->r12, wakesta->r12_ext, wakesta->raw_sta, wakesta->idle_sta,
 					    wakesta->event_reg, wakesta->isr, logout);
 	}
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 	last_r12 = wakesta->r12;
-#endif
 	return wr;
 }
 
-wake_reason_t
+unsigned int
 spm_sodi_output_log(struct wake_status *wakesta, struct pcm_desc *pcmdesc, int vcore_status, u32 sodi_flags)
 {
-	wake_reason_t wr = WR_NONE;
+	unsigned int wr = WR_NONE;
 	long int sodi_logout_curr_time = 0;
 	int need_log_out = SODI_LOGOUT_NONE;
 
@@ -747,20 +580,14 @@ spm_sodi_output_log(struct wake_status *wakesta, struct pcm_desc *pcmdesc, int v
 
 static void rekick_sodi_common_scenario(void)
 {
-#if defined(CONFIG_ARCH_MT6797)
-	spm_sodi_footprint(SPM_SODI_REKICK_VCORE);
-	spm_write(PCM_CON1, SPM_REGWR_CFG_KEY | (spm_read(PCM_CON1) & ~PCM_TIMER_EN_LSB));
-	__spm_backup_vcore_dvfs_dram_shuffle();
-	vcorefs_go_to_vcore_dvfs();
-#endif
 }
 
-wake_reason_t spm_go_to_sodi(u32 spm_flags, u32 spm_data, u32 sodi_flags)
+unsigned int spm_go_to_sodi(u32 spm_flags, u32 spm_data, u32 sodi_flags)
 {
 	struct wake_status wakesta;
 	unsigned long flags;
 	struct mtk_irq_mask *mask;
-	wake_reason_t wr = WR_NONE;
+	unsigned int wr = WR_NONE;
 	struct pcm_desc *pcmdesc;
 	struct pwr_ctrl *pwrctrl = __spm_sodi.pwrctrl;
 	int vcore_status;
@@ -788,7 +615,6 @@ wake_reason_t spm_go_to_sodi(u32 spm_flags, u32 spm_data, u32 sodi_flags)
 	/* enable APxGPT timer */
 	soidle_before_wfi(cpu);
 
-	lockdep_off();
 	spin_lock_irqsave(&__spm_lock, flags);
 
 	mask = kmalloc(sizeof(struct mtk_irq_mask), GFP_ATOMIC);
@@ -889,18 +715,12 @@ UNLOCK_SPM:
 
 void spm_sodi_set_vdo_mode(bool vdo_mode)
 {
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 	gSpm_lcm_vdo_mode = vdo_mode;
-#endif
 }
 
 bool spm_get_cmd_mode(void)
 {
-#if defined(CONFIG_ARCH_MT6797) || defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS)
 	return !gSpm_lcm_vdo_mode;
-#else
-	return true;
-#endif
 }
 
 void spm_sodi_mempll_pwr_mode(bool pwr_mode)

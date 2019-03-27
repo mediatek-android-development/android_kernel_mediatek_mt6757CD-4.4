@@ -84,10 +84,10 @@ do {									\
 
 #define PMIC6333_INT_TEMP_CUNT 0xF
 /* static __u32 tempsetting_count=0; */
-typedef struct {
+struct pmic6333_TEMPERATURE {
 	__s32 regsetting;
 	__s32 Temperature;
-} pmic6333_TEMPERATURE;
+};
 
 #define mtkts6311_dprintk(fmt, args...)   \
 do {									\
@@ -287,11 +287,6 @@ static int ts6311_sysrst_get_cur_state(struct thermal_cooling_device *cdev, unsi
 	return 0;
 }
 
-/* [lidebiao start] */
-static int ts6311_sysrst_happened = 0;
-extern int send_sysrst_signal(unsigned int type);
-/* [lidebiao end] */
-
 static int ts6311_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsigned long state)
 {
 	mtkts6311_dprintk("ts6311_sysrst_set_cur_state = %d\n", cl_dev_sysrst_state);
@@ -303,13 +298,7 @@ static int ts6311_sysrst_set_cur_state(struct thermal_cooling_device *cdev, unsi
 		pr_debug("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@");
 
 
-		/* [lidebiao start] */
-		if (0 == ts6311_sysrst_happened) {
-			send_sysrst_signal(0);
-			ts6311_sysrst_happened = 1;
-		}
-		//*(unsigned int *)0x0 = 0xdead; /* To trigger data abort to reset the system for thermal protection. */
-		/* [lidebiao end] */
+		*(unsigned int *)0x0 = 0xdead;	/* To trigger data abort to reset the system for thermal protection. */
 	}
 	return 0;
 }

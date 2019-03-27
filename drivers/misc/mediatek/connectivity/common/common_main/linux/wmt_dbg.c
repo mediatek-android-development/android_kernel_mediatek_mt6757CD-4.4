@@ -93,6 +93,15 @@ static INT32 wmt_dbg_lte_coex_test(INT32 par1, INT32 par2, INT32 par3);
 #ifdef CONFIG_TRACING
 static INT32 wmt_dbg_ftrace_dbg_log_ctrl(INT32 par1, INT32 par2, INT32 par3);
 #endif
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+static INT32 wmt_dbg_deep_sleep_ctrl(INT32 par1, INT32 par2, INT32 par3);
+#endif
+static INT32 wmt_dbg_sdio_retry_ctrl(INT32 par1, INT32 par2, INT32 par3);
+
+static INT32 wmt_dbg_func0_reg_read(INT32 par1, INT32 address, INT32 value);
+static INT32 wmt_dbg_func0_reg_write(INT32 par1, INT32 address, INT32 value);
+static INT32 wmt_dbg_stp_sdio_reg_read(INT32 par1, INT32 address, INT32 value);
+static INT32 wmt_dbg_stp_sdio_reg_write(INT32 par1, INT32 address, INT32 value);
 
 static const WMT_DEV_DBG_FUNC wmt_dev_dbg_func[] = {
 	[0x0] = wmt_dbg_psm_ctrl,
@@ -131,6 +140,14 @@ static const WMT_DEV_DBG_FUNC wmt_dev_dbg_func[] = {
 #ifdef CONFIG_TRACING
 	[0x1e] = wmt_dbg_ftrace_dbg_log_ctrl,
 #endif
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+	[0x1f] = wmt_dbg_deep_sleep_ctrl,
+#endif
+	[0x20] = wmt_dbg_sdio_retry_ctrl,
+	[0x22] = wmt_dbg_func0_reg_read,
+	[0x23] = wmt_dbg_func0_reg_write,
+	[0x24] = wmt_dbg_stp_sdio_reg_read,
+	[0x25] = wmt_dbg_stp_sdio_reg_write,
 };
 
 static VOID wmt_dbg_fwinfor_print_buff(UINT32 len)
@@ -141,14 +158,14 @@ static VOID wmt_dbg_fwinfor_print_buff(UINT32 len)
 	for (i = 0; i < len; i++) {
 		buf_emi[idx] = gEmiBuf[i];
 		if (gEmiBuf[i] == '\n') {
-			pr_debug("%s", buf_emi);
+			WMT_INFO_FUNC("%s", buf_emi);
 			osal_memset(buf_emi, 0, BUF_LEN_MAX);
 			idx = 0;
 		} else {
 			idx++;
 			if (idx == BUF_LEN_MAX-1) {
 				buf_emi[idx] = '\0';
-				pr_debug("%s", buf_emi);
+				WMT_INFO_FUNC("%s", buf_emi);
 				osal_memset(buf_emi, 0, BUF_LEN_MAX);
 				idx = 0;
 			}
@@ -156,7 +173,7 @@ static VOID wmt_dbg_fwinfor_print_buff(UINT32 len)
 	}
 	if ((idx != 0) && (idx < BUF_LEN_MAX)) {
 		buf_emi[idx] = '\0';
-		pr_debug("%s", buf_emi);
+		WMT_INFO_FUNC("%s", buf_emi);
 		osal_memset(buf_emi, 0, BUF_LEN_MAX);
 		idx = 0;
 	}
@@ -259,7 +276,7 @@ INT32 wmt_dbg_cmd_test_api(ENUM_WMTDRV_CMD_T cmd)
 	pSignal->timeoutValue = MAX_EACH_WMT_CMD;
 	/*this test command should be run with usb cable connected, so no host awake is needed */
 	/* wmt_lib_host_awake_get(); */
-	wmt_lib_set_host_assert_info(WMTDRV_TYPE_WMT, 0, 1);
+
 	switch (cmd) {
 	case WMTDRV_CMD_ASSERT:
 		pOp->op.au4OpData[0] = 0;
@@ -316,6 +333,9 @@ INT32 wmt_dbg_cmd_test_api(ENUM_WMTDRV_CMD_T cmd)
 		      pOp->op.au4OpData[0],
 		      pOp->op.au4OpData[1],
 		      bRet, MTK_WCN_BOOL_FALSE == bRet ? "failed" : "succeed");
+
+	if (bRet == MTK_WCN_BOOL_TRUE)
+		wmt_lib_set_host_assert_info(WMTDRV_TYPE_WMT, 0, 1);
 
 	return 0;
 }
@@ -523,6 +543,10 @@ INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 	if (offset == 1) {
 		do {
 			pAddr = (PUINT32) wmt_plat_get_emi_virt_add(0x24);
+			if (pAddr == NULL) {
+				WMT_ERR_FUNC("get virtual emi address 0x24 fail!\n");
+				return -1;
+			}
 			cur_idx_pagedtrace = *pAddr;
 
 			if (cur_idx_pagedtrace > prev_idx_pagedtrace) {
@@ -534,19 +558,19 @@ INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 
 			if (cur_idx_pagedtrace < prev_idx_pagedtrace) {
 				if (prev_idx_pagedtrace >= 0x8000) {
-					pr_debug("++ prev_idx_pagedtrace invalid ...++\n\\n");
+					WMT_INFO_FUNC("++ prev_idx_pagedtrace invalid ...++\n\\n");
 					prev_idx_pagedtrace = 0x8000 - 1;
 					continue;
 				}
 
 				len = 0x8000 - prev_idx_pagedtrace - 1;
 				wmt_lib_get_fwinfor_from_emi(1, prev_idx_pagedtrace, &gEmiBuf[0], len);
-				pr_debug("\n\n -- CONNSYS paged trace ascii output (cont...) --\n\n");
+				WMT_INFO_FUNC("\n\n -- CONNSYS paged trace ascii output (cont...) --\n\n");
 				wmt_dbg_fwinfor_print_buff(len);
 
 				len = cur_idx_pagedtrace;
 				wmt_lib_get_fwinfor_from_emi(1, 0x0, &gEmiBuf[0], len);
-				pr_debug("\n\n -- CONNSYS paged trace ascii output (end) --\n\n");
+				WMT_INFO_FUNC("\n\n -- CONNSYS paged trace ascii output (end) --\n\n");
 				wmt_dbg_fwinfor_print_buff(len);
 				prev_idx_pagedtrace = cur_idx_pagedtrace;
 			}
@@ -554,7 +578,7 @@ INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 		} while (isBreak);
 	}
 
-	pr_debug("\n\n -- control word --\n\n");
+	WMT_INFO_FUNC("\n\n -- control word --\n\n");
 	wmt_dbg_fwinfor_print_buff(256);
 	if (len > 1024 * 4)
 		len = 1024 * 4;
@@ -563,9 +587,9 @@ INT32 wmt_dbg_fwinfor_from_emi(INT32 par1, INT32 par2, INT32 par3)
 	osal_memset(&gEmiBuf[0], 0, WMT_EMI_DEBUG_BUF_SIZE);
 	wmt_lib_get_fwinfor_from_emi(1, offset, &gEmiBuf[0], len);
 
-	pr_debug("\n\n -- paged trace hex output --\n\n");
+	WMT_INFO_FUNC("\n\n -- paged trace hex output --\n\n");
 	wmt_dbg_fwinfor_print_buff(len);
-	pr_debug("\n\n -- paged trace ascii output --\n\n");
+	WMT_INFO_FUNC("\n\n -- paged trace ascii output --\n\n");
 	wmt_dbg_fwinfor_print_buff(len);
 	kfree(buf_emi);
 
@@ -581,25 +605,36 @@ INT32 wmt_dbg_stp_trigger_assert(INT32 par1, INT32 par2, INT32 par3)
 
 static INT32 wmt_dbg_ap_reg_read(INT32 par1, INT32 par2, INT32 par3)
 {
-	ULONG value = 0x0;
+	INT32 value = 0x0;
+	PUINT8 ap_reg_base = NULL;
 
 	WMT_INFO_FUNC("AP register read, reg address:0x%x\n", par2);
-	value = *((volatile unsigned long *)(unsigned long)par2);
-	WMT_INFO_FUNC("AP register read, reg address:0x%x, value:0x%lx\n", par2, value);
+	ap_reg_base = ioremap_nocache(par2, 0x4);
+	if (ap_reg_base) {
+		value = readl(ap_reg_base);
+		WMT_INFO_FUNC("AP register read, reg address:0x%x, value:0x%x\n", par2, value);
+		iounmap(ap_reg_base);
+	} else
+		WMT_ERR_FUNC("AP register ioremap fail!\n");
 
 	return 0;
 }
 
 static INT32 wmt_dbg_ap_reg_write(INT32 par1, INT32 par2, INT32 par3)
 {
-	ULONG value = 0x0;
+	INT32 value = 0x0;
+	PUINT8 ap_reg_base = NULL;
 
 	WMT_INFO_FUNC("AP register write, reg address:0x%x, value:0x%x\n", par2, par3);
 
-	*((volatile unsigned long *)(unsigned long)par2) = (UINT32) par3;
-	mb();
-	value = *((volatile unsigned long *)(unsigned long)par2);
-	WMT_INFO_FUNC("AP register write done, value after write:0x%lx\n", value);
+	ap_reg_base = ioremap_nocache(par2, 0x4);
+	if (ap_reg_base) {
+		writel(par3, ap_reg_base);
+		value = readl(ap_reg_base);
+		WMT_INFO_FUNC("AP register write done, value after write:0x%x\n", value);
+		iounmap(ap_reg_base);
+	} else
+		WMT_ERR_FUNC("AP register ioremap fail!\n");
 
 	return 0;
 }
@@ -612,6 +647,23 @@ static INT32 wmt_dbg_ftrace_dbg_log_ctrl(INT32 par1, INT32 par2, INT32 par3)
 	return osal_ftrace_print_ctrl(par2 == 0 ? 0 : 1);
 }
 #endif
+
+#ifdef CONFIG_MTK_COMBO_CHIP_DEEP_SLEEP_SUPPORT
+static INT32 wmt_dbg_deep_sleep_ctrl(INT32 par1, INT32 par2, INT32 par3)
+{
+	WMT_INFO_FUNC("%s deep_sleep !!\n", par2 == 0 ? "disable" : "enable");
+	return wmt_lib_deep_sleep_ctrl(par2);
+}
+#endif
+
+static INT32 wmt_dbg_sdio_retry_ctrl(INT32 par1, INT32 par2, INT32 par3)
+{
+	WMT_INFO_FUNC("%s sdio retry!!\n", par2 == 0 ? "disable" : "enable");
+
+	mtk_stp_dbg_sdio_retry_flag_ctrl(par2 == 0 ? 0 : 1);
+
+	return 0;
+}
 
 INT32 wmt_dbg_coex_test(INT32 par1, INT32 par2, INT32 par3)
 {
@@ -626,6 +678,57 @@ INT32 wmt_dbg_rst_ctrl(INT32 par1, INT32 par2, INT32 par3)
 	mtk_wcn_stp_set_auto_rst(par2 == 0 ? 0 : 1);
 
 	return 0;
+}
+
+INT32 wmt_dbg_func0_reg_read(INT32 par1, INT32 address, INT32 value)
+{
+	INT32 ret = -1;
+
+	ret = wmt_lib_sdio_reg_rw(0, 0, (UINT32)address, (UINT32)value);
+	if (ret) {
+		WMT_ERR_FUNC("read fucn0 SDIO register fail");
+		return ret;
+	}
+	return ret;
+}
+
+INT32 wmt_dbg_func0_reg_write(INT32 par1, INT32 address, INT32 value)
+{
+	INT32 ret = -1;
+
+	ret = wmt_lib_sdio_reg_rw(0, 1, (UINT32)address, (UINT32)value);
+	if (ret) {
+		WMT_ERR_FUNC("write func0 SDIO register fail");
+		return ret;
+	}
+
+	return ret;
+}
+
+INT32 wmt_dbg_stp_sdio_reg_read(INT32 par1, INT32 address, INT32 value)
+{
+	INT32 ret = -1;
+
+	ret = wmt_lib_sdio_reg_rw(2, 0, (UINT32)address, (UINT32)value);
+	if (ret) {
+		WMT_ERR_FUNC("read  SDIO register fail");
+		return ret;
+	}
+
+	return ret;
+}
+
+INT32 wmt_dbg_stp_sdio_reg_write(INT32 par1, INT32 address, INT32 value)
+{
+	INT32 ret = -1;
+
+	ret = wmt_lib_sdio_reg_rw(2, 1, (UINT32)address, (UINT32)value);
+	if (ret) {
+		WMT_ERR_FUNC("write  SDIO register fail");
+		return ret;
+	}
+
+	return ret;
 }
 
 INT32 wmt_dbg_ut_test(INT32 par1, INT32 par2, INT32 par3)
@@ -792,8 +895,10 @@ static INT32 wmt_dbg_set_mcu_clock(INT32 par1, INT32 par2, INT32 par3)
 	P_OSAL_OP pOp;
 	P_OSAL_SIGNAL pSignal = NULL;
 	UINT32 kind = 0;
+	UINT32 version = 0;
 
-	kind = par2;
+	version = par2;
+	kind = par3;
 	pOp = wmt_lib_get_free_op();
 	if (!pOp) {
 		WMT_WARN_FUNC("get_free_lxop fail\n");
@@ -802,6 +907,7 @@ static INT32 wmt_dbg_set_mcu_clock(INT32 par1, INT32 par2, INT32 par3)
 	pSignal = &pOp->signal;
 	pOp->op.opId = WMT_OPID_SET_MCU_CLK;
 	pOp->op.au4OpData[0] = kind;
+	pOp->op.au4OpData[1] = version;
 	pSignal->timeoutValue = MAX_EACH_WMT_CMD;
 
 	WMT_INFO_FUNC("OPID(%d) kind(%d) start\n", pOp->op.opId, pOp->op.au4OpData[0]);
@@ -843,7 +949,16 @@ static INT32 wmt_dbg_jtag_flag_ctrl(INT32 par1, INT32 par2, INT32 par3)
 {
 	UINT32 en_flag = par2;
 
-	wmt_lib_jtag_flag_set(en_flag);
+	switch (en_flag) {
+	case 1:
+	case 2:
+		/* gen2 consys does not support 2-wire jtag*/
+		wmt_lib_jtag_flag_set(en_flag);
+		WMT_INFO_FUNC("enable %s mcu jtag pinmux setting\n", en_flag == 1 ? "7-wire" : "2-wire");
+		break;
+	default:
+		WMT_INFO_FUNC("enable mcu jtag does not support %d options\n", en_flag);
+	}
 
 	return 0;
 }
@@ -852,13 +967,13 @@ static INT32 wmt_dbg_jtag_flag_ctrl(INT32 par1, INT32 par2, INT32 par3)
 #if CFG_WMT_LTE_COEX_HANDLING
 static INT32 wmt_dbg_lte_to_wmt_test(UINT32 opcode, UINT32 msg_len)
 {
-	ipc_ilm_t ilm;
-	local_para_struct *p_buf_str;
+	struct ipc_ilm ilm;
+	struct local_para *p_buf_str;
 	INT32 i = 0;
 	INT32 iRet = -1;
 
 	WMT_INFO_FUNC("opcode(0x%02x),msg_len(%d)\n", opcode, msg_len);
-	p_buf_str = osal_malloc(osal_sizeof(local_para_struct) + msg_len);
+	p_buf_str = osal_malloc(osal_sizeof(struct local_para) + msg_len);
 	if (p_buf_str == NULL) {
 		WMT_ERR_FUNC("kmalloc for local para ptr structure failed.\n");
 		return -1;
@@ -1087,8 +1202,12 @@ ssize_t wmt_dbg_write(struct file *filp, const char __user *buffer, size_t count
 
 	pBuf = buf;
 	pToken = osal_strsep(&pBuf, pDelimiter);
-	osal_strtol(pToken, 16, &res);
-	x = pToken != NULL ? (INT32)res : 0;
+	if (pToken != NULL) {
+		osal_strtol(pToken, 16, &res);
+		x = (INT32)res;
+	} else {
+		x = 0;
+	}
 
 	pToken = osal_strsep(&pBuf, "\t\n ");
 	if (pToken != NULL) {

@@ -1,4 +1,15 @@
-/* EXM */
+/*
+* Copyright (C) 2016 MediaTek Inc.
+*
+* This program is free software; you can redistribute it and/or modify
+* it under the terms of the GNU General Public License version 2 as
+* published by the Free Software Foundation.
+*
+* This program is distributed in the hope that it will be useful,
+* but WITHOUT ANY WARRANTY; without even the implied warranty of
+* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+*/
 #include <linux/module.h>
 #include <linux/io.h>
 #include <linux/slab.h>
@@ -39,7 +50,7 @@ static size_t extmem_mspace_size;
 
 static phys_addr_t extmem_phys_base;
 
-static int extmem_scan_memory(unsigned long node, const char *uname, int depth, void *data)
+static int __init extmem_scan_memory(unsigned long node, const char *uname, int depth, void *data)
 {
 	struct mem_desc *mem_desc;
 	/* We are scanning "memory" nodes only */
@@ -83,7 +94,7 @@ static int extmem_get_lca_reserved_mem(void)
 	return 0;
 }
 
-static void extmem_init(void)
+void __init extmem_init(void)
 {
 	if (extmem_mspace == NULL) {
 	#ifdef CONFIG_ARM64
@@ -120,7 +131,7 @@ static void extmem_init(void)
 	}
 }
 #else
-static void extmem_init(void)
+void __init extmem_init(void)
 {
 	if (extmem_mspace == NULL) {
 		if (extmem_mspace_size == 0) {
@@ -154,12 +165,17 @@ static void extmem_init(void)
 	}
 }
 #endif
+EXPORT_SYMBOL(extmem_init);
 
 void *extmem_malloc(size_t bytes)
 {
 	void *mem;
 
-	extmem_init();
+	if (!extmem_mspace) {
+		WARN(1, "extmem_mspace invalid\n");
+		return NULL;
+	}
+
 	mem = mspace_malloc(extmem_mspace, bytes);
 	extmem_printk("%s mem:0x%p, size: 0x%zx\n", __func__, mem, bytes);
 	extmem_printk("%s extmem current used: 0x%zx, peak used: 0x%zx\n",
@@ -172,7 +188,11 @@ void *extmem_malloc_page_align(size_t bytes)
 {
 	void *mem;
 
-	extmem_init();
+	if (!extmem_mspace) {
+		WARN(1, "extmem_mspace invalid\n");
+		return NULL;
+	}
+
 	mem = mspace_memalign(extmem_mspace, 1<<PAGE_SHIFT, bytes);
 	extmem_printk("%s mem:0x%p, size: 0x%zx\n", __func__, mem, bytes);
 	extmem_printk("%s extmem current used: 0x%zx, peak used: 0x%zx\n",
@@ -180,6 +200,32 @@ void *extmem_malloc_page_align(size_t bytes)
 	return mem;
 }
 EXPORT_SYMBOL(extmem_malloc_page_align);
+
+void __init *extmem_malloc_init(size_t bytes)
+{
+	void *mem;
+
+	extmem_init();
+	mem = mspace_malloc(extmem_mspace, bytes);
+	extmem_printk("%s mem:0x%p, size: 0x%zx\n", __func__, mem, bytes);
+	extmem_printk("%s extmem current used: 0x%zx, peak used: 0x%zx\n",
+		__func__, mspace_mem_used(extmem_mspace), mspace_mem_used_peak(extmem_mspace));
+	return mem;
+}
+EXPORT_SYMBOL(extmem_malloc_init);
+
+void __init *extmem_malloc_page_align_init(size_t bytes)
+{
+	void *mem;
+
+	extmem_init();
+	mem = mspace_memalign(extmem_mspace, 1<<PAGE_SHIFT, bytes);
+	extmem_printk("%s mem:0x%p, size: 0x%zx\n", __func__, mem, bytes);
+	extmem_printk("%s extmem current used: 0x%zx, peak used: 0x%zx\n",
+		__func__, mspace_mem_used(extmem_mspace), mspace_mem_used_peak(extmem_mspace));
+	return mem;
+}
+EXPORT_SYMBOL(extmem_malloc_page_align_init);
 
 void extmem_free(void *mem)
 {
@@ -288,7 +334,7 @@ static int mtk_mspace_mmap_physical(struct exm_info *info, struct vm_area_struct
 	return ret;
 }
 
-static int mt_mspace_probe(struct platform_device *dev)
+static int __init mt_mspace_probe(struct platform_device *dev)
 {
 	/* struct resource *regs; */
 	struct exm_info *info;
@@ -346,7 +392,7 @@ static const struct of_device_id extmem_of_ids[] = {
 };
 #endif
 
-static struct platform_driver mt_mspace_driver = {
+static struct platform_driver mt_mspace_driver_probe = {
 	.probe = mt_mspace_probe,
 	.remove = mt_mspace_remove,
 	.driver = {
@@ -360,12 +406,12 @@ static struct platform_driver mt_mspace_driver = {
 static int __init mt_mspace_init(void)
 {
 	extmem_printk("%s\n", __func__);
-	return platform_driver_register(&mt_mspace_driver);
+	return platform_driver_register(&mt_mspace_driver_probe);
 }
 
 static void __exit mt_mspace_exit(void)
 {
-	platform_driver_unregister(&mt_mspace_driver);
+	platform_driver_unregister(&mt_mspace_driver_probe);
 }
 
 static size_t extmem_used; /* extmem current used */

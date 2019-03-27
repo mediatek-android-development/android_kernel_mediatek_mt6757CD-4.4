@@ -186,21 +186,37 @@ static void statsInfoEnvDisplay(GLUE_INFO_T *prGlueInfo, UINT8 *prInBuf, UINT32 
 		}
 
 		if (prInfo->u4TxDataCntErr == 0) {
-			DBGLOG(RX, INFO, "<stats> TOS(%u) OK(%u %u) PendingPKT Num(%u %u %u %u)\n",
+			DBGLOG(RX, INFO, "<stats> TOS(%u) OK(%u %u) PendingPKT(%u) SE(%u) Num(%u %u %u %u)\n"
+					"TC resource(%d %d %d %d %d)\n",
 					    (UINT32) prGlueInfo->rNetDevStats.tx_packets,
 					    prInfo->u4TxDataCntAll, prInfo->u4TxDataCntOK,
+					prGlueInfo->i4TxPendingFrameNum,
+					prGlueInfo->i4TxPendingSecurityFrameNum,
 					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][0],
 					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][1],
 					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][2],
-					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][3]);
+					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][3],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC0_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC1_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC2_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC3_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC4_INDEX]);
 		} else {
-			DBGLOG(RX, INFO, "<stats> TOS(%u) OK(%u %u) ERR(%u) PendingPKT Num(%u %u %u %u)\n",
+			DBGLOG(RX, INFO, "<stats> TOS(%u) OK(%u %u) ERR(%u) PendingPKT(%u) SE(%u) Num(%u %u %u %u)\n"
+					"TC resource(%d %d %d %d %d)\n",
 					    (UINT32) prGlueInfo->rNetDevStats.tx_packets,
 					    prInfo->u4TxDataCntAll, prInfo->u4TxDataCntOK, prInfo->u4TxDataCntErr,
+					prGlueInfo->i4TxPendingFrameNum,
+					prGlueInfo->i4TxPendingSecurityFrameNum,
 					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][0],
 					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][1],
 					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][2],
-					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][3]);
+					prGlueInfo->ai4TxPendingFrameNumPerQueue[NETWORK_TYPE_AIS_INDEX][3],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC0_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC1_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC2_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC3_INDEX],
+					prAdapter->rTxCtrl.rTc.aucFreeBufferCount[TC4_INDEX]);
 			DBGLOG(RX, INFO, "<stats> ERR type(%u %u %u %u %u %u)\n",
 					    prInfo->u4TxDataCntErrType[0], prInfo->u4TxDataCntErrType[1],
 					    prInfo->u4TxDataCntErrType[2], prInfo->u4TxDataCntErrType[3],
@@ -852,10 +868,13 @@ VOID statsEnvReportDetect(ADAPTER_T *prAdapter, UINT8 ucStaRecIndex)
 	STA_RECORD_T *prStaRec;
 	OS_SYSTIME rCurTime;
 	STATS_CMD_CORE_T rCmd;
+
 	prStaRec = cnmGetStaRecByIndex(prAdapter, ucStaRecIndex);
 
 	if (prStaRec == NULL) {
-		DBGLOG(TX, WARN, "%s : prStaRec[%d] is null!", __func__, ucStaRecIndex);
+		/* check station record but skip broadcast id: 0xFF */
+		if (ucStaRecIndex != 0xFF)
+			DBGLOG(TX, WARN, "%s : prStaRec[%d] is null!", __func__, ucStaRecIndex);
 		return;
 	}
 
@@ -993,13 +1012,13 @@ VOID StatsEnvTxTime2Hif(MSDU_INFO_T *prMsduInfo, HIF_TX_HEADER_T *prHwTxHeader)
 
 	u8SysTime = StatsEnvTimeGet();
 	u8SysTimeIn = GLUE_GET_PKT_XTIME(prMsduInfo->prPacket);
+	u4TimeDiff = 0;
 
 /* printk("<stats> hif: 0x%x %u %u %u\n", */
 /* prMsduInfo->prPacket, StatsEnvTimeGet(), u8SysTime, GLUE_GET_PKT_XTIME(prMsduInfo->prPacket)); */
 
 	if ((u8SysTimeIn > 0) && (u8SysTime > u8SysTimeIn)) {
-		u8SysTime = u8SysTime - u8SysTimeIn;
-		u4TimeDiff = (UINT32) u8SysTime;
+		u4TimeDiff = (UINT32) (u8SysTime - u8SysTimeIn);
 		u4TimeDiff = u4TimeDiff / 1000;	/* ns to us */
 
 		/* pass the delay between OS to us and we to HIF */
@@ -1013,6 +1032,16 @@ VOID StatsEnvTxTime2Hif(MSDU_INFO_T *prMsduInfo, HIF_TX_HEADER_T *prHwTxHeader)
 		prHwTxHeader->aucReserved[0] = 0;
 		prHwTxHeader->aucReserved[1] = 0;
 	}
+
+	DBGLOG(TX, LOUD, "(%d)<stats>Tx 2 hif: 0x%p (%lld - %lld) =%u\n"
+		, prMsduInfo->u4DbgTxPktStatusIndex
+		, (PUINT_8)prMsduInfo->prPacket
+		, u8SysTime, GLUE_GET_PKT_XTIME(prMsduInfo->prPacket)
+		, u4TimeDiff);
+
+	/*record the XmitTime and Write HIF time for each pkt*/
+	wlanPktStausDebugUpdateProcessTime(prMsduInfo->u4DbgTxPktStatusIndex);
+
 }
 
 static VOID statsParsePktInfo(PUINT_8 pucPkt, UINT_8 status, UINT_8 eventType, P_MSDU_INFO_T prMsduInfo)
@@ -1030,7 +1059,7 @@ static VOID statsParsePktInfo(PUINT_8 pucPkt, UINT_8 status, UINT_8 eventType, P
 			prMsduInfo->fgIsBasicRate = TRUE;
 
 		wlanPktDebugTraceInfoARP(status, eventType, u2OpCode);
-		wlanPktStatusDebugTraceInfoARP(status, eventType, u2OpCode, pucPkt);
+		wlanPktStatusDebugTraceInfoARP(status, eventType, u2OpCode, pucPkt, prMsduInfo);
 
 		if ((su2TxDoneCfg & CFG_ARP) == 0)
 			break;
@@ -1064,7 +1093,7 @@ static VOID statsParsePktInfo(PUINT_8 pucPkt, UINT_8 status, UINT_8 eventType, P
 			break;
 		case EVENT_TX_DONE:
 			if (u2OpCode == ARP_PRO_REQ)
-				DBGLOG(TX, INFO, "<TX status:%d> Arp Req to IP: %d.%d.%d.%d\n", status,
+				DBGLOGLIMITED(TX, INFO, "<TX status:%d> Arp Req to IP: %d.%d.%d.%d\n", status,
 					pucEthBody[24], pucEthBody[25], pucEthBody[26], pucEthBody[27]);
 			else if (u2OpCode == ARP_PRO_RSP)
 				DBGLOG(TX, TRACE, "<TX status:%d> Arp Rsp to IP: %d.%d.%d.%d\n", status,
@@ -1080,7 +1109,7 @@ static VOID statsParsePktInfo(PUINT_8 pucPkt, UINT_8 status, UINT_8 eventType, P
 		UINT_16 u2IpId = pucEthBody[4]<<8 | pucEthBody[5];
 
 		wlanPktDebugTraceInfoIP(status, eventType, ucIpProto, u2IpId);
-		wlanPktStatusDebugTraceInfoIP(status, eventType, ucIpProto, u2IpId, pucPkt);
+		wlanPktStatusDebugTraceInfoIP(status, eventType, ucIpProto, u2IpId, pucPkt, prMsduInfo);
 
 		if (ucIpVersion != IPVERSION)
 			break;

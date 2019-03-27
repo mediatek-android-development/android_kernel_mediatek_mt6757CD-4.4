@@ -13,7 +13,7 @@
 
 #ifndef __ENV_H__
 #define __ENV_H__
-#ifdef CONFIG_MTK_EMMC_SUPPORT
+#if defined(CONFIG_MTK_EMMC_SUPPORT) || defined(CONFIG_MTK_UFS_BOOTING) || defined(CONFIG_MMC_MTK)
 #include <linux/ioctl.h>
 
 #define CFG_ENV_SIZE		0x4000     /*16KB*/
@@ -71,7 +71,7 @@ extern long long data_free_size_th;
 
 #endif
 
-typedef struct env_struct {
+struct env_struct {
 	char sig[8]; /* "ENV_v1" */
 	char *env_data;
 	char sig_1[8];  /* "ENV_v1" */

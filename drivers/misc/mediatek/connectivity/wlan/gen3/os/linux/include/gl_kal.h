@@ -366,6 +366,7 @@ struct KAL_HALT_CTRL_T {
 /* Macros of getting current thread id                                        */
 /*----------------------------------------------------------------------------*/
 #define KAL_GET_CURRENT_THREAD_ID() (current->pid)
+#define KAL_GET_CURRENT_THREAD_NAME() (current->comm)
 
 /*----------------------------------------------------------------------------*/
 /* Macros of SPIN LOCK operations for using in Driver Layer                   */
@@ -629,37 +630,12 @@ struct KAL_HALT_CTRL_T {
 
 #define kalGetTimeTick()                            jiffies_to_msecs(jiffies)
 
-#define kalPrint                                    pr_debug
 #define WLAN_TAG                                    "[wlan]"
-
-#if 1
-#define kalPrintTag(_Fmt...)        kalPrint(WLAN_TAG _Fmt)
-#else
-
-#define kalPrintErr(_Fmt...)                    kalPrint(KERN_ERR WLAN_TAG _Fmt)
-#define kalPrintWarn(_Fmt...)                   kalPrint(KERN_WARNING WLAN_TAG _Fmt)
-#define kalPrintInfo(_Fmt...)                   kalPrint(KERN_INFO WLAN_TAG _Fmt)
-#define kalPrintDebug(_Fmt...)                  kalPrint(KERN_INFO WLAN_TAG _Fmt)
-
-#define kalDbgLog(_DbgClass, _Fmt) \
-{ \
-	if (_DbgClass & DBG_CLASS_ERROR) { \
-		kalPrintErr _Fmt; \
-	} \
-	else if (_DbgClass & DBG_CLASS_WARN) { \
-		kalPrintWarn _Fmt; \
-	} \
-	else if (_DbgClass & (DBG_CLASS_EVENT | DBG_CLASS_INFO)) { \
-		kalPrintInfo _Fmt; \
-	} \
-	else if (_DbgClass & (DBG_CLASS_STATE | DBG_CLASS_TRACE | DBG_CLASS_LOUD)) { \
-		kalPrintDebug _Fmt; \
-	} \
-	else if (_DbgClass & DBG_CLASS_TEMP) { \
-		kalPrintErr _Fmt; \
-	} \
-}
-#endif
+#define kalPrint(_Fmt...)                           pr_info(WLAN_TAG _Fmt)
+/* pr_info_ratelimited usage: max 10 lines logs are printed per 5 seconds,
+ * the others are dropped if exceed the rate limit and print "xxx callbacks suppressed" for tips
+ */
+#define kalPrintLimited(_Fmt...)                    pr_info_ratelimited(WLAN_TAG _Fmt)
 
 #define kalBreakPoint() \
 do { \
@@ -971,7 +947,12 @@ UINT_32 kalWriteToFile(const PUINT_8 pucPath, BOOLEAN fgDoAppend, PUINT_8 pucDat
 
 UINT_32 kalCheckPath(const PUINT_8 pucPath);
 
+UINT_32 kalTrunkPath(const PUINT_8 pucPath);
+
 INT_32 kalReadToFile(const PUINT_8 pucPath, PUINT_8 pucData, UINT_32 u4Size, PUINT_32 pu4ReadSize);
+
+INT_32 kalRequestFirmware(const PUINT_8 pucPath, PUINT_8 pucData, UINT_32 u4Size,
+		PUINT_32 pu4ReadSize, struct device *dev);
 
 /*----------------------------------------------------------------------------*/
 /* NL80211                                                                    */
@@ -1002,6 +983,14 @@ PVOID kalGetStats(IN struct net_device *prDev);
 
 VOID kalResetPacket(IN P_GLUE_INFO_T prGlueInfo, IN P_NATIVE_PACKET prPacket);
 
+#if CFG_SUPPORT_QA_TOOL
+struct file *kalFileOpen(const char *path, int flags, int rights);
+
+VOID kalFileClose(struct file *file);
+
+UINT_32 kalFileRead(struct file *file, unsigned long long offset, unsigned char *data, unsigned int size);
+#endif
+
 #if CFG_SUPPORT_SDIO_READ_WRITE_PATTERN
 /*----------------------------------------------------------------------------*/
 /* SDIO Read/Write Pattern Support                                            */
@@ -1015,38 +1004,6 @@ BOOLEAN kalSetSdioTestPattern(IN P_GLUE_INFO_T prGlueInfo, IN BOOLEAN fgEn, IN B
 VOID kalSchedScanResults(IN P_GLUE_INFO_T prGlueInfo);
 
 VOID kalSchedScanStopped(IN P_GLUE_INFO_T prGlueInfo, BOOLEAN fgDriverTriggerd);
-
-#if CFG_MULTI_ECOVER_SUPPORT
-
-#if 0
-typedef enum _ENUM_WMTHWVER_TYPE_T {
-	WMTHWVER_E1 = 0x0,
-	WMTHWVER_E2 = 0x1,
-	WMTHWVER_E3 = 0x2,
-	WMTHWVER_E4 = 0x3,
-	WMTHWVER_E5 = 0x4,
-	WMTHWVER_E6 = 0x5,
-	WMTHWVER_MAX,
-	WMTHWVER_INVALID = 0xff
-} ENUM_WMTHWVER_TYPE_T, *P_ENUM_WMTHWVER_TYPE_T;
-
-extern ENUM_WMTHWVER_TYPE_T mtk_wcn_wmt_hwver_get(VOID);
-
-#else
-
-typedef enum _ENUM_WMTCHIN_TYPE_T {
-	WMTCHIN_CHIPID = 0x0,
-	WMTCHIN_HWVER = WMTCHIN_CHIPID + 1,
-	WMTCHIN_MAPPINGHWVER = WMTCHIN_HWVER + 1,
-	WMTCHIN_FWVER = WMTCHIN_MAPPINGHWVER + 1,
-	WMTCHIN_MAX
-} ENUM_WMT_CHIPINFO_TYPE_T, *P_ENUM_WMT_CHIPINFO_TYPE_T;
-
-UINT_32 mtk_wcn_wmt_ic_info_get(ENUM_WMT_CHIPINFO_TYPE_T type);
-
-#endif
-
-#endif
 
 VOID kalSetFwOwnEvent2Hif(P_GLUE_INFO_T pr);
 
@@ -1082,6 +1039,8 @@ INT_32 kalPerMonStop(IN P_GLUE_INFO_T prGlueInfo);
 INT_32 kalPerMonDestroy(IN P_GLUE_INFO_T prGlueInfo);
 VOID kalPerMonHandler(IN P_ADAPTER_T prAdapter, ULONG ulParam);
 INT_32 kalBoostCpu(UINT_32 core_num);
+INT_32 kalSetCpuNumFreq(UINT_32 core_num, UINT_32 u4Freq);
+INT_32 kalPerMonSetForceEnableFlag(UINT_8 uFlag);
 INT_32 kalFbNotifierReg(IN P_GLUE_INFO_T prGlueInfo);
 VOID kalFbNotifierUnReg(VOID);
 

@@ -59,7 +59,6 @@ APPEND_VAR_IE_ENTRY_T txAssocReqIETable[] = {
 #if CFG_SUPPORT_802_11K
 	{(ELEM_HDR_LEN + 5), NULL, rlmGernerateRRMEnabledCapIE}, /* Element ID: 70 */
 #endif
-
 #if CFG_SUPPORT_HOTSPOT_2_0
 	{(ELEM_HDR_LEN + ELEM_MAX_LEN_INTERWORKING), NULL, hs20GenerateInterworkingIE}
 	,			/* 107 */
@@ -160,6 +159,7 @@ assocBuildCapabilityInfo(IN P_ADAPTER_T prAdapter, IN P_STA_RECORD_T prStaRec)
 #if CFG_SUPPORT_802_11K
 	u2CapInfo |= CAP_INFO_RADIO_MEASUREMENT;
 #endif
+
 	if (prStaRec == NULL)
 		u2CapInfo |= CAP_INFO_PRIVACY;
 	else {
@@ -305,7 +305,7 @@ static inline VOID assocBuildReAssocReqFrameCommonIEs(IN P_ADAPTER_T prAdapter, 
 	/* rateGetDataRatesFromRateSet((prBssDesc->u2OperationalRateSet & */
 	/* rPhyAttributes[prBssDesc->ePhyType].u2SupportedRateSet), */
 
-	if (prStaRec->fgHasBasicPhyType) {
+	if (prStaRec->ucDesiredPhyTypeSet) {
 		UINT_32 u4NonHTPhyType;
 
 		u4NonHTPhyType = prStaRec->ucNonHTBasicPhyType;
@@ -778,10 +778,8 @@ assocCheckRxReAssocRspFrameStatus(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRf
 	u2RxFrameCtrl = prAssocRspFrame->u2FrameCtrl;	/* NOTE(Kevin): Optimized for ARM */
 	u2RxFrameCtrl &= MASK_FRAME_TYPE;
 	if (prStaRec->fgIsReAssoc) {
-		// [yangqing start] Fix roaming failed if AP reply ASSOC_RSP.
-		// if (u2RxFrameCtrl != MAC_FRAME_REASSOC_RSP)
-		// 	return WLAN_STATUS_FAILURE;
-		// [yangqing end]
+		if (u2RxFrameCtrl != MAC_FRAME_REASSOC_RSP)
+			return WLAN_STATUS_FAILURE;
 	} else {
 		if (u2RxFrameCtrl != MAC_FRAME_ASSOC_RSP)
 			return WLAN_STATUS_FAILURE;
@@ -1216,7 +1214,8 @@ WLAN_STATUS assocProcessRxAssocReqFrame(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T 
 		default:
 			for (i = 0; i < (sizeof(rxAssocReqIETable) / sizeof(VERIFY_IE_ENTRY_T)); i++) {
 
-				if ((IE_ID(pucIE)) == rxAssocReqIETable[i].ucElemID) {
+				if (((IE_ID(pucIE)) == rxAssocReqIETable[i].ucElemID) &&
+				    (rxAssocReqIETable[i].pfnVarifyIE != NULL)) {
 					rxAssocReqIETable[i].pfnVarifyIE(prAdapter, prSwRfb, (P_IE_HDR_T) pucIE,
 									 &u2StatusCode);
 
@@ -1606,3 +1605,4 @@ VOID assocGenerateMDIE(IN P_ADAPTER_T prAdapter, IN OUT P_MSDU_INFO_T prMsduInfo
 	prMsduInfo->u2FrameLength += 5; /* IE size for MD IE is fixed, it is 5 */
 	kalMemCopy(pucBuffer, prFtIEs->prMDIE, 5);
 }
+

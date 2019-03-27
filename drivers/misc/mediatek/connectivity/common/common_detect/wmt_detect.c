@@ -42,14 +42,6 @@ static struct cdev gWmtDetectCdev;
 unsigned int gWmtDetectDbgLvl = WMT_DETECT_LOG_INFO;
 static ENUM_WMT_CHIP_TYPE g_chip_type = WMT_CHIP_TYPE_INVALID;
 
-#ifdef MTK_WCN_COMBO_CHIP_SUPPORT
-inline unsigned int wmt_plat_get_soc_chipid(void)
-{
-	WMT_DETECT_INFO_FUNC("no soc chip supported, due to MTK_WCN_SOC_CHIP_SUPPORT is not set.\n");
-	return -1;
-}
-#endif
-
 static int wmt_detect_open(struct inode *inode, struct file *file)
 {
 	WMT_DETECT_INFO_FUNC("open major %d minor %d (pid %d)\n", imajor(inode), iminor(inode), current->pid);
@@ -263,6 +255,8 @@ int wmt_detect_set_chip_type(int chip_id)
 	case 0x6630:
 	case 0x6632:
 		g_chip_type = WMT_CHIP_TYPE_COMBO;
+		break;
+	case -1:
 		break;
 	default:
 		g_chip_type = WMT_CHIP_TYPE_SOC;

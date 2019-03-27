@@ -63,7 +63,6 @@
 
 #include <mt-plat/mtk_boot.h>
 #include <musb_core.h>
-#include <mt-plat/mtk_battery.h>	// [lidebiao] Disable charging for Runin test
 #include "mtk_charger_intf.h"
 #include "mtk_switch_charging.h"
 
@@ -116,13 +115,33 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 		goto done;
 	}
 
-	if (info->usb_unlimited && (info->chr_type == STANDARD_HOST || info->chr_type == CHARGING_HOST)) {
+	if (info->usb_unlimited) {
 		pdata->input_current_limit = info->data.ac_charger_input_current;
 		pdata->charging_current_limit = info->data.ac_charger_current;
 		goto done;
 	}
 
-	if (info->chr_type == STANDARD_HOST) {
+	if ((get_boot_mode() == META_BOOT) || ((get_boot_mode() == ADVMETA_BOOT))) {
+		pdata->input_current_limit = 200000; /* 200mA */
+		goto done;
+	}
+
+	if (mtk_pdc_check_charger(info) == true) {
+		int vbus = 0, cur = 0, idx = 0;
+
+		mtk_pdc_get_setting(info, &vbus, &cur, &idx);
+		if (idx != -1) {
+		pdata->input_current_limit = cur * 1000;
+		pdata->charging_current_limit = info->data.pd_charger_current;
+			mtk_pdc_setup(info, idx);
+		} else {
+			pdata->input_current_limit = info->data.usb_charger_current_configured;
+			pdata->charging_current_limit = info->data.usb_charger_current_configured;
+		}
+		chr_err("[%s]vbus:%d input_cur:%d idx:%d current:%d\n", __func__,
+			vbus, cur, idx, info->data.pd_charger_current);
+
+	} else if (info->chr_type == STANDARD_HOST) {
 		if (IS_ENABLED(CONFIG_USBIF_COMPLIANCE)) {
 			if (info->usb_state == USB_SUSPEND)
 				pdata->input_current_limit = info->data.usb_charger_current_suspend;
@@ -133,7 +152,7 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 			else
 				pdata->input_current_limit = info->data.usb_charger_current_unconfigured;
 
-				pdata->charging_current_limit = pdata->input_current_limit;
+			pdata->charging_current_limit = pdata->input_current_limit;
 		} else {
 			pdata->input_current_limit = info->data.usb_charger_current;
 			pdata->charging_current_limit = info->data.usb_charger_current;	/* it can be larger */
@@ -141,11 +160,8 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 	} else if (info->chr_type == NONSTANDARD_CHARGER) {
 		pdata->input_current_limit = info->data.non_std_ac_charger_current;
 		pdata->charging_current_limit = info->data.non_std_ac_charger_current;
-		/* [lidebiao start] Add pep20 check for non-std ta */
-		mtk_pe20_set_charging_current(info, &pdata->charging_current_limit, &pdata->input_current_limit);
-		/* [lidebiao end] */
 	} else if (info->chr_type == STANDARD_CHARGER) {
-		pdata->input_current_limit = info->data.ac_charger_current;	// [lidebiao] Modify Ibus for standard TA
+		pdata->input_current_limit = info->data.ac_charger_input_current;
 		pdata->charging_current_limit = info->data.ac_charger_current;
 		mtk_pe20_set_charging_current(info, &pdata->charging_current_limit, &pdata->input_current_limit);
 		mtk_pe_set_charging_current(info, &pdata->charging_current_limit, &pdata->input_current_limit);
@@ -160,28 +176,16 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 		pdata->charging_current_limit = info->data.apple_2_1a_charger_current;
 	}
 
-	/* [lidebiao start] Modify temp strategy for batt charging */
 	if (info->enable_sw_jeita) {
 		if (IS_ENABLED(CONFIG_USBIF_COMPLIANCE) && info->chr_type == STANDARD_HOST)
-			pr_err("USBIF & STAND_HOST skip current check\n");
+			pr_debug("USBIF & STAND_HOST skip current check\n");
 		else {
-			if (info->sw_jeita.sm== TEMP_ABOVE_T4)
-				pdata->charging_current_limit = 0;
-			else if (info->sw_jeita.sm == TEMP_T3_TO_T4)
-				pdata->charging_current_limit = 1600000;
-			else if (info->sw_jeita.sm == TEMP_T2_TO_T3)
-				pdata->charging_current_limit = pdata->charging_current_limit;
-			else if (info->sw_jeita.sm == TEMP_T1_TO_T2)
-				pdata->charging_current_limit = 640000;
-			else if (info->sw_jeita.sm == TEMP_T0_TO_T1)
-				pdata->charging_current_limit = 0;
-			else if (info->sw_jeita.sm == TEMP_BELOW_T0)
-				pdata->charging_current_limit = 0;
-			else
-				pdata->charging_current_limit = 0;
+			if (info->sw_jeita.sm == TEMP_T0_TO_T1) {
+				pdata->input_current_limit = 500000;
+				pdata->charging_current_limit = 350000;
+			}
 		}
 	}
-	/* [lidebiao end]*/
 
 	if (pdata->thermal_charging_current_limit != -1)
 		if (pdata->thermal_charging_current_limit < pdata->charging_current_limit)
@@ -190,12 +194,6 @@ static void swchg_select_charging_current_limit(struct charger_manager *info)
 	if (pdata->thermal_input_current_limit != -1)
 		if (pdata->thermal_input_current_limit < pdata->input_current_limit)
 			pdata->input_current_limit = pdata->thermal_input_current_limit;
-
-	/* [lidebiao start] Disable charging for Runin test */
-	if (get_Runin_Test_Mode() == true && get_Charging_Mode() == 0) {
-		pdata->input_current_limit = 0;
-	}
-	/* [lidebiao end] */
 
 	if (pdata->input_current_limit_by_aicl != -1 && !mtk_is_pe30_running(info) &&
 		!mtk_pe20_get_is_connect(info) && !mtk_pe_get_is_connect(info))
@@ -209,13 +207,6 @@ done:
 	ret = charger_dev_get_min_input_current(info->chg1_dev, &aicr1_min);
 	if (ret != -ENOTSUPP && pdata->input_current_limit < aicr1_min)
 		pdata->input_current_limit = 0;
-
-        /* [lidebiao start] Modify Ibat for call active */
-        if (CALL_ACTIVE == get_Call_State() && pdata->charging_current_limit >= CALL_ACTIVE_ICHR) {
-                pdata->charging_current_limit = CALL_ACTIVE_ICHR;
-                pr_err("[CALL_STATE] charge current set to %d\n", pdata->charging_current_limit);
-        }
-        /* [lidebiao end] */
 
 	chr_err("force:%d thermal:%d %d setting:%d %d type:%d usb_unlimited:%d usbif:%d usbsm:%d aicl:%d\n",
 		pdata->force_charging_current,
@@ -280,7 +271,9 @@ static void swchg_turn_on_charging(struct charger_manager *info)
 		chr_err("[charger]Charger Error, turn OFF charging !\n");
 	} else if ((get_boot_mode() == META_BOOT) || ((get_boot_mode() == ADVMETA_BOOT))) {
 		charging_enable = false;
-		pr_err("[charger]In meta or advanced meta mode, disable charging.\n");
+		info->chg1_data.input_current_limit = 200000; /* 200mA */
+		charger_dev_set_input_current(info->chg1_dev, info->chg1_data.input_current_limit);
+		chr_err("[charger]In meta or advanced meta mode, disable charging and set input current limit to 200mA\n");
 	} else {
 		mtk_pe20_start_algorithm(info);
 		mtk_pe_start_algorithm(info);
@@ -314,6 +307,7 @@ static int mtk_switch_charging_plug_out(struct charger_manager *info)
 	mtk_pe20_set_is_cable_out_occur(info, true);
 	mtk_pe_set_is_cable_out_occur(info, true);
 	mtk_pe30_plugout_reset(info);
+	mtk_pdc_plugout(info);
 	charger_manager_notifier(info, CHARGER_NOTIFY_STOP_CHARGING);
 	return 0;
 }
@@ -379,13 +373,6 @@ static int mtk_switch_chr_cc(struct charger_manager *info)
 		mtk_pe_set_is_enable(info, true);
 		mtk_pe_set_to_check_chr_type(info, true);
 	}
-
-	/* [lidebiao start] Disable charging for Runin test */
-	if (get_Runin_Test_Mode() == true && get_Charging_Mode() == 0) {
-		charger_dev_set_input_current(info->chg1_dev, 0);
-	}
-	/* [lidebiao end] */
-
 	return 0;
 }
 
@@ -458,22 +445,13 @@ static int mtk_switch_charging_run(struct charger_manager *info)
 
 	chr_err("mtk_switch_charging_run [%d]\n", swchgalg->state);
 
-	/* [lidebiao start] Disable charging for Runin test */
-	if ( get_Charging_Mode() == 1) {
-		if (mtk_pe30_check_charger(info) == true)
-			swchgalg->state = CHR_PE30;
+	if (mtk_pe30_check_charger(info) == true)
+		swchgalg->state = CHR_PE30;
 
-		if (mtk_is_TA_support_pe30(info) == false)
-			mtk_pe20_check_charger(info);
-
-		if (mtk_is_TA_support_pe30(info) == false)
-			mtk_pe_check_charger(info);
+	if (mtk_is_TA_support_pe30(info) == false) {
+		mtk_pe20_check_charger(info);
+		mtk_pe_check_charger(info);
 	}
-
-	if (get_Runin_Test_Mode() == true && get_Charging_Mode() == 0) {
-		charger_dev_set_input_current(info->chg1_dev, 0);
-	}
-	/* [lidebiao end] */
 
 	switch (swchgalg->state) {
 	case CHR_CC:

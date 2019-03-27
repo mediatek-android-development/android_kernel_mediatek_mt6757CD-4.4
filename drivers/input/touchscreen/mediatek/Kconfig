@@ -21,6 +21,16 @@ config TOUCHSCREEN_MTK
 	  To compile this dirver as a module, choose M here: the
 	  module will be called.
 
+config TOUCHSCREEN_PHYSICAL_ROTATION_WITH_LCM
+	bool "MediaTek Touch Panel Rotation With LCM"
+	default y
+	help
+	  Say N here if touch panel is not physical rotated as LCM does.
+	  Physically rotated means that this driver will map
+	  the reported coordination to diagonal position.
+
+	  If unsure, say Y.
+
 config TOUCHSCREEN_MTK_GT1151
 	bool "GT1151 for Mediatek package"
 	default n
@@ -34,32 +44,19 @@ config TOUCHSCREEN_MTK_GT1151
 
 source "drivers/input/touchscreen/mediatek/GT1151/Kconfig"
 
-config TOUCHSCREEN_MTK_FT8716
-	bool "FT8716 for Mediatek package"
-	default n
+config TOUCHSCREEN_MTK_GT911
+	bool "GT911 for Mediatek package"
 	help
-	  Say Y here if you have FT8716 touch panel.
+	  Say Y here if you have GT911 touch panel.
 
 	  If unsure, say N.
 
-	  To compile this dirver as a module, choose M here: the
-	  module will be called.
-source "drivers/input/touchscreen/mediatek/FT8716/Kconfig"
+source "drivers/input/touchscreen/mediatek/GT911/Kconfig"
 
-source "drivers/input/touchscreen/mediatek/gn_nt36xxx/Kconfig"
-
-config TOUCHSCREEN_MTK_SYNAPTICS
-	tristate "synaptics_dsx"
-	depends on I2C
+config TOUCHSCREEN_MTK_GSLX680
+	bool "gslX680 for Mediatek package"
 	help
-	  Say Y here if you have a synaptics_dsx
-	  connected to your system.
+	  Say Y here if you have gslX680 touch panel.
 
 	  If unsure, say N.
-
-	  To compile this driver as a module, choose M here: the
-	  module will be called synaptics_dsx.
-
-source "drivers/input/touchscreen/mediatek/synaptics_dsx/Kconfig"
-
 endif

@@ -17,6 +17,7 @@ struct cputopo_arm {
 extern struct cputopo_arm cpu_topology[NR_CPUS];
 extern unsigned long arch_get_max_cpu_capacity(int);
 extern unsigned long arch_get_cur_cpu_capacity(int);
+extern unsigned long cpufreq_scale_max_freq_capacity(int cpu);
 
 #define topology_physical_package_id(cpu)	(cpu_topology[cpu].socket_id)
 #define topology_core_id(cpu)		(cpu_topology[cpu].core_id)
@@ -67,6 +68,16 @@ static inline int arch_better_capacity(unsigned int cpu) { return 0; }
 #ifdef CONFIG_MTK_CPU_TOPOLOGY
 void arch_build_cpu_topology_domain(void);
 #endif
+
+
+#ifdef CONFIG_MTK_SCHED_EAS_POWER_SUPPORT
+extern inline
+int mtk_idle_power(int idle_state, int cid, void *argu, int);
+
+extern inline
+int mtk_busy_power(int cpu, void *argu, int);
+#endif
+
 
 #include <asm-generic/topology.h>
 

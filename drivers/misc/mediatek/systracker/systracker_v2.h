@@ -16,7 +16,8 @@
 
 #include <linux/platform_device.h>
 
-#define BUS_DBG_CON			(BUS_DBG_BASE + 0x0000)
+#define BUS_DBG_CON			(BUS_DBG_BASE)
+#define BUS_DBG_CON_INFRA		(BUS_DBG_INFRA_BASE)
 #define BUS_DBG_TIMER_CON0		(BUS_DBG_BASE + 0x0004)
 #define BUS_DBG_TIMER_CON1		(BUS_DBG_BASE + 0x0008)
 #define BUS_DBG_TIMER_R0		(BUS_DBG_BASE + 0x000C)
@@ -106,11 +107,11 @@ struct mt_systracker_driver {
 	void	(*systracker_write_timeout_test)(void);
 	void	(*systracker_withrecord_test)(void);
 	void	(*systracker_notimeout_test)(void);
-	void    (*systracker_debug_dump)(void);
 };
 
 struct systracker_entry_t {
 	unsigned int dbg_con;
+	unsigned int dbg_con_infra;
 	unsigned int ar_track_l[BUS_DBG_NUM_TRACKER];
 	unsigned int ar_track_h[BUS_DBG_NUM_TRACKER];
 	unsigned int ar_trans_tid[BUS_DBG_NUM_TRACKER];
@@ -136,6 +137,7 @@ extern void dump_regs(const char *fmt, const char v1, const unsigned int reg, co
 extern struct mt_systracker_driver *get_mt_systracker_drv(void);
 
 extern void __iomem *BUS_DBG_BASE;
+extern void __iomem *BUS_DBG_CON_REG;
 extern int systracker_irq;
 extern struct systracker_config_t track_config;
 extern struct systracker_entry_t track_entry;
@@ -159,7 +161,6 @@ extern void systracker_enable(void);
 extern void systracker_test_cleanup(void);
 
 
-/* #define SYSTRACKER_TEST_SUIT */   /* enable for driver poring test suit */
-#define TRACKER_DEBUG 1
-
+#define SYSTRACKER_TEST_SUIT /* enable for driver poring test suit */
+/* #define TRACKER_DEBUG 0 */
 #endif

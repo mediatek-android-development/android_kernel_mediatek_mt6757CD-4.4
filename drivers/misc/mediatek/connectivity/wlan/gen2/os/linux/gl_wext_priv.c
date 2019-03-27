@@ -166,6 +166,10 @@ typedef struct priv_driver_cmd_s {
 #define CMD_NCHO_DFS_SCAN_MODE_SET		"SETDFSSCANMODE"
 #define CMD_NCHO_ENABLE				"NCHOENABLE"
 #define CMD_NCHO_DISABLE			"NCHODISABLE"
+static int
+priv_driver_enable_ncho(IN struct net_device *prNetDev, IN char *pcCommand, IN int i4TotalLen);
+static int
+priv_driver_disable_ncho(IN struct net_device *prNetDev, IN char *pcCommand, IN int i4TotalLen);
 
 int
 priv_driver_set_ncho_roam_trigger(IN struct net_device *prNetDev, IN char *pcCommand, IN int i4TotalLen)
@@ -1220,6 +1224,8 @@ priv_driver_set_ncho_wes_mode(IN struct net_device *prNetDev, IN char *pcCommand
 	PCHAR apcArgv[WLAN_CFG_ARGV_MAX];
 	INT_32 i4Ret = -1;
 	WLAN_STATUS rStatus = WLAN_STATUS_FAILURE;
+	UINT_8 puCommondBuf[WLAN_CFG_ARGV_MAX];
+
 
 	ASSERT(prNetDev);
 	if (GLUE_CHK_PR2(prNetDev, pcCommand) == FALSE)
@@ -1236,8 +1242,17 @@ priv_driver_set_ncho_wes_mode(IN struct net_device *prNetDev, IN char *pcCommand
 			DBGLOG(REQ, ERROR, "NCHO parse u4Param error %d\n", i4Ret);
 			return -1;
 		}
+		/*If WES mode is 1, enable NCHO*/
+		/*If WES mode is 0, disable NCHO*/
+		if (u4Param == TRUE && prGlueInfo->prAdapter->rNchoInfo.fgECHOEnabled == FALSE) {
+			kalSnprintf(puCommondBuf, WLAN_CFG_ARGV_MAX, "%s %d", CMD_NCHO_ENABLE, 1);
+			priv_driver_enable_ncho(prNetDev, puCommondBuf, sizeof(puCommondBuf));
+		} else if (u4Param == FALSE && prGlueInfo->prAdapter->rNchoInfo.fgECHOEnabled == TRUE) {
+			kalSnprintf(puCommondBuf, WLAN_CFG_ARGV_MAX, "%s", CMD_NCHO_DISABLE);
+			priv_driver_disable_ncho(prNetDev, puCommondBuf, sizeof(puCommondBuf));
+		}
 
-		DBGLOG(INIT, TRACE, "NCHO set WES mode cmd %d\n", u4Param);
+		DBGLOG(INIT, INFO, "NCHO set WES mode cmd %d\n", u4Param);
 		rStatus = kalIoctl(prGlueInfo,
 				   wlanoidSetNchoWesMode,
 				   &u4Param, sizeof(UINT_32), FALSE, FALSE, TRUE, FALSE, &u4SetInfoLen);
@@ -1528,7 +1543,18 @@ priv_driver_disable_ncho(IN struct net_device *prNetDev, IN char *pcCommand, IN 
 		DBGLOG(REQ, ERROR, "NCHO error input parameter %d\n", i4Argc);
 		return i4BytesWritten;
 	}
+	/*<1> Set NCHO Disable to FW*/
+	u4Param = FALSE;
+	rStatus = kalIoctl(prGlueInfo,
+			   wlanoidSetNchoEnable,
+			   &u4Param, sizeof(UINT_32), FALSE, FALSE, TRUE, FALSE, &u4BufLen);
 
+	if (rStatus != WLAN_STATUS_SUCCESS) {
+		DBGLOG(INIT, ERROR, "NCHO wlanoidSetNchoEnable :%d fail 0x%x\n", u4Param, rStatus);
+		return i4BytesWritten;
+	}
+
+	/*<2> Query NCHOEnable Satus*/
 	rStatus = kalIoctl(prGlueInfo,
 			   wlanoidQueryNchoEnable,
 			   &cmdV1Header,
@@ -1540,6 +1566,8 @@ priv_driver_disable_ncho(IN struct net_device *prNetDev, IN char *pcCommand, IN 
 	}
 
 	DBGLOG(REQ, TRACE, "NCHO query ok and ret is %s\n", cmdV1Header.buffer);
+
+
 	i4BytesWritten = kalkStrtou32(cmdV1Header.buffer, 0, &u4Param);
 	if (i4BytesWritten) {
 		DBGLOG(REQ, ERROR, "NCHO parse u4Param error %d!\n", i4BytesWritten);
@@ -1550,6 +1578,28 @@ priv_driver_disable_ncho(IN struct net_device *prNetDev, IN char *pcCommand, IN 
 
 	return i4BytesWritten;
 }
+/*Check NCHO is enable or not.*/
+BOOLEAN
+priv_driver_auto_enable_ncho(IN struct net_device *prNetDev)
+{
+	UINT_8 puCommondBuf[WLAN_CFG_ARGV_MAX];
+	P_GLUE_INFO_T prGlueInfo = NULL;
+
+	ASSERT(prNetDev);
+	prGlueInfo = *((P_GLUE_INFO_T *) netdev_priv(prNetDev));
+	ASSERT(prGlueInfo);
+
+	kalSnprintf(puCommondBuf, WLAN_CFG_ARGV_MAX, "%s %d", CMD_NCHO_ENABLE, 1);
+#if CFG_SUPPORT_NCHO_AUTO_ENABLE
+	if (prGlueInfo->prAdapter->rNchoInfo.fgECHOEnabled == FALSE) {
+		DBGLOG(INIT, INFO, "NCHO is unavailable now! Start to NCHO Enable CMD\n");
+		priv_driver_enable_ncho(prNetDev, puCommondBuf, sizeof(puCommondBuf));
+
+	}
+#endif
+	return TRUE;
+}
+
 #endif
 
 /*******************************************************************************
@@ -3207,7 +3257,7 @@ _priv_set_struct(IN struct net_device *prNetDev,
 		u4CmdLen = prIwReqData->data.length;
 		prNdisReq = (P_NDIS_TRANSPORT_STRUCT) &aucOidBuf[0];
 
-		if (u4CmdLen > (sizeof(aucOidBuf) - OFFSET_OF(NDIS_TRANSPORT_STRUCT, ndisOidContent))) {
+		if (u4CmdLen > sizeof(prNdisReq->ndisOidContent)) {
 			DBGLOG(REQ, ERROR, "Input data length is invalid %u\n", u4CmdLen);
 			return -EINVAL;
 		}
@@ -3227,13 +3277,9 @@ _priv_set_struct(IN struct net_device *prNetDev,
 #if CFG_SUPPORT_TX_POWER_BACK_OFF
 	case PRIV_CMD_SET_TX_POWER:
 		{
+			P_REG_INFO_T prRegInfo = &prGlueInfo->rRegInfo;
 			WLAN_STATUS rStatus = WLAN_STATUS_SUCCESS;
-			BOOLEAN bTxPowerLimitEnable2G = FALSE;
-			BOOLEAN bTxPowerLimitEnable5G = FALSE;
 			UINT8 cStartTxBackOff = 0;
-			UINT8 cTxBackOffMaxPower2G = 0x00;
-			UINT8 cTxBackOffMaxPower5G = 0x00;
-			UINT8 aucTmp[2];
 			/* TxPwrBackOffParam's 0th byte contains enable/disable TxPowerBackOff for 2G */
 			/* TxPwrBackOffParam's 1st byte contains default TxPowerBackOff value for 2G */
 			/* TxPwrBackOffParam's 2nd byte contains enable/disable TxPowerBackOff for 5G */
@@ -3241,38 +3287,37 @@ _priv_set_struct(IN struct net_device *prNetDev,
 
 			ULONG TxPwrBackOffParam = 0;
 
-			DBGLOG(REQ, INFO, "Entered case PRIV_CMD_SET_TX_POWER\n");
-			prTestStruct = prIwReqData->data.pointer;
+			u4CmdLen = prIwReqData->data.length;
+			prTestStruct = (P_PARAM_MTK_WIFI_TEST_STRUCT_T)&aucOidBuf[0];
 
-			DBGLOG(REQ, INFO, "prTestStruct->u4FuncIndex = %u, prTestStruct->u4FuncData = %u[0x%x]\n",
-			       prTestStruct->u4FuncIndex, prTestStruct->u4FuncData, prTestStruct->u4FuncData);
+			if (u4CmdLen > sizeof(aucOidBuf)) {
+				DBGLOG(REQ, ERROR, "SET_TX_POWER: Input data length is invalid %u\n", u4CmdLen);
+				return -EINVAL;
+			}
+			if (copy_from_user(prTestStruct, prIwReqData->data.pointer, u4CmdLen)) {
+				DBGLOG(REQ, INFO, "SET_TX_POWER: copy from user failed\n");
+				return -EFAULT;
+			}
+
+			DBGLOG(REQ, INFO, "%s: SET_TX_POWER FuncIndex %u, FuncData %u[0x%x] %d %d %d %d\n",
+				__func__,
+				prTestStruct->u4FuncIndex,
+				prTestStruct->u4FuncData,
+				prTestStruct->u4FuncData,
+				prRegInfo->bTxPowerLimitEnable2G,
+				prRegInfo->cTxBackOffMaxPower2G,
+				prRegInfo->bTxPowerLimitEnable5G,
+				prRegInfo->cTxBackOffMaxPower5G);
+
 			cStartTxBackOff = prTestStruct->u4FuncData;
 
-			/* load TxPower for 2.4G Band from nvram */
-			kalCfgDataRead16(prGlueInfo, OFFSET_OF(WIFI_CFG_PARAM_STRUCT,
-				bTxPowerLimitEnable2G), (PUINT_16) aucTmp);
-			bTxPowerLimitEnable2G = (BOOLEAN)aucTmp[0];
-			cTxBackOffMaxPower2G = aucTmp[1];
-
-			/* load TxPower for 5G Band from nvram */
-			kalCfgDataRead16(prGlueInfo, OFFSET_OF(WIFI_CFG_PARAM_STRUCT,
-				bTxPowerLimitEnable5G), (PUINT_16) aucTmp);
-			bTxPowerLimitEnable5G = (BOOLEAN)aucTmp[0];
-			cTxBackOffMaxPower5G = aucTmp[1];
-
-			DBGLOG(REQ, INFO, "%s: %d, %d, %d, %d\n", __func__,
-				bTxPowerLimitEnable2G,
-				cTxBackOffMaxPower2G,
-				bTxPowerLimitEnable5G,
-				cTxBackOffMaxPower5G);
-
-			if ((bTxPowerLimitEnable2G == TRUE) || (bTxPowerLimitEnable5G == TRUE)) {
+			if ((prRegInfo->bTxPowerLimitEnable2G == TRUE) || (prRegInfo->bTxPowerLimitEnable5G == TRUE)) {
 				if (cStartTxBackOff == TRUE) {
 					DBGLOG(REQ, INFO, "Start BackOff\n");
-					TxPwrBackOffParam |= bTxPowerLimitEnable2G;
-					TxPwrBackOffParam |= cTxBackOffMaxPower2G << 8;
-					TxPwrBackOffParam |= bTxPowerLimitEnable5G << 16;
-					TxPwrBackOffParam |= cTxBackOffMaxPower5G << 24;
+					TxPwrBackOffParam |= prRegInfo->bTxPowerLimitEnable2G;
+					TxPwrBackOffParam |= prRegInfo->cTxBackOffMaxPower2G << 8;
+					TxPwrBackOffParam |= prRegInfo->bTxPowerLimitEnable5G << 16;
+					TxPwrBackOffParam |= (ULONG)prRegInfo->cTxBackOffMaxPower5G << 24;
 					rStatus = nicTxPowerBackOff(prGlueInfo->prAdapter, TxPwrBackOffParam);
 				} else {
 					DBGLOG(REQ, INFO, "Stop BackOff\n");
@@ -3344,8 +3389,7 @@ _priv_get_struct(IN struct net_device *prNetDev,
 
 	switch (u4SubCmd) {
 	case PRIV_CMD_OID:
-		if (copy_from_user(&aucOidBuf[0], prIwReqData->data.pointer,
-					sizeof(NDIS_TRANSPORT_STRUCT) + sizeof(UINT_8)*16)) {
+		if (copy_from_user(&aucOidBuf[0], prIwReqData->data.pointer, sizeof(NDIS_TRANSPORT_STRUCT))) {
 			DBGLOG(REQ, INFO, "priv_get_struct() copy_from_user oidBuf fail\n");
 			return -EFAULT;
 		}
@@ -3359,7 +3403,7 @@ _priv_get_struct(IN struct net_device *prNetDev,
 			prNdisReq->outNdisOidLength = u4BufLen;
 			if (copy_to_user(prIwReqData->data.pointer,
 					 &aucOidBuf[0],
-					 u4BufLen + sizeof(NDIS_TRANSPORT_STRUCT) + sizeof(UINT_8)*16 -
+					 u4BufLen + sizeof(NDIS_TRANSPORT_STRUCT) -
 					 sizeof(prNdisReq->ndisOidContent))) {
 				DBGLOG(REQ, INFO, "priv_get_struct() copy_to_user oidBuf fail(1)\n");
 				return -EFAULT;
@@ -3376,7 +3420,7 @@ _priv_get_struct(IN struct net_device *prNetDev,
 	case PRIV_CMD_SW_CTRL:
 		prNdisReq = (P_NDIS_TRANSPORT_STRUCT) &aucOidBuf[0];
 
-		if (prIwReqData->data.length > (sizeof(aucOidBuf) - OFFSET_OF(NDIS_TRANSPORT_STRUCT, ndisOidContent))) {
+		if (prIwReqData->data.length > sizeof(prNdisReq->ndisOidContent)) {
 			DBGLOG(REQ, INFO, "priv_get_struct() exceeds length limit\n");
 			return -EFAULT;
 		}
@@ -3879,6 +3923,7 @@ _priv_set_string(IN struct net_device *prNetDev,
 
 	if (copy_from_user(pucInBuf, prIwReqData->data.pointer, u4BufLen))
 		return -EFAULT;
+
 	DBGLOG(REQ, INFO, "orig str cmd %s, %u\n", pucInBuf, u4BufLen);
 
 	subcmd = CmdStringDecParse(pucInBuf, &pucInBuf, &u4BufLen);
@@ -3965,6 +4010,9 @@ _priv_get_string(IN struct net_device *prNetDev,
 
 		if (!kalStrniCmp(pcExtra, "dumpts", 6))
 			kalIoctl(prGlueInfo, wlanoidTspecOperation, (PVOID)pcExtra,
+					 512, FALSE, FALSE, FALSE, FALSE, &i4BytesWritten);
+		else if (!kalStrniCmp(pcExtra, "dumpuapsd", 9))
+			kalIoctl(prGlueInfo, wlanoidDumpUapsdSetting, (PVOID)pcExtra,
 					 512, FALSE, FALSE, FALSE, FALSE, &i4BytesWritten);
 		prIwReqData->data.length = i4BytesWritten;
 		DBGLOG(REQ, INFO, "returned Bytes %d\n", i4BytesWritten);
@@ -4281,7 +4329,7 @@ int priv_driver_set_miracast(IN struct net_device *prNetDev, IN char *pcCommand,
 	UINT_32 ucMode = 0;
 	P_WFD_CFG_SETTINGS_T prWfdCfgSettings = (P_WFD_CFG_SETTINGS_T) NULL;
 	P_MSG_WFD_CONFIG_SETTINGS_CHANGED_T prMsgWfdCfgUpdate = (P_MSG_WFD_CONFIG_SETTINGS_CHANGED_T) NULL;
-	PCHAR apcArgv[WLAN_CFG_ARGV_MAX];
+	PCHAR apcArgv[WLAN_CFG_ARGV_MAX] = { 0 };
 	INT_32 u4Ret;
 
 	ASSERT(prNetDev);
@@ -4528,7 +4576,7 @@ int priv_support_driver_cmd(IN struct net_device *prNetDev, IN OUT struct ifreq 
 
 	i4TotalLen = priv_cmd->total_len;
 
-	if (i4TotalLen <= 0) {
+	if (i4TotalLen <= 0 || i4TotalLen > PRIV_CMD_SIZE) {
 		ret = -EINVAL;
 		DBGLOG(REQ, INFO, "%s: i4TotalLen invalid\n", __func__);
 		goto exit;
@@ -4668,8 +4716,14 @@ INT_32 priv_driver_cmds(IN struct net_device *prNetDev, IN PCHAR pcCommand, IN I
 					rFccTxPwrAdjust.Channel_HT40[0] = 8;
 					/* end channel, primiary channel 12, HT40,  center channel (11) -2 */
 					rFccTxPwrAdjust.Channel_HT40[1] = 9;
+					/* set special bandedge*/
+					rFccTxPwrAdjust.Channel_Bandedge[0] = 11;
+					rFccTxPwrAdjust.Channel_Bandedge[1] = 13;
 #else
 					kalMemCopy(&rFccTxPwrAdjust, pFccTxPwrAdjust, sizeof(FCC_TX_PWR_ADJUST));
+					/* set special channel band edge */
+					kalMemCopy(&rFccTxPwrAdjust.Channel_Bandedge,
+						&prGlueInfo->rRegInfo.aucChannelBandEdge, sizeof(UINT_8)*2);
 #endif
 					rFccTxPwrAdjust.fgFccTxPwrAdjust = *pcCommand == '0' ? 1 : 0;
 

@@ -51,14 +51,12 @@ void __iomem *vdecsys_base;
 void __iomem *vencsys_base;
 void __iomem *audiosys_base_in_idle;
 void __iomem  *apmixed_base_in_idle;
-void __iomem  *timer_base_in_idle;
 
 /* Idle handler on/off */
 int idle_switch[NR_TYPES] = {
 	1,	/* dpidle switch */
 	1,	/* soidle3 switch */
 	1,	/* soidle switch */
-	0,      /* mcsodi_switch */
 #ifdef CONFIG_CPU_ISOLATION
 	0,	/* mcidle switch */
 #else
@@ -116,21 +114,6 @@ unsigned int soidle_condition_mask[NR_GRPS] = {
 	0x00000000, /* AUDIO */
 };
 
-
-/*FIXME: Need to confirm following CGs condition*/
-unsigned int mcsodi_condition_mask[NR_GRPS] = {
-	0x00640802, /* INFRA0: */
-	0x03AFB900, /* INFRA1: separate I2C-appm CG check */
-	0x000000C3, /* INFRA2: */
-	0xAAB06FF8, /* DISP0:  */
-	0x00008C15, /* DISP1:  */
-	0x00000312, /* IMAGE, use SPM MTCMOS off as condition: */
-	0x00000112, /* MFG,   use SPM MTCMOS off as condition: */
-	0x00000112, /* VDEC,  use SPM MTCMOS off as condition: */
-	0x00000F12, /* VENC,  use SPM MTCMOS off as condition: */
-	0x00000000, /* AUDIO */
-};
-
 unsigned int slidle_condition_mask[NR_GRPS] = {
 	0x00000000, /* INFRA0: */
 	0x00000000, /* INFRA1: */
@@ -148,7 +131,6 @@ const char *idle_name[NR_TYPES] = {
 	"dpidle",
 	"soidle3",
 	"soidle",
-	"mcsodi",
 	"mcidle",
 	"slidle",
 	"rgidle",
@@ -330,14 +312,6 @@ bool cg_check_idle_can_enter(
 						VEN_PWR_STA_MASK))
 				return false;
 		}
-	} else if (mode == MTK_MCSODI) {
-		if (!mcsodi_by_pass_pg) {
-			if (sta & (MFG_PWR_STA_MASK |
-						ISP_PWR_STA_MASK |
-						VDE_PWR_STA_MASK |
-						VEN_PWR_STA_MASK))
-				return false;
-		}
 	}
 
 	return ret;
@@ -418,7 +392,6 @@ void __init iomap_init(void)
 	get_base_from_node("mediatek,vdec_gcon", &vdecsys_base, 0);
 	get_base_from_node("mediatek,venc_gcon", &vencsys_base, 0);
 	get_base_from_node("mediatek,audio", &audiosys_base_in_idle, 0);
-	get_base_from_node("mediatek,mt6757-timer", &timer_base_in_idle, 0);
 }
 
 const char *cg_grp_get_name(int id)

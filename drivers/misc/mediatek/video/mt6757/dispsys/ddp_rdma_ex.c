@@ -293,12 +293,12 @@ void rdma_set_ultra_l(unsigned int idx, unsigned int bpp, void *handle, struct g
 		fill_rate = 960*mmsysclk*3/16; /* FIFO depth / us  */
 
 	if (idx == 0) {
-		consume_rate = rdma_golden_setting->dst_width * rdma_golden_setting->dst_height
-				*frame_rate * Bytes_per_sec;
+		consume_rate = (unsigned long long)rdma_golden_setting->dst_width
+				* rdma_golden_setting->dst_height * frame_rate * Bytes_per_sec;
 		do_div(consume_rate, 1000);
 
 	} else {
-		consume_rate = rdma_golden_setting->ext_dst_width
+		consume_rate = (unsigned long long)rdma_golden_setting->ext_dst_width
 				* rdma_golden_setting->ext_dst_height*frame_rate*Bytes_per_sec;
 		do_div(consume_rate, 1000);
 	}
@@ -331,7 +331,7 @@ void rdma_set_ultra_l(unsigned int idx, unsigned int bpp, void *handle, struct g
 
 
 	/* output valid should < total rdma data size, or hang will happen */
-	temp = rdma_golden_setting->rdma_width * rdma_golden_setting->rdma_height * Bytes_per_sec;
+	temp = (unsigned long long)rdma_golden_setting->rdma_width * rdma_golden_setting->rdma_height * Bytes_per_sec;
 	do_div(temp, 16);
 	temp -= 1;
 	output_valid_fifo_threshold = preultra_low < temp ? preultra_low : temp;
@@ -1035,10 +1035,10 @@ static inline int rdma_switch_to_sec(enum DISP_MODULE_ENUM module, void *handle)
 	/* cmdqRecSecureEnableDAPC(handle, (1LL << cmdq_engine)); */
 	if (rdma_is_sec[rdma_idx] == 0) {
 		DDPSVPMSG("[SVP] switch rdma%d to sec\n", rdma_idx);
-		MMProfileLogEx(ddp_mmp_get_events()->svp_module[module],
-			MMProfileFlagStart, 0, 0);
-		/*MMProfileLogEx(ddp_mmp_get_events()->svp_module[module],
-		 *	MMProfileFlagPulse, rdma_idx, 1);
+		mmprofile_log_ex(ddp_mmp_get_events()->svp_module[module],
+			MMPROFILE_FLAG_START, 0, 0);
+		/*mmprofile_log_ex(ddp_mmp_get_events()->svp_module[module],
+		 *	MMPROFILE_FLAG_PULSE, rdma_idx, 1);
 		 */
 	}
 	rdma_is_sec[rdma_idx] = 1;
@@ -1102,10 +1102,10 @@ int rdma_switch_to_nonsec(enum DISP_MODULE_ENUM module, struct disp_ddp_path_con
 
 		cmdqRecDestroy(nonsec_switch_handle);
 		DDPSVPMSG("[SVP] switch rdma%d to nonsec\n", rdma_idx);
-		MMProfileLogEx(ddp_mmp_get_events()->svp_module[module],
-			MMProfileFlagEnd, 0, 0);
-		/*MMProfileLogEx(ddp_mmp_get_events()->svp_module[module],
-		 *	MMProfileFlagPulse, rdma_idx, 0);
+		mmprofile_log_ex(ddp_mmp_get_events()->svp_module[module],
+			MMPROFILE_FLAG_END, 0, 0);
+		/*mmprofile_log_ex(ddp_mmp_get_events()->svp_module[module],
+		 *	MMPROFILE_FLAG_PULSE, rdma_idx, 0);
 		 */
 	}
 
@@ -1155,8 +1155,8 @@ int rdma_wait_sec_done(enum DISP_MODULE_ENUM module, struct disp_ddp_path_config
 
 	cmdqRecDestroy(wait_handle);
 
-	MMProfileLogEx(ddp_mmp_get_events()->svp_module[module],
-		MMProfileFlagPulse, 1, 1);
+	mmprofile_log_ex(ddp_mmp_get_events()->svp_module[module],
+		MMPROFILE_FLAG_PULSE, 1, 1);
 	return 0;
 }
 

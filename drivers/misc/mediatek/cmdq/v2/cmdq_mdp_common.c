@@ -231,13 +231,18 @@ const char *cmdq_mdp_dispatch_virtual(uint64_t engineFlag)
 
 void cmdq_mdp_trackTask_virtual(const struct TaskStruct *pTask)
 {
-	memcpy(gCmdqMDPTask[gCmdqMDPTaskIndex].callerName,
-		pTask->callerName, sizeof(pTask->callerName));
-	if (pTask->userDebugStr)
-		memcpy(gCmdqMDPTask[gCmdqMDPTaskIndex].userDebugStr,
-			pTask->userDebugStr, (uint32_t)strlen(pTask->userDebugStr) + 1);
-	else
+	if (pTask) {
+		memcpy(gCmdqMDPTask[gCmdqMDPTaskIndex].callerName,
+			pTask->callerName, sizeof(pTask->callerName));
+		if (pTask->userDebugStr)
+			memcpy(gCmdqMDPTask[gCmdqMDPTaskIndex].userDebugStr,
+				pTask->userDebugStr, (uint32_t)strlen(pTask->userDebugStr) + 1);
+		else
+			gCmdqMDPTask[gCmdqMDPTaskIndex].userDebugStr[0] = '\0';
+	} else {
+		gCmdqMDPTask[gCmdqMDPTaskIndex].callerName[0] = '\0';
 		gCmdqMDPTask[gCmdqMDPTaskIndex].userDebugStr[0] = '\0';
+	}
 
 	CMDQ_MSG("cmdq_mdp_trackTask: caller: %s\n",
 		gCmdqMDPTask[gCmdqMDPTaskIndex].callerName);
@@ -248,6 +253,33 @@ void cmdq_mdp_trackTask_virtual(const struct TaskStruct *pTask)
 
 	gCmdqMDPTaskIndex = (gCmdqMDPTaskIndex + 1) % MDP_MAX_TASK_NUM;
 }
+
+#if defined(CMDQ_USE_LEGACY)
+void cmdq_mdp_init_module_clk_MUTEX_32K_virtual(void)
+{
+	/* Do Nothing */
+}
+#endif
+#ifdef CONFIG_MTK_CMDQ_TAB
+void cmdq_mdp_smi_larb_enable_clock_virtual(bool enable)
+{
+	/* Do Nothing */
+}
+#endif
+
+#ifdef CMDQ_OF_SUPPORT
+void cmdq_mdp_get_module_pa_virtual(long *startPA, long *endPA)
+{
+	/* Do Nothing */
+}
+#endif
+
+#ifdef CMDQ_USE_LEGACY
+void cmdq_mdp_enable_clock_mutex32k_virtual(bool enable)
+{
+	/* Do Nothing */
+}
+#endif
 
 /**************************************************************************************/
 /************************                      Common Code                      ************************/
@@ -289,6 +321,19 @@ void cmdq_mdp_virtual_function_setting(void)
 	pFunc->dispatchModule = cmdq_mdp_dispatch_virtual;
 
 	pFunc->trackTask = cmdq_mdp_trackTask_virtual;
+
+#if defined(CMDQ_USE_LEGACY)
+	pFunc->mdpInitModuleClkMutex32K = cmdq_mdp_init_module_clk_MUTEX_32K_virtual;
+#endif
+#ifdef CONFIG_MTK_CMDQ_TAB
+	pFunc->mdpSmiLarbEnableClock = cmdq_mdp_smi_larb_enable_clock_virtual;
+#endif
+#ifdef CMDQ_OF_SUPPORT
+	pFunc->mdpGetModulePa = cmdq_mdp_get_module_pa_virtual;
+#endif
+#ifdef CMDQ_USE_LEGACY
+	pFunc->mdpEnableClockMutex32k = cmdq_mdp_enable_clock_mutex32k_virtual;
+#endif
 }
 
 struct cmdqMDPFuncStruct *cmdq_mdp_get_func(void)

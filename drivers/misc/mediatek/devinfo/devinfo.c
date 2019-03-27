@@ -26,9 +26,11 @@
 #include <linux/device.h>
 #ifdef CONFIG_OF
 #include <linux/of_fdt.h>
+#include <linux/of.h>
 #endif
 #include <linux/atomic.h>
 #include <asm/setup.h>
+#include <mt-plat/mtk_devinfo.h>
 #include "devinfo.h"
 
 enum {
@@ -38,6 +40,7 @@ enum {
 
 static u32 *g_devinfo_data;
 static u32 g_devinfo_size;
+static u32 g_hrid_size = HRID_DEFAULT_SIZE;
 static struct cdev devinfo_cdev;
 static struct class *devinfo_class;
 static dev_t devinfo_dev;
@@ -45,6 +48,7 @@ static struct dentry *devinfo_segment_root;
 static char devinfo_segment_buff[128];
 static atomic_t g_devinfo_init_status = ATOMIC_INIT(DEVINFO_UNINIT);
 static atomic_t g_devinfo_init_errcnt = ATOMIC_INIT(0);
+static struct device_node *chosen_node;
 
 /*****************************************************************************
 *FUNCTION DEFINITION
@@ -54,6 +58,7 @@ static int devinfo_release(struct inode *inode, struct file *filp);
 static long devinfo_ioctl(struct file *file, unsigned int cmd, unsigned long arg);
 static ssize_t devinfo_segment_read(struct file *filp, char __user *buf, size_t len, loff_t *ppos);
 static void init_devinfo_exclusive(void);
+static void devinfo_parse_dt(void);
 
 /**************************************************************************
 *EXTERN FUNCTION
@@ -97,6 +102,50 @@ u32 get_devinfo_with_index(u32 index)
 	return ret;
 }
 EXPORT_SYMBOL(get_devinfo_with_index);
+
+u32 get_hrid_size(void)
+{
+#ifdef CONFIG_OF
+	if (devinfo_get_size() == 0)
+		init_devinfo_exclusive();
+#endif
+
+	return g_hrid_size;
+}
+EXPORT_SYMBOL(get_hrid_size);
+
+u32 get_hrid(unsigned char *rid, unsigned char *rid_sz)
+{
+	u32 ret = E_SUCCESS;
+	u32 i, j;
+
+#ifdef CONFIG_OF
+	if (devinfo_get_size() == 0)
+		init_devinfo_exclusive();
+#endif
+
+	if (rid_sz == NULL)
+		return E_BUF_SIZE_ZERO_OR_NULL;
+
+	if (rid == NULL)
+		return E_BUF_ZERO_OR_NULL;
+
+	if (*rid_sz < (g_hrid_size * 4))
+		return E_BUF_NOT_ENOUGH;
+
+	for (i = 0; i < g_hrid_size; i++) {
+		u32 reg_val = 0;
+
+		reg_val = get_devinfo_with_index(12 + i);
+		for (j = 0; j < 4; j++)
+			*(rid + i * 4 + j) = (reg_val & (0xff << (8 * j))) >> (8 * j);
+	}
+
+	*rid_sz = g_hrid_size * 4;
+
+	return ret;
+}
+EXPORT_SYMBOL(get_hrid);
 
 /**************************************************************************
 *STATIC FUNCTION
@@ -247,15 +296,24 @@ static int __init devinfo_init(void)
 }
 
 #ifdef CONFIG_OF
-static int __init devinfo_parse_dt(unsigned long node, const char *uname, int depth, void *data)
+static void devinfo_parse_dt(void)
 {
 	struct devinfo_tag *tags;
 	u32 size = 0;
+	u32 hrid_magic_num_and_size = 0;
+	u32 hrid_magic_num = 0;
+	u32 hrid_tmp_size = 0;
 
-	if (depth != 1 || (strcmp(uname, "chosen") != 0 && strcmp(uname, "chosen@0") != 0))
-		return 0;
+	chosen_node = of_find_node_by_path("/chosen");
+	if (!chosen_node) {
+		chosen_node = of_find_node_by_path("/chosen@0");
+		if (!chosen_node) {
+			pr_err("chosen node is not found!!");
+			return;
+		}
+	}
 
-	tags = (struct devinfo_tag *) of_get_flat_dt_prop(node, "atag,devinfo", NULL);
+	tags = (struct devinfo_tag *) of_get_property(chosen_node, "atag,devinfo", NULL);
 	if (tags) {
 		size = tags->data_size;
 
@@ -266,7 +324,23 @@ static int __init devinfo_parse_dt(unsigned long node, const char *uname, int de
 
 		memcpy(g_devinfo_data, tags->data, (size * sizeof(u32)));
 
-		pr_err("tag_devinfo_data size:%d\n", size);
+		if (size >= EFUSE_FIXED_HRID_SIZE_INDEX) {
+			hrid_magic_num_and_size = g_devinfo_data[EFUSE_FIXED_HRID_SIZE_INDEX];
+			hrid_magic_num = (hrid_magic_num_and_size & 0xFFFF0000);
+			hrid_tmp_size = (hrid_magic_num_and_size & 0x0000FFFF);
+			if (hrid_magic_num == HRID_SIZE_MAGIC_NUM) {
+				if (hrid_tmp_size > HRID_MAX_ALLOWED_SIZE)
+					g_hrid_size = HRID_MAX_ALLOWED_SIZE;
+				else if (hrid_tmp_size < HRID_MIN_ALLOWED_SIZE)
+					g_hrid_size = HRID_MIN_ALLOWED_SIZE;
+				else
+					g_hrid_size = hrid_tmp_size;
+			} else
+				g_hrid_size = HRID_DEFAULT_SIZE;
+		} else
+			g_hrid_size = HRID_DEFAULT_SIZE;
+
+		pr_err("tag_devinfo_data size:%d, HRID size:%d\n", size, g_hrid_size);
 
 		sprintf(devinfo_segment_buff, "segment code=0x%x\n", g_devinfo_data[DEVINFO_SEGCODE_INDEX]);
 
@@ -278,7 +352,6 @@ static int __init devinfo_parse_dt(unsigned long node, const char *uname, int de
 		pr_err("'atag,devinfo' is not found\n");
 	}
 
-	return 1;
 }
 
 static void init_devinfo_exclusive(void)
@@ -295,10 +368,10 @@ static void init_devinfo_exclusive(void)
 	else
 		return;
 
-	of_scan_flat_dt(devinfo_parse_dt, NULL);
+	devinfo_parse_dt();
 }
 
-static int __init devinfo_of_init(void)
+static int devinfo_of_init(void)
 {
 	init_devinfo_exclusive();
 	return 0;

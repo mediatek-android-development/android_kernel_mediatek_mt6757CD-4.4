@@ -30,8 +30,14 @@
 #include "mtk/ion_drv.h"
 #include "mtk/mtk_ion.h"
 
+#ifdef CONFIG_MTK_IOMMU
+
 #ifdef CONFIG_MTK_PSEUDO_M4U
 #include <mach/pseudo_m4u.h>
+#else
+#include <m4u_v2_ext.h>
+#endif
+
 #else
 #include <m4u.h>
 #endif
@@ -92,6 +98,7 @@ static int ion_fb_heap_phys(struct ion_heap *heap, struct ion_buffer *buffer,
 	port_info.security = buffer_info->security;
 	port_info.BufSize = buffer->size;
 	port_info.flags = 0;
+
 	/*Allocate MVA*/
 	mutex_lock(&buffer_info->lock);
 	if (buffer_info->MVA == 0) {
@@ -101,10 +108,12 @@ static int ion_fb_heap_phys(struct ion_heap *heap, struct ion_buffer *buffer,
 			IONMSG("[ion_fb_heap_phys]: Error. Allocate MVA failed.\n");
 			return -EFAULT;
 		}
+
 		buffer_info->MVA = port_info.mva;
 		*addr = (ion_phys_addr_t)buffer_info->MVA;
 	} else
 		*addr = (ion_phys_addr_t)buffer_info->MVA;
+
 	mutex_unlock(&buffer_info->lock);
 	*len = buffer->size;
 	/*IONMSG("[ion_fb_heap_phys]: MVA = 0x%x, len = 0x%x.\n", buffer_info->MVA, (unsigned int) buffer->size);*/
@@ -154,8 +163,17 @@ static void ion_fb_heap_free(struct ion_buffer *buffer)
 {
 	struct ion_heap *heap = buffer->heap;
 	struct ion_fb_buffer_info *buffer_info = (struct ion_fb_buffer_info *)buffer->priv_virt;
+	struct sg_table *table = buffer->sg_table;
+
+	if (!buffer_info) {
+		IONMSG("[ion_fb_heap_free]: Error: buffer_info is NULL.\n");
+		return;
+	}
 
 	buffer->priv_virt = NULL;
+	if (buffer_info->MVA)
+		m4u_dealloc_mva_sg(buffer_info->module_id, table, buffer->size, buffer_info->MVA);
+
 	ion_fb_free(heap, buffer_info->priv_phys, buffer->size);
 
 	buffer_info->priv_phys = ION_CARVEOUT_ALLOCATE_FAIL;

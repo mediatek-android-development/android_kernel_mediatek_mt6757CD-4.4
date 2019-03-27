@@ -17,6 +17,7 @@
 #include <linux/device.h>
 #include <linux/usb/audio.h>
 #include <linux/wait.h>
+#include <linux/pm_qos.h>
 #include <sound/core.h>
 #include <sound/initval.h>
 #include <sound/pcm.h>
@@ -31,15 +32,10 @@
 #define SAMPLE_RATE 44100
 #define FRAMES_PER_MSEC (SAMPLE_RATE / 1000)
 
-/* mod for performance enhancement */
 #define BYTES_PER_FRAME 4
-#define IN_EP_MAX_PACKET_SIZE ((FRAMES_PER_MSEC + 1) * BYTES_PER_FRAME)
-/* #define IN_EP_MAX_PACKET_SIZE 256 */
+#define IN_EP_MAX_PACKET_SIZE 256
 
-/* Number of requests to allocate */
-/* #define IN_EP_REQ_COUNT 4 */
-/* mod for performance enhancement */
-#define IN_EP_REQ_COUNT 16
+#define IN_EP_REQ_COUNT 4
 
 #define AUDIO_AC_INTERFACE	0
 #define AUDIO_AS_INTERFACE	1
@@ -273,6 +269,8 @@ struct audio_dev {
 	/* number of frames sent since start_time */
 	s64				frames_sent;
 	struct audio_source_config	*config;
+	/* for creating and issuing QoS requests */
+	struct pm_qos_request pm_qos;
 };
 
 static inline struct audio_dev *func_to_audio(struct usb_function *f)
@@ -315,6 +313,7 @@ static struct device_attribute *audio_source_function_attributes[] = {
 static struct usb_request *audio_request_new(struct usb_ep *ep, int buffer_size)
 {
 	struct usb_request *req = usb_ep_alloc_request(ep, GFP_KERNEL);
+
 	if (!req)
 		return NULL;
 
@@ -392,12 +391,9 @@ static void audio_send(struct audio_dev *audio)
 	spin_unlock_irqrestore(&audio->lock, flags);
 	/* compute number of frames to send */
 	now = ktime_get();
-	msecs = ktime_to_ns(now) - ktime_to_ns(audio->start_time);
-	do_div(msecs, 1000000);
-	/* mod for performance enhancement */
-	msecs += IN_EP_REQ_COUNT/2;
-	frames = msecs * SAMPLE_RATE;
-	do_div(frames, 1000);
+	msecs = div_s64((ktime_to_ns(now) - ktime_to_ns(audio->start_time)),
+			1000000);
+	frames = div_s64((msecs * SAMPLE_RATE), 1000);
 
 	/* Readjust our frames_sent if we fall too far behind.
 	 * If we get too far behind it is better to drop some frames than
@@ -405,19 +401,15 @@ static void audio_send(struct audio_dev *audio)
 	 */
 
 
-	/* if (frames - audio->frames_sent > 10 * FRAMES_PER_MSEC) */
-	/* mod for performance enhancement */
-	if (frames - audio->frames_sent > 2 * FRAMES_PER_MSEC * IN_EP_REQ_COUNT)
+	if (frames - audio->frames_sent > 10 * FRAMES_PER_MSEC)
 		audio->frames_sent = frames - FRAMES_PER_MSEC;
 
 	frames -= audio->frames_sent;
 
 	/* We need to send something to keep the pipeline going */
-	/* mod for performance enhancement */
-	/*
 	if (frames <= 0)
-	*	frames = FRAMES_PER_MSEC;
-	*/
+		frames = FRAMES_PER_MSEC;
+
 	while (frames > 0) {
 		req = audio_req_get(audio);
 		spin_lock_irqsave(&audio->lock, flags);
@@ -776,6 +768,8 @@ static int audio_pcm_open(struct snd_pcm_substream *substream)
 	spin_lock_irqsave(&audio->lock, flags);
 	audio->substream = substream;
 	spin_unlock_irqrestore(&audio->lock, flags);
+	/* Add the QoS request and set the latency to 0 */
+	pm_qos_add_request(&audio->pm_qos, PM_QOS_CPU_DMA_LATENCY, 0);
 	return 0;
 }
 
@@ -783,6 +777,9 @@ static int audio_pcm_close(struct snd_pcm_substream *substream)
 {
 	struct audio_dev *audio = substream->private_data;
 	unsigned long flags;
+
+	/* Remove the QoS request */
+	pm_qos_remove_request(&audio->pm_qos);
 
 	spin_lock_irqsave(&audio->lock, flags);
 	audio->substream = NULL;

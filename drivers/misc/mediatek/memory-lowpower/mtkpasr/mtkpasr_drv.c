@@ -27,6 +27,10 @@
 /* Header file for DRAMC PASR configuration */
 #include <mtk_dramc.h>
 
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+#include <mtk_vcorefs_manager.h>
+#endif
+
 #ifdef CONFIG_MTK_DCS
 #include <mt-plat/mtk_meminfo.h>
 #endif
@@ -127,11 +131,25 @@ retry:
 static void enable_dcs_pasr(void)
 {
 	int chconfig, ret;
+	int chid;
 
 	if (!dcs_initialied()) {
 		dcs_status = DCS_NORMAL;
 		dcs_acquired = 1;
 		goto bypass_dcs;
+	}
+
+	/* Step0 - switch to lowpower mode */
+#ifdef DCS_SCREENOFF_ONLY_MODE
+	ret = dcs_exit_perf(DCS_KICKER_DEBUG);
+	if (ret)
+		pr_err("exit perf failed, kick=%d\n", DCS_KICKER_DEBUG);
+#endif
+
+	ret = dcs_switch_to_lowpower();
+	if (ret != 0) {
+		pr_warn("%s: failed to swtich to lowpower mode, error (%d)\n", __func__, ret);
+		return;
 	}
 
 	/* Step1 - Acquire DCS status */
@@ -164,10 +182,11 @@ bypass_dcs:
 			pr_warn("%s: failed to configure PASR, error (%d)\n", __func__, ret);
 			goto err;
 		}
-		enter_dcs_pasr_dpd_config(mtkpasr_vec[chconfig].pasr_on & 0xFF,
-					mtkpasr_vec[chconfig].pasr_on >> 0x8);
-		/* Step3 - Turn off DDRPHY */
-		dram_dcs_turn_on_off_ch(0);
+
+		/* Configure DRAMC */
+		for (chid = 0; chid < max_channel_num; chid++)
+			enter_dcs_pasr_dpd_config(mtkpasr_vec[chid].pasr_on & 0xFF,
+						mtkpasr_vec[chid].pasr_on >> 0x8, chid);
 	} else {
 		pr_warn("%s: should not be here\n", __func__);
 		goto err;
@@ -182,12 +201,12 @@ err:
 
 static void disable_dcs_pasr(void)
 {
+#ifdef DCS_SCREENOFF_ONLY_MODE
+	int ret;
+#endif
+
 	if (!dcs_acquired)
 		return;
-
-	/* Turn on DDRPHY */
-	if (dcs_status == DCS_LOWPOWER)
-		dram_turn_on_off_ch_b(1);
 
 	/* Restore PASR */
 	if (dcs_status == DCS_NORMAL)
@@ -202,6 +221,13 @@ static void disable_dcs_pasr(void)
 	dcs_status = DCS_BUSY;
 	if (dcs_initialied())
 		dcs_get_dcs_status_unlock();
+
+#ifdef DCS_SCREENOFF_ONLY_MODE
+	/* enter performance mode */
+	ret = dcs_enter_perf(DCS_KICKER_DEBUG);
+	if (ret)
+		pr_err("enter perf failed, kick=%d\n", DCS_KICKER_DEBUG);
+#endif
 }
 #endif
 
@@ -213,6 +239,9 @@ static int mtkpasr_config(int times, get_range_t func)
 {
 	unsigned long spfn, epfn;
 	int which, i;
+#ifndef CONFIG_MTK_DCS
+	int retry = 3;
+#endif
 
 	/* Not enable */
 	if (!mtkpasr_enable)
@@ -241,14 +270,26 @@ static int mtkpasr_config(int times, get_range_t func)
 		if (mtkpasr_banks[i].free == (mtkpasr_banks[i].end_pfn - mtkpasr_banks[i].start_pfn))
 			mtkpasr_on |= (1 << mtkpasr_banks[i].segment);
 
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_0);
+#endif
+
 #ifndef CONFIG_MTK_DCS
+retry_pasr:
 	/* APMCU flow */
 	MTKPASR_PRINT("%s: PASR[0x%lx]\n", __func__, mtkpasr_on);
-	if (enter_pasr_dpd_config(mtkpasr_on & 0xFF, mtkpasr_on >> 0x8) != 0)
+	if (enter_pasr_dpd_config(mtkpasr_on & 0xFF, mtkpasr_on >> 0x8) != 0) {
+		if (--retry)
+			goto retry_pasr;
 		MTKPASR_PRINT("%s: failed to program DRAMC!\n", __func__);
+	}
 #else
 	/* Channel based PASR configuration */
 	enable_dcs_pasr();
+#endif
+
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_UNREQ);
 #endif
 
 	++mtkpasr_triggered;
@@ -273,10 +314,18 @@ static int mtkpasr_restore(void)
 
 	MTKPASR_PRINT("%s:+\n", __func__);
 
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_0);
+#endif
+
 #ifndef CONFIG_MTK_DCS
 	restore_pasr();
 #else
 	disable_dcs_pasr();
+#endif
+
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_UNREQ);
 #endif
 
 	MTKPASR_PRINT("%s:-\n", __func__);
@@ -293,16 +342,21 @@ static struct memory_lowpower_operation mtkpasr_handler = {
 /* ++ SYSFS Interface ++ */
 int mtkpasr_show_banks(char *buf)
 {
+#define MTKPASR_SHOW_BANKS_LIMIT	(128)
 	int i, len = 0, tmp;
 
 	/* Show banks */
 	for (i = 0; i < num_banks; i++) {
-		tmp = sprintf(buf, "Bank[%d] - start_pfn[0x%lx] end_pfn[0x%lx] segment[%d] rank[%d]\n",
+		tmp = snprintf(buf, MTKPASR_SHOW_BANKS_LIMIT,
+				"Bank[%2d] - start_pfn[%6lx] end_pfn[%6lx] segment[%2d] rank[%d] %s\n",
 				i, mtkpasr_banks[i].start_pfn, mtkpasr_banks[i].end_pfn - 1,
-				mtkpasr_banks[i].segment, mtkpasr_banks[i].rank);
+				mtkpasr_banks[i].segment, mtkpasr_banks[i].rank,
+				((mtkpasr_on >> mtkpasr_banks[i].segment) & 0x1) ? "[ON]" : "");
 		buf += tmp;
 		len += tmp;
 	}
+
+#undef MTKPASR_SHOW_BANKS_LIMIT
 
 	return len;
 }
@@ -332,9 +386,34 @@ static ssize_t enable_store(struct device *dev, struct device_attribute *attr, c
 	return len;
 }
 
+/* MTKPASR status */
+static int show_pasr_status(char *buf)
+{
+	int len;
+
+	len = sprintf(buf, "Triggered [%lu]times :: Last PASR[0x%lx]\n", mtkpasr_triggered, mtkpasr_on);
+
+#ifdef CONFIG_MTK_DCS
+	if (mtkpasr_vec) {
+		int i, tmp;
+
+		buf += len;
+		tmp = sprintf(buf, "Channel-based PASR, max channel number[%d]\n", max_channel_num);
+		buf += tmp;
+		len += tmp;
+		for (i = 0; i < max_channel_num; i++) {
+			tmp = sprintf(buf, "ch[%d] :: PASR-masked[0x%lx]\n", i, mtkpasr_vec[i].pasr_on);
+			buf += tmp;
+			len += tmp;
+		}
+	}
+#endif
+	return len;
+}
+
 static ssize_t mtkpasr_status_show(struct device *dev, struct device_attribute *attr, char *buf)
 {
-	return sprintf(buf, "Triggered [%lu]times :: Last PASR[0x%lx]\n", mtkpasr_triggered, mtkpasr_on);
+	return show_pasr_status(buf);
 }
 
 static ssize_t srmask_show(struct device *dev, struct device_attribute *attr, char *buf)
@@ -371,7 +450,7 @@ static ssize_t execstate_show(struct device *dev, struct device_attribute *attr,
 	len += tmp;
 
 	/* MTKPASR status */
-	tmp = sprintf(buf, "Triggered [%lu]times :: Last PASR[0x%lx]\n", mtkpasr_triggered, mtkpasr_on);
+	tmp = show_pasr_status(buf);
 	buf += tmp;
 	len += tmp;
 
@@ -411,8 +490,8 @@ static int __init mtkpasr_construct_bankrank(void)
 	unsigned long start_pfn, end_pfn;
 
 	/* Init mtkpasr range */
-	start_pfn = memory_lowpower_cma_base() >> PAGE_SHIFT;
-	end_pfn = start_pfn + (memory_lowpower_cma_size() >> PAGE_SHIFT);
+	start_pfn = memory_lowpower_base() >> PAGE_SHIFT;
+	end_pfn = start_pfn + (memory_lowpower_size() >> PAGE_SHIFT);
 	max_bank_pfns = 0;
 	ret = mtkpasr_init_range(start_pfn, end_pfn, &max_bank_pfns);
 	if (ret <= 0 || max_bank_pfns == 0) {

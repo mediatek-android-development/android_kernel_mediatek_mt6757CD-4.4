@@ -158,6 +158,12 @@ typedef enum _ENUM_KAL_MEM_ALLOCATION_TYPE_E {
 	MEM_TYPE_NUM
 } ENUM_KAL_MEM_ALLOCATION_TYPE;
 
+enum ENUM_BUILD_VARIANT_E {
+	MTK_BUILD_VAR_ENG = 1,		/*eng load*/
+	MTK_BUILD_VAR_USERDEUB = 2,	/*userdebug load*/
+	MTK_BUILD_VAR_USER = 3	/*user load*/
+};
+
 #if CONFIG_ANDROID		/* Defined in Android kernel source */
 typedef struct wake_lock KAL_WAKE_LOCK_T, *P_KAL_WAKE_LOCK_T;
 #else
@@ -353,6 +359,7 @@ typedef UINT_32 KAL_WAKE_LOCK_T, *P_KAL_WAKE_LOCK_T;
 
 #define kalMdelay(u4MSec)                           mdelay(u4MSec)
 #define kalMsleep(u4MSec)                           msleep(u4MSec)
+#define kalUsleepRange(u4StarUSec, u4EndUSec)        usleep_range(u4StarUSec, u4EndUSec)
 
 /* Copy memory from user space to kernel space */
 #define kalMemCopyFromUser(_pvTo, _pvFrom, _u4N)    copy_from_user(_pvTo, _pvFrom, _u4N)
@@ -468,270 +475,9 @@ typedef UINT_32 KAL_WAKE_LOCK_T, *P_KAL_WAKE_LOCK_T;
 
 #define kalGetTimeTick()                            jiffies_to_msecs(jiffies)
 
-#define kalPrint                                    pr_debug
-
-#if !DBG
-#define AIS_ERROR_LOGFUNC(_Fmt...)
-#define AIS_WARN_LOGFUNC(_Fmt...)
-#define AIS_INFO_LOGFUNC(_Fmt...)
-#define AIS_STATE_LOGFUNC(_Fmt...)
-#define AIS_EVENT_LOGFUNC(_Fmt...)
-#define AIS_TRACE_LOGFUNC(_Fmt...)
-#define AIS_LOUD_LOGFUNC(_Fmt...)
-#define AIS_TEMP_LOGFUNC(_Fmt...)
-
-#define INTR_ERROR_LOGFUNC(_Fmt...)
-#define INTR_WARN_LOGFUNC(_Fmt...)
-#define INTR_INFO_LOGFUNC(_Fmt...)
-#define INTR_STATE_LOGFUNC(_Fmt...)
-#define INTR_EVENT_LOGFUNC(_Fmt...)
-#define INTR_TRACE_LOGFUNC(_Fmt...)
-#define INTR_LOUD_LOGFUNC(_Fmt...)
-#define INTR_TEMP_LOGFUNC(_Fmt...)
-
-#define INIT_ERROR_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define INIT_WARN_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define INIT_INFO_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define INIT_STATE_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define INIT_EVENT_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define INIT_TRACE_LOGFUNC(_Fmt...)
-#define INIT_LOUD_LOGFUNC(_Fmt...)
-#define INIT_TEMP_LOGFUNC(_Fmt...)
-
-#define AAA_ERROR_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define AAA_WARN_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define AAA_INFO_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define AAA_STATE_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define AAA_EVENT_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define AAA_TRACE_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define AAA_LOUD_LOGFUNC(_Fmt...)
-#define AAA_TEMP_LOGFUNC(_Fmt...)
-
-#define ROAMING_ERROR_LOGFUNC(_Fmt...)
-#define ROAMING_WARN_LOGFUNC(_Fmt...)
-#define ROAMING_INFO_LOGFUNC(_Fmt...)
-#define ROAMING_STATE_LOGFUNC(_Fmt...)
-#define ROAMING_EVENT_LOGFUNC(_Fmt...)
-#define ROAMING_TRACE_LOGFUNC(_Fmt...)
-#define ROAMING_LOUD_LOGFUNC(_Fmt...)
-#define ROAMING_TEMP_LOGFUNC(_Fmt...)
-
-#define REQ_ERROR_LOGFUNC(_Fmt...)
-#define REQ_WARN_LOGFUNC(_Fmt...)
-#define REQ_INFO_LOGFUNC(_Fmt...)
-#define REQ_STATE_LOGFUNC(_Fmt...)
-#define REQ_EVENT_LOGFUNC(_Fmt...)
-#define REQ_TRACE_LOGFUNC(_Fmt...)
-#define REQ_LOUD_LOGFUNC(_Fmt...)
-#define REQ_TEMP_LOGFUNC(_Fmt...)
-
-#define TX_ERROR_LOGFUNC(_Fmt...)
-#define TX_WARN_LOGFUNC(_Fmt...)
-#define TX_INFO_LOGFUNC(_Fmt...)
-#define TX_STATE_LOGFUNC(_Fmt...)
-#define TX_EVENT_LOGFUNC(_Fmt...)
-#define TX_TRACE_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define TX_LOUD_LOGFUNC(_Fmt...)
-#define TX_TEMP_LOGFUNC(_Fmt...)
-
-#define RX_ERROR_LOGFUNC(_Fmt...)
-#define RX_WARN_LOGFUNC(_Fmt...)
-#define RX_INFO_LOGFUNC(_Fmt...)
-#define RX_STATE_LOGFUNC(_Fmt...)
-#define RX_EVENT_LOGFUNC(_Fmt...)
-#define RX_TRACE_LOGFUNC(_Fmt...)
-#define RX_LOUD_LOGFUNC(_Fmt...)
-#define RX_TEMP_LOGFUNC(_Fmt...)
-
-#define RFTEST_ERROR_LOGFUNC(_Fmt...)
-#define RFTEST_WARN_LOGFUNC(_Fmt...)
-#define RFTEST_INFO_LOGFUNC(_Fmt...)
-#define RFTEST_STATE_LOGFUNC(_Fmt...)
-#define RFTEST_EVENT_LOGFUNC(_Fmt...)
-#define RFTEST_TRACE_LOGFUNC(_Fmt...)
-#define RFTEST_LOUD_LOGFUNC(_Fmt...)
-#define RFTEST_TEMP_LOGFUNC(_Fmt...)
-
-#define EMU_ERROR_LOGFUNC(_Fmt...)
-#define EMU_WARN_LOGFUNC(_Fmt...)
-#define EMU_INFO_LOGFUNC(_Fmt...)
-#define EMU_STATE_LOGFUNC(_Fmt...)
-#define EMU_EVENT_LOGFUNC(_Fmt...)
-#define EMU_TRACE_LOGFUNC(_Fmt...)
-#define EMU_LOUD_LOGFUNC(_Fmt...)
-#define EMU_TEMP_LOGFUNC(_Fmt...)
-
-#define HEM_ERROR_LOGFUNC(_Fmt...)
-#define HEM_WARN_LOGFUNC(_Fmt...)
-#define HEM_INFO_LOGFUNC(_Fmt...)
-#define HEM_STATE_LOGFUNC(_Fmt...)
-#define HEM_EVENT_LOGFUNC(_Fmt...)
-#define HEM_TRACE_LOGFUNC(_Fmt...)
-#define HEM_LOUD_LOGFUNC(_Fmt...)
-#define HEM_TEMP_LOGFUNC(_Fmt...)
-
-#define RLM_ERROR_LOGFUNC(_Fmt...)
-#define RLM_WARN_LOGFUNC(_Fmt...)
-#define RLM_INFO_LOGFUNC(_Fmt...)
-#define RLM_STATE_LOGFUNC(_Fmt...)
-#define RLM_EVENT_LOGFUNC(_Fmt...)
-#define RLM_TRACE_LOGFUNC(_Fmt...)
-#define RLM_LOUD_LOGFUNC(_Fmt...)
-#define RLM_TEMP_LOGFUNC(_Fmt...)
-
-#define MEM_ERROR_LOGFUNC(_Fmt...)
-#define MEM_WARN_LOGFUNC(_Fmt...)
-#define MEM_INFO_LOGFUNC(_Fmt...)
-#define MEM_STATE_LOGFUNC(_Fmt...)
-#define MEM_EVENT_LOGFUNC(_Fmt...)
-#define MEM_TRACE_LOGFUNC(_Fmt...)
-#define MEM_LOUD_LOGFUNC(_Fmt...)
-#define MEM_TEMP_LOGFUNC(_Fmt...)
-
-#define CNM_ERROR_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define CNM_WARN_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define CNM_INFO_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define CNM_STATE_LOGFUNC(_Fmt...)
-#define CNM_EVENT_LOGFUNC(_Fmt...)
-#define CNM_TRACE_LOGFUNC(_Fmt...)
-#define CNM_LOUD_LOGFUNC(_Fmt...)
-#define CNM_TEMP_LOGFUNC(_Fmt...)
-
-#define RSN_ERROR_LOGFUNC(_Fmt...)
-#define RSN_WARN_LOGFUNC(_Fmt...)
-#define RSN_INFO_LOGFUNC(_Fmt...)
-#define RSN_STATE_LOGFUNC(_Fmt...)
-#define RSN_EVENT_LOGFUNC(_Fmt...)
-#define RSN_TRACE_LOGFUNC(_Fmt...)
-#define RSN_LOUD_LOGFUNC(_Fmt...)
-#define RSN_TEMP_LOGFUNC(_Fmt...)
-
-#define BSS_ERROR_LOGFUNC(_Fmt...)
-#define BSS_WARN_LOGFUNC(_Fmt...)
-#define BSS_INFO_LOGFUNC(_Fmt...)
-#define BSS_STATE_LOGFUNC(_Fmt...)
-#define BSS_EVENT_LOGFUNC(_Fmt...)
-#define BSS_TRACE_LOGFUNC(_Fmt...)
-#define BSS_LOUD_LOGFUNC(_Fmt...)
-#define BSS_TEMP_LOGFUNC(_Fmt...)
-
-#define SCN_ERROR_LOGFUNC(_Fmt...)
-#define SCN_WARN_LOGFUNC(_Fmt...)
-#define SCN_INFO_LOGFUNC(_Fmt...)
-#define SCN_STATE_LOGFUNC(_Fmt...)
-#define SCN_EVENT_LOGFUNC(_Fmt...)
-#define SCN_TRACE_LOGFUNC(_Fmt...)
-#define SCN_LOUD_LOGFUNC(_Fmt...)
-#define SCN_TEMP_LOGFUNC(_Fmt...)
-
-#define SAA_ERROR_LOGFUNC(_Fmt...)
-#define SAA_WARN_LOGFUNC(_Fmt...)
-#define SAA_INFO_LOGFUNC(_Fmt...)
-#define SAA_STATE_LOGFUNC(_Fmt...)
-#define SAA_EVENT_LOGFUNC(_Fmt...)
-#define SAA_TRACE_LOGFUNC(_Fmt...)
-#define SAA_LOUD_LOGFUNC(_Fmt...)
-#define SAA_TEMP_LOGFUNC(_Fmt...)
-
-#define P2P_ERROR_LOGFUNC(_Fmt...)
-#define P2P_WARN_LOGFUNC(_Fmt...)
-#define P2P_INFO_LOGFUNC(_Fmt...)
-#define P2P_STATE_LOGFUNC(_Fmt...)
-#define P2P_EVENT_LOGFUNC(_Fmt...)
-#define P2P_TRACE_LOGFUNC(_Fmt...)
-#define P2P_LOUD_LOGFUNC(_Fmt...)
-#define P2P_TEMP_LOGFUNC(_Fmt...)
-
-#define QM_ERROR_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define QM_WARN_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define QM_INFO_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define QM_STATE_LOGFUNC(_Fmt...)
-#define QM_EVENT_LOGFUNC(_Fmt...)
-#define QM_TRACE_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define QM_LOUD_LOGFUNC(_Fmt...)
-#define QM_TEMP_LOGFUNC(_Fmt...)
-
-#define SEC_ERROR_LOGFUNC(_Fmt...)
-#define SEC_WARN_LOGFUNC(_Fmt...)
-#define SEC_INFO_LOGFUNC(_Fmt...)
-#define SEC_STATE_LOGFUNC(_Fmt...)
-#define SEC_EVENT_LOGFUNC(_Fmt...)
-#define SEC_TRACE_LOGFUNC(_Fmt...)
-#define SEC_LOUD_LOGFUNC(_Fmt...)
-#define SEC_TEMP_LOGFUNC(_Fmt...)
-
-#define BOW_ERROR_LOGFUNC(_Fmt...)
-#define BOW_WARN_LOGFUNC(_Fmt...)
-#define BOW_INFO_LOGFUNC(_Fmt...)
-#define BOW_STATE_LOGFUNC(_Fmt...)
-#define BOW_EVENT_LOGFUNC(_Fmt...)
-#define BOW_TRACE_LOGFUNC(_Fmt...)
-#define BOW_LOUD_LOGFUNC(_Fmt...)
-#define BOW_TEMP_LOGFUNC(_Fmt...)
-
-#define HAL_ERROR_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define HAL_WARN_LOGFUNC(_Fmt...)
-#define HAL_INFO_LOGFUNC(_Fmt...)
-#define HAL_STATE_LOGFUNC(_Fmt...)
-#define HAL_EVENT_LOGFUNC(_Fmt...)
-#define HAL_TRACE_LOGFUNC(_Fmt...)
-#define HAL_LOUD_LOGFUNC(_Fmt...)
-#define HAL_TEMP_LOGFUNC(_Fmt...)
-
-#define WAPI_ERROR_LOGFUNC(_Fmt...)
-#define WAPI_WARN_LOGFUNC(_Fmt...)
-#define WAPI_INFO_LOGFUNC(_Fmt...)
-#define WAPI_STATE_LOGFUNC(_Fmt...)
-#define WAPI_EVENT_LOGFUNC(_Fmt...)
-#define WAPI_TRACE_LOGFUNC(_Fmt...)
-#define WAPI_LOUD_LOGFUNC(_Fmt...)
-#define WAPI_TEMP_LOGFUNC(_Fmt...)
-
-#define TDLS_ERROR_LOGFUNC(_Fmt...) kalPrint(_Fmt)
-#define TDLS_WARN_LOGFUNC(_Fmt...)  kalPrint(_Fmt)
-#define TDLS_INFO_LOGFUNC(_Fmt...)  kalPrint(_Fmt)
-#define TDLS_STATE_LOGFUNC(_Fmt...)
-#define TDLS_EVENT_LOGFUNC(_Fmt...)
-#define TDLS_TRACE_LOGFUNC(_Fmt...)
-#define TDLS_LOUD_LOGFUNC(_Fmt...)
-#define TDLS_TEMP_LOGFUNC(_Fmt...)
-
-#define SW1_ERROR_LOGFUNC(_Fmt...)
-#define SW1_WARN_LOGFUNC(_Fmt...)
-#define SW1_INFO_LOGFUNC(_Fmt...)
-#define SW1_STATE_LOGFUNC(_Fmt...)
-#define SW1_EVENT_LOGFUNC(_Fmt...)
-#define SW1_TRACE_LOGFUNC(_Fmt...)
-#define SW1_LOUD_LOGFUNC(_Fmt...)
-#define SW1_TEMP_LOGFUNC(_Fmt...)
-
-#define SW2_ERROR_LOGFUNC(_Fmt...)
-#define SW2_WARN_LOGFUNC(_Fmt...)
-#define SW2_INFO_LOGFUNC(_Fmt...)
-#define SW2_STATE_LOGFUNC(_Fmt...)
-#define SW2_EVENT_LOGFUNC(_Fmt...)
-#define SW2_TRACE_LOGFUNC(_Fmt...)
-#define SW2_LOUD_LOGFUNC(_Fmt...)
-#define SW2_TEMP_LOGFUNC(_Fmt...)
-
-#define SW3_ERROR_LOGFUNC(_Fmt...)
-#define SW3_WARN_LOGFUNC(_Fmt...)
-#define SW3_INFO_LOGFUNC(_Fmt...)
-#define SW3_STATE_LOGFUNC(_Fmt...)
-#define SW3_EVENT_LOGFUNC(_Fmt...)
-#define SW3_TRACE_LOGFUNC(_Fmt...)
-#define SW3_LOUD_LOGFUNC(_Fmt...)
-#define SW3_TEMP_LOGFUNC(_Fmt...)
-
-#define SW4_ERROR_LOGFUNC(_Fmt...)
-#define SW4_WARN_LOGFUNC(_Fmt...)
-#define SW4_INFO_LOGFUNC(_Fmt...)
-#define SW4_STATE_LOGFUNC(_Fmt...)
-#define SW4_EVENT_LOGFUNC(_Fmt...)
-#define SW4_TRACE_LOGFUNC(_Fmt...)
-#define SW4_LOUD_LOGFUNC(_Fmt...)
-#define SW4_TEMP_LOGFUNC(_Fmt...)
-#endif
+#define WLAN_TAG                                    "[wlan]"
+#define kalPrint(_Fmt...)                           pr_debug(WLAN_TAG _Fmt)
+#define kalPrintLimited(_Fmt...)                    pr_debug_ratelimited(WLAN_TAG _Fmt)
 
 #define kalBreakPoint() \
 do { \
@@ -775,7 +521,7 @@ VOID kalUpdateMACAddress(IN P_GLUE_INFO_T prGlueInfo, IN PUINT_8 pucMacAddr);
 
 VOID kalPacketFree(IN P_GLUE_INFO_T prGlueInfo, IN PVOID pvPacket);
 
-PVOID kalPacketAlloc(IN P_GLUE_INFO_T prGlueInfo, IN UINT_32 u4Size, OUT PUINT_8 *ppucData);
+PVOID kalPacketAlloc(IN P_GLUE_INFO_T prGlueInfo, IN UINT_32 u4Size, OUT PPUINT_8 ppucData);
 
 VOID kalOsTimerInitialize(IN P_GLUE_INFO_T prGlueInfo, IN PVOID prTimerHandler);
 
@@ -812,7 +558,7 @@ VOID kalQueryTxChksumOffloadParam(IN PVOID pvPacket, OUT PUINT_8 pucFlag);
 VOID kalUpdateRxCSUMOffloadParam(IN PVOID pvPacket, IN ENUM_CSUM_RESULT_T eCSUM[]);
 #endif /* CFG_TCP_IP_CHKSUM_OFFLOAD */
 
-BOOLEAN kalRetrieveNetworkAddress(IN P_GLUE_INFO_T prGlueInfo, IN OUT PARAM_MAC_ADDRESS *prMacAddr);
+BOOLEAN kalRetrieveNetworkAddress(IN P_GLUE_INFO_T prGlueInfo, PARAM_MAC_ADDRESS *prMacAddr);
 
 VOID
 kalReadyOnChannel(IN P_GLUE_INFO_T prGlueInfo,
@@ -846,7 +592,7 @@ kalDevPortWrite(P_GLUE_INFO_T prGlueInfo,
 
 BOOLEAN kalDevWriteWithSdioCmd52(IN P_GLUE_INFO_T prGlueInfo, IN UINT_32 u4Addr, IN UINT_8 ucData);
 
-void kalDevLoopbkAuto(IN GLUE_INFO_T *GlueInfo);
+void kalDevLoopbkAuto(IN P_GLUE_INFO_T GlueInfo);
 
 #if CFG_SUPPORT_EXT_CONFIG
 UINT_32 kalReadExtCfg(IN P_GLUE_INFO_T prGlueInfo);
@@ -1103,10 +849,8 @@ INT_32 kalBoostCpu(UINT_32 core_num);
 INT32 kalSetCpuNumFreq(UINT_32 core_num, UINT_32 freq);
 INT_32 kalFbNotifierReg(IN P_GLUE_INFO_T prGlueInfo);
 VOID kalFbNotifierUnReg(VOID);
-VOID kalChangeSchedParams(P_GLUE_INFO_T prGlueInfo, BOOLEAN fgNormalThread);
-
 #if CFG_SUPPORT_SET_CAM_BY_PROC
 VOID nicConfigProcSetCamCfgWrite(BOOLEAN enabled);
 #endif
-
+VOID kalChangeSchedParams(P_GLUE_INFO_T prGlueInfo, BOOLEAN fgNormalThread);
 #endif /* _GL_KAL_H */

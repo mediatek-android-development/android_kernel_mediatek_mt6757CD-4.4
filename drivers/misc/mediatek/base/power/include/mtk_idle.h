@@ -18,9 +18,13 @@
 
 #include "spm_v2/mtk_idle.h"
 
-#elif defined(CONFIG_MACH_MT6799)
+#elif defined(CONFIG_MACH_MT6799) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6759)
 
 #include "spm_v3/mtk_idle.h"
+
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6739)
+
+#include "spm_v4/mtk_idle.h"
 
 #endif
 

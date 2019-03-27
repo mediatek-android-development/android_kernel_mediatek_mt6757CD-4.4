@@ -21,6 +21,16 @@ config CHARGER_RT9466
 	  It depends on config MTK_SMART_BATTERY
 	  and config MTK_SWCHR_SUPPORT.
 
+config CHARGER_RT9467
+	bool "Charger Driver for Richtek RT9467 Charger IC"
+	default n
+	depends on MTK_SMART_BATTERY && MTK_SWCHR_SUPPORT
+	help
+	  Say Y to enable
+	  Richtek RT9467 driver.
+	  It depends on config MTK_SMART_BATTERY
+	  and config MTK_SWCHR_SUPPORT.
+
 config CHARGER_RT9465
 	bool "Charger Driver for Richtek RT9465 Charger IC"
 	default n
@@ -31,9 +41,19 @@ config CHARGER_RT9465
 	  It depends on config MTK_SMART_BATTERY
 	  and config MTK_SWCHR_SUPPORT.
 
+config CHARGER_RT9458
+	bool "Charger Driver for Richtek RT9458 Charger IC"
+	default n
+	depends on MTK_SMART_BATTERY && MTK_SWCHR_SUPPORT
+	help
+	  Say Y to enable
+	  Richtek RT9458 driver.
+	  It depends on config MTK_SMART_BATTERY
+	  and config MTK_SWCHR_SUPPORT.
+
 config RT9465_PWR_EN_TO_MT6336
 	bool "RT9465 PWR_EN pin's connection"
-	default y
+	default n
 	depends on CHARGER_RT9465
 	help
 	  This is used to indicate PWR_EN pin's connection.
@@ -290,7 +310,7 @@ config MTK_DISABLE_GAUGE
 
 config MTK_ADDITIONAL_BATTERY_TABLE
 	bool "Enable the fifth battery table"
-	default n
+	default y
 	help
 	  Set Yes to enable the fifth battery table
 	  Table number is five.
@@ -327,7 +347,6 @@ config MTK_PUMP_EXPRESS_PLUS_20_SUPPORT
 config MTK_PUMP_EXPRESS_PLUS_30_SUPPORT
 	bool "MediaTek PUMP EXPRESS PLUS 3.0"
 	default n
-	depends on TCPC_CLASS
 	help
 	  low voltage high current fast charging, by using switch charger and PD
 	  to achive better charging ability,it reduce more IC heat than PE+

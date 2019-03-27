@@ -30,7 +30,7 @@
 #include <linux/uidgid.h>
 #include <linux/slab.h>
 
-#define RESERVED_TZS (9)
+#define RESERVED_TZS (12)
 
 static kuid_t uid = KUIDT_INIT(0);
 static kgid_t gid = KGIDT_INIT(1000);
@@ -227,11 +227,11 @@ static void mtkts_allts_start_timer(void)
 			continue;
 
 		if (g_tsData[i].thz_dev != NULL && g_tsData[i].interval != 0)
-			mod_delayed_work(system_freezable_wq,
-				&(g_tsData[i].thz_dev->poll_queue), round_jiffies(msecs_to_jiffies(1000)));
-		/*1000 = 1sec */
+			mod_delayed_work(system_freezable_power_efficient_wq, &(g_tsData[i].thz_dev->poll_queue),
+				round_jiffies(msecs_to_jiffies(1000)));
 
 		up(&g_tsData[i].sem_mutex);
+		/*1000 = 1sec */
 	}
 }
 
@@ -302,7 +302,7 @@ static ssize_t tz ## num ## _proc_write(struct file *file, const char __user *bu
 	pTempD->desc[len] = '\0';\
 \
 	i = sscanf(pTempD->desc,	\
-		"%d %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d",\
+"%d %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d %d %19s %d",\
 		&pTempD->num_trip,	\
 		&pTempD->trip[0], &pTempD->t_type[0], pTempD->bind[0],	\
 		&pTempD->trip[1], &pTempD->t_type[1], pTempD->bind[1],	\
@@ -413,6 +413,9 @@ PROC_FOPS_RW(6);
 PROC_FOPS_RW(7);
 PROC_FOPS_RW(8);
 PROC_FOPS_RW(9);
+PROC_FOPS_RW(10);
+PROC_FOPS_RW(11);
+PROC_FOPS_RW(12);
 
 static const struct file_operations *thz_fops[RESERVED_TZS] = {
 	FOPS(1),
@@ -423,7 +426,10 @@ static const struct file_operations *thz_fops[RESERVED_TZS] = {
 	FOPS(6),
 	FOPS(7),
 	FOPS(8),
-	FOPS(9)
+	FOPS(9),
+	FOPS(10),
+	FOPS(11),
+	FOPS(12)
 };
 
 static int __init tsallts_init(void)
@@ -466,7 +472,6 @@ static int __init tsallts_init(void)
 	}
 
 	mtkTTimer_register("tztsAll", mtkts_allts_start_timer, mtkts_allts_cancel_timer);
-
 	return 0;
 }
 

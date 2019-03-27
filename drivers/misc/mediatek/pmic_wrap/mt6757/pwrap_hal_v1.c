@@ -1401,25 +1401,25 @@ static int pwrap_of_iomap(void)
 
 	infracfg_ao_node = of_find_compatible_node(NULL, NULL, "mediatek,infracfg_ao");
 	if (!infracfg_ao_node) {
-		pr_warn("get INFRACFG_AO failed\n");
+		pr_notice("get INFRACFG_AO failed\n");
 		return -ENODEV;
 	}
 
 	infracfg_ao_base = of_iomap(infracfg_ao_node, 0);
 	if (!infracfg_ao_base) {
-		pr_warn("INFRACFG_AO iomap failed\n");
+		pr_notice("INFRACFG_AO iomap failed\n");
 		return -ENOMEM;
 	}
 
 	topckgen_node = of_find_compatible_node(NULL, NULL, "mediatek,topckgen");
 	if (!topckgen_node) {
-		pr_warn("get TOPCKGEN failed\n");
+		pr_notice("get TOPCKGEN failed\n");
 		return -ENODEV;
 	}
 
 	topckgen_base = of_iomap(topckgen_node, 0);
 	if (!topckgen_base) {
-		pr_warn("TOPCKGEN iomap failed\n");
+		pr_notice("TOPCKGEN iomap failed\n");
 		return -ENOMEM;
 	}
 	return 0;
@@ -1600,22 +1600,22 @@ static int __init pwrap_hal_init(void)
 	PWRAPLOG("mt_pwrap_init++++\n");
 	pwrap_node = of_find_compatible_node(NULL, NULL, "mediatek,pwrap");
 	if (!pwrap_node) {
-		pr_warn("PWRAP get node failed\n");
+		pr_notice("PWRAP get node failed\n");
 		return -ENODEV;
 	}
 
 	pwrap_base = of_iomap(pwrap_node, 0);
 	if (!pwrap_base) {
-		pr_warn("PWRAP iomap failed\n");
+		pr_notice("PWRAP iomap failed\n");
 		return -ENOMEM;
 	}
 
 	pwrap_irq = irq_of_parse_and_map(pwrap_node, 0);
 	if (!pwrap_irq) {
-		pr_warn("PWRAP get irq fail\n");
+		pr_notice("PWRAP get irq fail\n");
 		return -ENODEV;
 	}
-	pr_warn("PWRAP reg: 0x%p,  irq: %d\n", pwrap_base, pwrap_irq);
+	pr_notice("PWRAP reg: 0x%p,  irq: %d\n", pwrap_base, pwrap_irq);
 #endif
 	mt_wrp = get_mt_pmic_wrap_drv();
 	mt_wrp->store_hal = mt_pwrap_store_hal;

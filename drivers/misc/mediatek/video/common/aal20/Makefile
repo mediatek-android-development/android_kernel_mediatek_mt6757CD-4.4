@@ -12,7 +12,6 @@
 #
 
 obj-y += ddp_aal.o
-obj-y += ddp_pwm.o
 
 ccflags-y += \
 				-I$(srctree)/drivers/misc/mediatek/video/include     \
@@ -21,9 +20,17 @@ ccflags-y += \
 				-I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox \
 				-I$(srctree)/drivers/misc/mediatek/sync/      \
 				-I$(srctree)/drivers/misc/mediatek/smi/ \
-				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/ \
-				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(MTK_PLATFORM)/ \
 				-I$(srctree)/drivers/misc/mediatek/lcm/inc/ \
 				-I$(srctree)/drivers/misc/mediatek/leds/ \
 				-I$(srctree)/drivers/misc/mediatek/leds/$(MTK_PLATFORM)/
 
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6799)))
+ccflags-y += \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v3/ \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v3/$(MTK_PLATFORM)/
+else
+ccflags-y += \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/ \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(MTK_PLATFORM)/
+endif

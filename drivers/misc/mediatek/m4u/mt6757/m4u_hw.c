@@ -215,9 +215,7 @@ int mau_start_monitor(int m4u_id, int m4u_slave_id, int mau_set,
 		      int wr, int vir, int io, int bit32,
 		      unsigned int start, unsigned int end, unsigned int port_mask, unsigned int larb_mask)
 {
-	unsigned long m4u_base;
-
-	m4u_base = gM4UBaseAddr[m4u_id];
+	unsigned long m4u_base = gM4UBaseAddr[m4u_id];
 
 	if (m4u_base == 0)
 		return -1;
@@ -258,7 +256,10 @@ int config_mau(M4U_MAU_STRUCT mau)
 
 	if (m4u_id != 0)
 		return -1;
-
+	if (mau.port < 0 || mau.port >= M4U_PORT_UNKNOWN) {
+		M4UMSG("%s,error port %d\n", __func__, mau.port);
+		return -1;
+	}
 	for (i = 0; i < M4U0_MAU_NR; i++) {
 		if (gM4u0_mau[i].Enabled != 0) {
 			if (MVAStart >= gM4u0_mau[i].MVAStart && MVAEnd <= gM4u0_mau[i].MVAEnd) {       /* no overlap */
@@ -1096,13 +1097,8 @@ void smi_common_clock_on(void)
 	enable_clock(MT_CG_MMSYS_SMI_COMMON, "smi_common");
 	/* m4uHw_set_field_by_mask(0, 0xf4000108, 0x1, 0x1); */
 #else
-	int ret = 0;
-
 	M4UMSG("error: smi_common_clock_on not support");
 	return;
-	clk_enable(gM4uDev->smi_clk[SMI_COMMON]);
-	if (ret)
-		M4UMSG("error: prepare clk %s fail!.\n", smi_clk_name[SMI_COMMON]);
 #endif
 }
 EXPORT_SYMBOL(smi_common_clock_on);
@@ -1115,7 +1111,6 @@ void smi_common_clock_off(void)
 #else
 	M4UMSG("error: smi_common_clock_off not support");
 	return;
-	clk_disable(gM4uDev->smi_clk[SMI_COMMON]);
 #endif
 }
 EXPORT_SYMBOL(smi_common_clock_off);
@@ -1390,9 +1385,7 @@ static int _m4u_config_port(int port, int virt, int sec, int dis, int dir)
 	if (virt == 0 || sec == 1)
 		M4ULOG_HIGH("config_port:%s,v%d,s%d\n", m4u_get_port_name(port), virt, sec);
 
-	if (port < 0 || port >= M4U_PORT_NR)
-		return -1;
-	/* MMProfileLogEx(M4U_MMP_Events[M4U_MMP_CONFIG_PORT], MMProfileFlagStart, port, virt); */
+	/* mmprofile_log_ex(M4U_MMP_Events[M4U_MMP_CONFIG_PORT], MMPROFILE_FLAG_START, port, virt); */
 
 	/* Prefetch Distance & Direction, one bit for each port, 1:-, 0:+ */
 
@@ -1432,7 +1425,7 @@ static int _m4u_config_port(int port, int virt, int sec, int dis, int dir)
 
 	spin_unlock(&gM4u_reg_lock);
 
-	/* MMProfileLogEx(M4U_MMP_Events[M4U_MMP_CONFIG_PORT], MMProfileFlagEnd, dis, dir); */
+	/* mmprofile_log_ex(M4U_MMP_Events[M4U_MMP_CONFIG_PORT], MMPROFILE_FLAG_END, dis, dir); */
 
 	return ret;
 }
@@ -1441,7 +1434,7 @@ static inline void _m4u_port_clock_toggle(int m4u_index, int larb, int on)
 {
 	unsigned long long start, end;
 
-	/* MMProfileLogEx(M4U_MMP_Events[M4U_MMP_TOGGLE_CG], MMProfileFlagStart, larb, on); */
+	/* mmprofile_log_ex(M4U_MMP_Events[M4U_MMP_TOGGLE_CG], MMPROFILE_FLAG_START, larb, on); */
 	if (m4u_index == 0) {
 		start = sched_clock();
 		if (on)
@@ -1456,7 +1449,7 @@ static inline void _m4u_port_clock_toggle(int m4u_index, int larb, int on)
 			M4ULOG_HIGH("warn: larb%d clock %d time: %lld ns\n", larb, on, end - start);
 		}
 	}
-	/* MMProfileLogEx(M4U_MMP_Events[M4U_MMP_TOGGLE_CG], MMProfileFlagEnd, 0, 0); */
+	/* mmprofile_log_ex(M4U_MMP_Events[M4U_MMP_TOGGLE_CG], MMPROFILE_FLAG_END, 0, 0); */
 }
 
 int m4u_config_port(M4U_PORT_STRUCT *pM4uPort)	/* native */
@@ -1468,7 +1461,10 @@ int m4u_config_port(M4U_PORT_STRUCT *pM4uPort)	/* native */
 #ifdef M4U_TEE_SERVICE_ENABLE
 	unsigned int larb_port, mmu_en = 0, sec_en = 0;
 #endif
-
+	if (pM4uPort->ePortID < 0 || pM4uPort->ePortID >= M4U_PORT_UNKNOWN) {
+		M4UMSG("%s,error port %d\n", __func__, pM4uPort->ePortID);
+		return -1;
+	}
 	_m4u_port_clock_toggle(m4u_index, larb, 1);
 
 #ifdef M4U_TEE_SERVICE_ENABLE
@@ -1617,14 +1613,11 @@ void m4u_get_perf_counter(int m4u_index, int m4u_slave_id, M4U_PERF_COUNT *pM4U_
 
 int m4u_monitor_start(int m4u_id)
 {
-	unsigned long m4u_base;
+	unsigned long m4u_base = gM4UBaseAddr[m4u_id];
 
-	M4UINFO("====m4u_monitor_start: %d======\n", m4u_id);
-	if (m4u_id < 0)
+	M4UINFO("====m4u_monitor_start: %d,m4u base:0x%lx======\n", m4u_id, m4u_base);
+	if (m4u_base == 0)
 		return -1;
-
-	m4u_base = gM4UBaseAddr[m4u_id];
-
 	/* clear GMC performance counter */
 	m4uHw_set_field_by_mask(m4u_base, REG_MMU_CTRL_REG,
 				F_MMU_CTRL_MONITOR_CLR(1), F_MMU_CTRL_MONITOR_CLR(1));
@@ -1643,8 +1636,8 @@ int m4u_monitor_stop(int m4u_id)
 	int m4u_index = m4u_id;
 	unsigned long m4u_base = gM4UBaseAddr[m4u_index];
 
-	M4UINFO("====m4u_monitor_stop: %d======\n", m4u_id);
-	if (m4u_id < 0)
+	M4UINFO("====m4u_monitor_stop: %d,m4u base:0x%lx======\n", m4u_id, m4u_base);
+	if (m4u_base == 0)
 		return -1;
 	/* disable GMC performance monitor */
 	m4uHw_set_field_by_mask(m4u_base, REG_MMU_CTRL_REG,
@@ -2023,12 +2016,12 @@ int m4u_unregister_fault_callback(int port)
 
 int m4u_enable_tf(int port, bool fgenable)
 {
-	if (port >= 0 && port < M4U_PORT_UNKNOWN) {
-		gM4uPort[port].enable_tf = fgenable;
-		return 0;
+	if (port < 0 || port >= M4U_PORT_UNKNOWN) {
+		M4UMSG("error port %d\n", port);
+		return -1;
 	}
-	M4UMSG("%s fail, port=%d\n", __func__, port);
-	return -1;
+	gM4uPort[port].enable_tf = fgenable;
+	return 0;
 }
 
 /* ============================================================================== */
@@ -2209,7 +2202,7 @@ irqreturn_t MTK_M4U_isr(int irq, void *dev_id)
 				 m4u_get_port_name(m4u_port), m4u_get_port_name(m4u_port),
 				 fault_mva, fault_pa);
 			}
-			MMProfileLogEx(M4U_MMP_Events[M4U_MMP_M4U_ERROR], MMProfileFlagPulse,
+			mmprofile_log_ex(M4U_MMP_Events[M4U_MMP_M4U_ERROR], MMPROFILE_FLAG_PULSE,
 				       m4u_port, fault_mva);
 		}
 		if (IntrSrc & F_INT_MAIN_MULTI_HIT_FAULT(m4u_slave_id)) {

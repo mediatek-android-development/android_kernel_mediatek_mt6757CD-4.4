@@ -27,7 +27,6 @@ struct switch_dev {
 	ssize_t	(*print_name)(struct switch_dev *sdev, char *buf);
 	ssize_t	(*print_state)(struct switch_dev *sdev, char *buf);
 	int (*set_state)(struct switch_dev *sdev, int state);
-	int (*get_state)(struct switch_dev *sdev, int *state);
 };
 
 struct gpio_switch_platform_data {
