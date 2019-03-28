@@ -17,4 +17,4 @@ ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/include
 obj-$(CONFIG_MTK_LEDS) += mtk_leds_drv.o
 
 obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-
+obj-$(CONFIG_LED_BREATHLIGHT_AW2013) += aw2013/

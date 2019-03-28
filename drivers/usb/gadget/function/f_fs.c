@@ -693,6 +693,63 @@ static void ffs_epfile_async_io_complete(struct usb_ep *_ep,
 	schedule_work(&io_data->work);
 }
 
+/* Trigger re-start adbd ****************************************************/
+static pid_t tid;
+static struct delayed_work abortion_work;
+#define ABORTION_WORK_DELAY 300
+static int cnxn_cnt;
+
+void abortion(struct work_struct *data)
+{
+	/* send SIGKILL to adbd */
+	struct task_struct *t;
+	struct siginfo info;
+
+	memset(&info, 0, sizeof(struct siginfo));
+	info.si_signo = SIGPOLL;
+	info.si_code = POLL_ERR;
+
+	t = find_task_by_vpid(tid);
+	if (t != NULL) {
+		pr_info("%s, tid<%d>, comm<%s>\n", __func__, tid, t->comm);
+		send_sig_info(SIGKILL, &info, t);
+	}
+}
+
+static void abortion_user(void)
+{
+	static bool inited;
+
+	if (!inited) {
+		INIT_DELAYED_WORK(&abortion_work, abortion);
+		inited = true;
+	}
+
+	tid = current->pid;
+	schedule_delayed_work(&abortion_work, msecs_to_jiffies(ABORTION_WORK_DELAY));
+}
+
+static int write_in;
+static int write_out;
+#define ADB_WRITE_MONITOR_DELAY 5000
+static struct delayed_work adb_write_monitor_work;
+static void do_adb_write_monitor_work(struct work_struct *work)
+{
+	static int state;
+	static int last_write_in;
+
+	if ((write_in != write_out) && (last_write_in == write_in)) {
+		if (state == 2)
+			pr_notice("USB write stuck, <%d,%d,%d>\n",
+					write_in, write_out, last_write_in);
+		else
+			state++;
+	} else
+		state = 0;
+
+	last_write_in = write_in;
+	schedule_delayed_work(&adb_write_monitor_work, msecs_to_jiffies(ADB_WRITE_MONITOR_DELAY));
+}
 static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 {
 	struct ffs_epfile *epfile = file->private_data;
@@ -700,6 +757,7 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 	char *data = NULL;
 	ssize_t ret, data_len = -EINVAL, original_len = -EINVAL;
 	int halt;
+	char *cnxn_data = NULL;
 
 	pr_debug("%s: len %lld, read %d\n", __func__, (u64)io_data->len, io_data->read);
 
@@ -876,7 +934,21 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 				req->context  = done;
 			}
 
+			if (!io_data->read) {
+				static bool inited;
+
+				if (!inited) {
+					INIT_DEFERRABLE_WORK(&adb_write_monitor_work, do_adb_write_monitor_work);
+					schedule_delayed_work(&adb_write_monitor_work, 0);
+					inited = true;
+				}
+				write_in++;
+			}
+
 			ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);
+
+			if (!io_data->read)
+				cnxn_cnt = 0;
 
 			spin_unlock_irq(&epfile->ffs->eps_lock);
 
@@ -914,6 +986,23 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 					ret = -ENODEV;
 				spin_unlock_irq(&epfile->ffs->eps_lock);
 
+				cnxn_data = req->buf;
+				if (io_data->read && ret > 0 && req->actual == 24) {
+					if (cnxn_data[0] == 0x43 && cnxn_data[1] == 0x4e
+						&& cnxn_data[2] == 0x58 && cnxn_data[3] == 0x4e) {
+						cnxn_cnt++;
+						pr_info("%s: cnxn_cnt=%d\n", __func__, cnxn_cnt);
+					} else {
+						cnxn_cnt = 0;
+					}
+
+					if (cnxn_cnt == 3) {
+						cnxn_cnt = 0;
+						pr_info("%s trigger abort\n", __func__);
+						abortion_user();
+					}
+				}
+
 				if (io_data->read && ret > 0) {
 					if (unlikely(ret > original_len))
 						pr_err("%s(), ret<%d>, original_len<%d>\n",
@@ -924,6 +1013,8 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 						ret = -EFAULT;
 				}
 			}
+			if (!io_data->read)
+				write_out++;
 			kfree(data);
 		}
 	}
@@ -1763,7 +1854,7 @@ static int ffs_func_eps_enable(struct ffs_function *func)
 		ep->ep->desc = ds;
 
 		if (needs_comp_desc) {
-			comp_desc = (struct usb_ss_ep_comp_descriptor *)(ds +
+			comp_desc = (struct usb_ss_ep_comp_descriptor *)((char *)ds +
 					USB_DT_ENDPOINT_SIZE);
 			ep->ep->maxburst = comp_desc->bMaxBurst + 1;
 			ep->ep->comp_desc = comp_desc;
@@ -3574,7 +3665,6 @@ static void ffs_closed(struct ffs_data *ffs)
 {
 	struct ffs_dev *ffs_obj;
 	struct f_fs_opts *opts;
-	struct config_item *ci;
 
 	ENTER();
 	ffs_dev_lock();
@@ -3598,10 +3688,12 @@ static void ffs_closed(struct ffs_data *ffs)
 	    || !atomic_read(&opts->func_inst.group.cg_item.ci_kref.refcount))
 		goto done;
 
-	ci = opts->func_inst.group.cg_item.ci_parent->ci_parent;
 	ffs_dev_unlock();
 
-	unregister_gadget_item(ci);
+	if (test_bit(FFS_FL_BOUND, &ffs->flags))
+		unregister_gadget_item(opts->
+			       func_inst.group.cg_item.ci_parent->ci_parent);
+
 	return;
 done:
 	ffs_dev_unlock();

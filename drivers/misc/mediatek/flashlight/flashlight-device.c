@@ -11,13 +11,22 @@
  * GNU General Public License for more details.
  */
 
+
 #include "flashlight-core.h"
 
 #if defined(mt6739)
-const struct flashlight_device_id flashlight_id[] = {
-	/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
-	{0, 0, 0, "flashlights-rt4505", 0, 0},
-};
+#if defined(tb8765ap1_64_bsp) || defined(tb8765ap1_bsp_1g) || defined(tb8765ap1_bsp)
+	const struct flashlight_device_id flashlight_id[] = {
+		/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
+		{0, 0, 0, "flashlights_led191", 0, 0},
+		{1, 0, 0, "flashlights_led191", 1, 0},
+	};
+#else
+	const struct flashlight_device_id flashlight_id[] = {
+		/* {TYPE, CT, PART, "NAME", CHANNEL, DECOUPLE} */
+		{0, 0, 0, "flashlights-dummy-gpio", 0, 0},
+	};
+#endif
 #elif defined(mt6757)
 	#if defined(evb6757p_dm_64) || defined(k57pv1_dm_64) || \
 	defined(k57pv1_64_baymo) || defined(k57pv1_dm_64_bif) || \

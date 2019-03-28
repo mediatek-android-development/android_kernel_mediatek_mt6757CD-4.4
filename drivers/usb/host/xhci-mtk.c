@@ -243,7 +243,6 @@ static int xhci_mtk_ssusb_config(struct xhci_hcd_mtk *mtk)
 	return xhci_mtk_host_enable(mtk);
 }
 
-#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
 static void xhci_mtk_ssusb_ip_sleep(struct xhci_hcd_mtk *mtk)
 {
 	struct device_node *of_node = mtk->dev->of_node;
@@ -260,7 +259,6 @@ static void xhci_mtk_ssusb_ip_sleep(struct xhci_hcd_mtk *mtk)
 		writel(value, &ippc->ip_pw_ctr0);
 	}
 }
-#endif
 
 static int xhci_mtk_clks_enable(struct xhci_hcd_mtk *mtk)
 {
@@ -797,7 +795,7 @@ static int xhci_mtk_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, mtk);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	hcd->regs = devm_ioremap_resource(dev, res);
+	hcd->regs = devm_ioremap(dev, res->start, resource_size(res));
 	if (IS_ERR(hcd->regs)) {
 		ret = PTR_ERR(hcd->regs);
 		goto put_usb2_hcd;
@@ -808,7 +806,7 @@ static int xhci_mtk_probe(struct platform_device *pdev)
 	mtk->ippc_regs = NULL;
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
 	if (res) {	/* ippc register is optional */
-		mtk->ippc_regs = devm_ioremap_resource(dev, res);
+		mtk->ippc_regs = devm_ioremap(dev, res->start, resource_size(res));
 		if (IS_ERR(mtk->ippc_regs)) {
 			ret = PTR_ERR(mtk->ippc_regs);
 			goto put_usb2_hcd;
@@ -911,9 +909,9 @@ static int xhci_mtk_remove(struct platform_device *dev)
 	usb_put_hcd(xhci->shared_hcd);
 	usb_put_hcd(hcd);
 	xhci_mtk_sch_exit(mtk);
-#ifndef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
-	xhci_mtk_host_power_down(mtk);
-#endif
+
+	xhci_mtk_ssusb_ip_sleep(mtk);
+
 	xhci_mtk_clks_disable(mtk);
 	xhci_mtk_ldos_disable(mtk);
 #ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
@@ -922,9 +920,7 @@ static int xhci_mtk_remove(struct platform_device *dev)
 	pm_runtime_put_noidle(&dev->dev);
 #endif
 	pm_runtime_disable(&dev->dev);
-#ifdef CONFIG_USB_XHCI_MTK_SUSPEND_SUPPORT
-	xhci_mtk_ssusb_ip_sleep(mtk);
-#endif
+
 	xhci_mtk_phy_power_off(mtk);
 	xhci_mtk_phy_exit(mtk);
 

@@ -35,7 +35,7 @@
 #include <fde_aes_dbg.h>
 #endif
 
-/* MSDC_SWITCH_MODE_WHEN_ERROR */
+/* #define MSDC_SWITCH_MODE_WHEN_ERROR */
 #define TUNE_NONE                (0)        /* No need tune */
 #define TUNE_ASYNC_CMD           (0x1 << 0) /* async transfer cmd crc */
 #define TUNE_ASYNC_DATA_WRITE    (0x1 << 1) /* async transfer data crc */
@@ -43,12 +43,13 @@
 #define TUNE_LEGACY_CMD          (0x1 << 3) /* legacy transfer cmd crc */
 #define TUNE_LEGACY_DATA_WRITE   (0x1 << 4) /* legacy transfer data crc */
 #define TUNE_LEGACY_DATA_READ    (0x1 << 5) /* legacy transfer data crc */
-#define TUNE_AUTOK_PASS          (0x1 << 6) /* autok pass flag */
+#define TUNE_LEGACY_CMD_TMO      (0x1 << 6) /* legacy transfer cmd tmo */
+#define TUNE_AUTOK_PASS          (0x1 << 7) /* autok pass flag */
 
 #define MSDC_DMA_ADDR_DEBUG
 
 #define MTK_MSDC_USE_CMD23
-#if defined(CONFIG_MTK_EMMC_CACHE) && defined(MTK_MSDC_USE_CMD23)
+#if !defined(CONFIG_PWR_LOSS_MTK_TEST) && defined(MTK_MSDC_USE_CMD23)
 #define MTK_MSDC_USE_CACHE
 #endif
 
@@ -155,6 +156,7 @@ typedef void (*pm_callback_t)(pm_message_t state, void *data);
 #define MSDC_REMOVABLE      (1 << 5)  /* removable slot                */
 #define MSDC_SYS_SUSPEND    (1 << 6)  /* suspended by system           */
 #define MSDC_SDIO_DDR208    (1 << 7)  /* ddr208 mode used by 6632      */
+#define MSDC_VMCH_FASTOFF   (1 << 8)  /* vmch fastoff when plug ot card      */
 /* for some board, need SD power always on!! or cannot recognize the sd card*/
 #define MSDC_SD_NEED_POWER  (1 << 31)
 
@@ -185,7 +187,8 @@ struct msdc_hw {
 	unsigned char cd_level;         /* card detection level */
 
 	/* external sdio irq operations */
-	void (*request_sdio_eirq)(sdio_irq_handler_t sdio_irq_handler, void *data);
+	void (*request_sdio_eirq)(sdio_irq_handler_t sdio_irq_handler,
+		void *data);
 	void (*enable_sdio_eirq)(void);
 	void (*disable_sdio_eirq)(void);
 
@@ -273,6 +276,7 @@ struct msdc_saved_para {
 	u32 pb1;
 	u32 pb2;
 	u32 sdc_fifo_cfg;
+	u32 sdc_adv_cfg0;
 
 	/* msdc top reg  */
 	u32 emmc_top_control;
@@ -300,6 +304,8 @@ struct msdc_host {
 	 * race condition with hot-plug enable
 	 */
 	spinlock_t              remove_bad_card;
+
+	spinlock_t              cmd_dump_lock;
 
 	 /* avoid race condition at DAT1 interrupt case*/
 	spinlock_t              sdio_irq_lock;
@@ -345,6 +351,10 @@ struct msdc_host {
 	int                     pin_state;      /* for hw trapping */
 	struct timer_list       timer;
 	u32                     sw_timeout;
+#ifdef SDCARD_ESD_RECOVERY
+	/* cmd13 contunous timeout, clear when any other cmd succeed */
+	u32                     cmd13_timeout_cont;
+#endif
 	u32                     data_timeout_cont; /* data continuous timeout */
 	bool                    tuning_in_progress;
 	u32                     need_tune;
@@ -375,11 +385,11 @@ struct msdc_host {
 #endif
 	void    (*power_control)(struct msdc_host *host, u32 on);
 	void    (*power_switch)(struct msdc_host *host, u32 on);
-	u32                     vmc_cal_default;
 	u32                     power_io;
 	u32                     power_flash;
 
 	struct clk              *clk_ctl;
+	struct clk              *aes_clk_ctl;
 	struct clk              *hclk_ctl;
 	struct delayed_work	work_init; /* for init mmc_host */
 	struct delayed_work	work_sdio; /* for DVFS kickoff */
@@ -392,8 +402,8 @@ struct msdc_host {
 #ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 	atomic_t                cq_error_need_stop;
 #endif
-#if defined(CONFIG_MTK_HW_FDE) && !defined(CONFIG_MTK_HW_FDE_AES)
-	bool                    is_fde_init;
+#if (defined(CONFIG_MTK_HW_FDE) || defined(CONFIG_HIE)) && !defined(CONFIG_MTK_HW_FDE_AES)
+	bool                    is_crypto_init;
 	u32                     key_idx;
 #endif
 	/* BEGIN temporarily debug  ALPS03052531*/
@@ -403,6 +413,8 @@ struct msdc_host {
 	u32                     dma_cnt;
 	u64                     start_dma_time;
 	u64                     stop_dma_time;
+	/* flag to record if eMMC will enter hs400 mode */
+	bool                    hs400_mode;
 };
 
 enum {
@@ -572,8 +584,12 @@ static inline unsigned int uffs(unsigned int x)
 #define is_card_sdio(h)         (((struct msdc_host *)(h))->hw->register_pm)
 
 #define CMD_TIMEOUT             (HZ/10 * 5)     /* 100ms x5 */
+#define CMD_CQ_TIMEOUT          (HZ    * 3)
 #define DAT_TIMEOUT             (HZ    * 5)     /* 1000ms x5 */
-#define CLK_TIMEOUT             (HZ    * 1)     /* 1s    */
+/* Please modify msdc_sd.h to override the setting here */
+#ifndef CLK_TIMEOUT
+#define CLK_TIMEOUT             (HZ/10)         /* 100ms */
+#endif
 #define POLLING_BUSY            (HZ    * 3)
 #define POLLING_PINS            (HZ*20 / 1000)	/* 20ms */
 
@@ -647,6 +663,7 @@ void msdc_gate_clock(struct msdc_host *host, int delay);
 void msdc_ungate_clock(struct msdc_host *host);
 
 /* Function provided by msdc_tune.c */
+int sdcard_hw_reset(struct mmc_host *mmc);
 int sdcard_reset_tuning(struct mmc_host *mmc);
 int emmc_reinit_tuning(struct mmc_host *mmc);
 
@@ -664,8 +681,7 @@ int msdc_can_apply_cache(unsigned long long start_addr,
 	unsigned int size);
 int msdc_check_otp_ops(unsigned int opcode, unsigned long long start_addr,
 	unsigned int size);
-struct gendisk *mmc_get_disk(struct mmc_card *card);
-u64 msdc_get_capacity(int get_emmc_total);
+int msdc_get_part_info(unsigned char *name, struct hd_struct *part);
 u64 msdc_get_user_capacity(struct msdc_host *host);
 u32 msdc_get_other_capacity(struct msdc_host *host, char *name);
 
@@ -678,6 +694,9 @@ void msdc_save_timing_setting(struct msdc_host *host, int save_mode);
 void msdc_restore_timing_setting(struct msdc_host *host);
 void msdc_set_bad_card_and_remove(struct msdc_host *host);
 void msdc_remove_card(struct work_struct *work);
+#ifdef CONFIG_HIE
+struct hie_dev *msdc_hie_get_dev(void);
+#endif
 
 /* Function provided by mmc/core/sd.c */
 /* FIX ME: maybe removed in kernel 4.4 */

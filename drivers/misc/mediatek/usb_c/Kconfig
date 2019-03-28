@@ -127,6 +127,16 @@ config TCPC_RT5081
 	  Also Support Power Delivery
 	  Say N to disable
 
+config TCPC_MT6370
+	bool "MediaTek MT6370 TypeC port Controller Driver"
+	depends on TCPC_CLASS
+	default n
+	help
+	  Say Y to enable MediaTek MT6370
+	  TypeC port Controller
+	  Also Support Power Delivery
+	  Say N to disable
+
 config USB_PD_VBUS_STABLE_TOUT
 	int "PD VBUS Stable Timeout"
 	depends on USB_POWER_DELIVERY
@@ -137,15 +147,6 @@ config USB_PD_VBUS_STABLE_TOUT
 	  for
 	  VBUS change
 	  stable
-
-config RT7207_ADAPTER
-	bool "Richtek RT7207 PD Adapter"
-	default n
-	help
-	  Say Y to enable
-	  Richtek RT7207
-	  PD Adapter
-	  Function.
 
 config USB_C_SWITCH_U3_MUX
 	bool "USB TYPE-C USB 3.0 Mux"

@@ -95,6 +95,8 @@
 #include <trace/events/sched.h>
 #include "walt.h"
 
+#include <mt-plat/fpsgo_common.h>
+
 enum ipi_msg_type {
 	IPI_RESCHEDULE,
 	IPI_CALL_FUNC,
@@ -106,6 +108,11 @@ enum ipi_msg_type {
 
 DEFINE_MUTEX(sched_domains_mutex);
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+
+DEFINE_MUTEX(sched_isolation_mutex);
+struct cpumask cpu_all_masks;
+struct cpumask available_cpus;
+enum iso_prio_t iso_prio = ISO_UNSET;
 
 static void update_rq_clock_task(struct rq *rq, s64 delta);
 
@@ -1241,6 +1248,7 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
 	struct rq *rq;
 	unsigned int dest_cpu;
 	int ret = 0;
+	cpumask_t allowed_mask;
 
 	rq = task_rq_lock(p, &flags);
 
@@ -1256,24 +1264,29 @@ static int __set_cpus_allowed_ptr(struct task_struct *p,
 	if (cpumask_equal(&p->cpus_allowed, new_mask))
 		goto out;
 
-	if (!cpumask_intersects(new_mask, cpu_active_mask)) {
-		ret = -EINVAL;
-		goto out;
+	cpumask_andnot(&allowed_mask, new_mask, cpu_isolated_mask);
+	cpumask_and(&allowed_mask, &allowed_mask, cpu_active_mask);
+
+	dest_cpu = cpumask_any(&allowed_mask);
+	if (dest_cpu >= nr_cpu_ids) {
+		/* if p is not a kthread, use unisolation mask for allowed_mask */
+		if (p->flags & PF_KTHREAD)
+			cpumask_and(&allowed_mask, cpu_active_mask, new_mask);
+		else
+			cpumask_andnot(&allowed_mask, cpu_active_mask, cpu_isolated_mask);
+		dest_cpu = cpumask_any(&allowed_mask);
+		if (dest_cpu >= nr_cpu_ids) {
+			ret = -EINVAL;
+			goto out;
+		}
 	}
+
+	do_set_cpus_allowed(p, new_mask);
 
 	/* Can the task run on the task's current CPU? If so, we're done */
-	if (cpumask_test_cpu(task_cpu(p), new_mask)) {
-		do_set_cpus_allowed(p, new_mask);
+	if (cpumask_test_cpu(task_cpu(p), &allowed_mask)) {
 		goto out;
 	}
-
-	dest_cpu = cpumask_any_and(cpu_active_mask, new_mask);
-	/* sched: if cpu_active_mask and new_mask have no intesects */
-	if (dest_cpu >= nr_cpu_ids) {
-		ret = -EINVAL;
-		goto out;
-	} else
-		do_set_cpus_allowed(p, new_mask);
 
 	if (task_running(rq, p) || p->state == TASK_WAKING) {
 		struct migration_arg arg = { p, dest_cpu };
@@ -1583,12 +1596,13 @@ EXPORT_SYMBOL_GPL(kick_process);
 /*
  * ->cpus_allowed is protected by both rq->lock and p->pi_lock
  */
-static int select_fallback_rq(int cpu, struct task_struct *p)
+static int select_fallback_rq(int cpu, struct task_struct *p, bool allow_iso)
 {
 	int nid = cpu_to_node(cpu);
 	const struct cpumask *nodemask = NULL;
-	enum { cpuset, possible, fail } state = cpuset;
+	enum { cpuset, possible, fail, bug } state = cpuset;
 	int dest_cpu;
+	int isolated_candidate = -1;
 
 	/*
 	 * If the node that the cpu is on has been offlined, cpu_to_node()
@@ -1604,6 +1618,8 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 				continue;
 			if (!cpu_active(dest_cpu))
 				continue;
+			if (cpu_isolated(dest_cpu))
+				continue;
 			if (cpumask_test_cpu(dest_cpu, tsk_cpus_allowed(p)))
 				return dest_cpu;
 		}
@@ -1616,6 +1632,16 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 				continue;
 			if (!cpu_active(dest_cpu))
 				continue;
+			if (cpu_isolated(dest_cpu)) {
+				if (allow_iso)
+					isolated_candidate = dest_cpu;
+				continue;
+			}
+			goto out;
+		}
+
+		if (isolated_candidate != -1) {
+			dest_cpu = isolated_candidate;
 			goto out;
 		}
 
@@ -1634,6 +1660,11 @@ static int select_fallback_rq(int cpu, struct task_struct *p)
 			break;
 
 		case fail:
+			allow_iso = true;
+			state = bug;
+			break;
+
+		case bug:
 			BUG();
 			break;
 		}
@@ -1661,6 +1692,8 @@ out:
 static inline
 int select_task_rq(struct task_struct *p, int cpu, int sd_flags, int wake_flags)
 {
+	bool allow_isolated = (p->flags & PF_KTHREAD);
+
 	lockdep_assert_held(&p->pi_lock);
 
 	if (p->nr_cpus_allowed > 1)
@@ -1677,8 +1710,9 @@ int select_task_rq(struct task_struct *p, int cpu, int sd_flags, int wake_flags)
 	 *   not worry about this generic constraint ]
 	 */
 	if (unlikely(!cpumask_test_cpu(cpu, tsk_cpus_allowed(p)) ||
-		     !cpu_online(cpu)))
-		cpu = select_fallback_rq(task_cpu(p), p);
+		     !cpu_online(cpu)) ||
+		     (cpu_isolated(cpu) && !allow_isolated))
+		cpu = select_fallback_rq(task_cpu(p), p, allow_isolated);
 
 	return cpu;
 }
@@ -1847,6 +1881,8 @@ void sched_ttwu_pending(void)
 
 void scheduler_ipi(void)
 {
+	int cpu = smp_processor_id();
+
 	/*
 	 * Fold TIF_NEED_RESCHED into the preempt_count; anybody setting
 	 * TIF_NEED_RESCHED remotely (for the first time) will also send
@@ -1885,7 +1921,7 @@ void scheduler_ipi(void)
 	/*
 	 * Check if someone kicked us for doing the nohz idle load balance.
 	 */
-	if (unlikely(got_nohz_idle_kick())) {
+	if (unlikely(got_nohz_idle_kick()) && !cpu_isolated(cpu)) {
 		this_rq()->idle_balance = 1;
 		raise_softirq_irqoff(SCHED_SOFTIRQ);
 	}
@@ -2068,6 +2104,9 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	raw_spin_unlock(&rq->lock);
 
 	p->sched_contributes_to_load = !!task_contributes_to_load(p);
+
+	fpsgo_update_render_dep(p);
+
 	p->state = TASK_WAKING;
 
 	if (p->sched_class->task_waking)
@@ -2897,7 +2936,7 @@ void sched_exec(void)
 	if (dest_cpu == smp_processor_id())
 		goto unlock;
 
-	if (likely(cpu_active(dest_cpu))) {
+	if (likely(cpu_active(dest_cpu) && likely(!cpu_isolated(dest_cpu)))) {
 		struct migration_arg arg = { p, dest_cpu };
 
 		raw_spin_unlock_irqrestore(&p->pi_lock, flags);
@@ -2972,65 +3011,90 @@ unsigned long long task_sched_runtime(struct task_struct *p)
  *  1205 : 15%
  *  1137 : 10%
  */
+#ifdef CONFIG_MACH_MT6771
+#define jump_step(idx, nr, st) { *st = 1; }
+static int marginless_hroom = 1137;
+#else
+static int marginless_hroom = 1280;
+#define jump_step(idx, nr, st) { *st = (idx < nr/3) ? 2 : 1; }
+#endif
 
-static unsigned long sum_capacity_reqs(unsigned long cfs_cap,
-				       struct sched_capacity_reqs *scr)
+static inline bool is_margin_less(void)
 {
-	unsigned long total = cfs_cap + scr->rt;
-
-	total = total * 1280; /* head room: 20% */
-	total /= SCHED_CAPACITY_SCALE;
-	total += scr->dl;
-	return total;
+	if (capacity_margin_dvfs <= 1024)
+		return true;
+	return false;
 }
 
-static void sched_freq_tick(int cpu)
+static inline
+unsigned long add_capacity_margin(unsigned long cpu_capacity)
 {
+	cpu_capacity  = cpu_capacity * (is_margin_less() ?
+				marginless_hroom : capacity_margin_dvfs);
+	cpu_capacity /= SCHED_CAPACITY_SCALE;
+	return cpu_capacity;
+}
+
+static inline
+unsigned long sum_capacity_reqs(unsigned long cfs_cap,
+		struct sched_capacity_reqs *scr)
+{
+	unsigned long total = add_capacity_margin(cfs_cap + scr->rt);
+
+	return total += scr->dl;
+}
+
+static void sched_freq_tick_pelt(int cpu)
+{
+	unsigned long cpu_utilization = boosted_cpu_util(cpu);
+	unsigned long capacity_curr = capacity_curr_of(cpu);
 	struct sched_capacity_reqs *scr;
-	unsigned long capacity_orig, capacity_curr;
-	unsigned long capacity_req;
-	struct sched_domain *sd;
 
-	if (!sched_freq())
+	scr = &per_cpu(cpu_sched_capacity_reqs, cpu);
+	if (sum_capacity_reqs(cpu_utilization, scr) < capacity_curr)
 		return;
-
-	capacity_orig = capacity_orig_of(cpu);
-	capacity_curr = capacity_curr_of(cpu);
-
-	if (capacity_curr == capacity_orig)
-		return;
-
-	rcu_read_lock();
-	sd = rcu_dereference(per_cpu(sd_ea, cpu));
-	rcu_read_unlock();
 
 	/*
 	 * To make free room for a task that is building up its "real"
 	 * utilization and to harm its performance the least, request
-	 * a jump to bigger OPP as soon as the margin of free capacity is
-	 * impacted (specified by capacity_margin).
+	 * a jump to a higher OPP as soon as the margin of free capacity
+	 * is impacted (specified by capacity_margin).
+	 * Remember CPU utilization in sched_capacity_reqs should be normalised.
 	 */
+	cpu_utilization = cpu_utilization * SCHED_CAPACITY_SCALE / capacity_orig_of(cpu);
+	set_cfs_cpu_capacity(cpu, true, cpu_utilization, SCHE_TICK);
+}
+
+static void _sched_freq_tick_marginless(int cpu)
+{
+	struct sched_capacity_reqs *scr;
+	unsigned long capacity_curr = capacity_curr_of(cpu);
+	unsigned long capacity_req;
+
 	scr = &per_cpu(cpu_sched_capacity_reqs, cpu);
 
-	/* capacity_req which includes RT loading & capacity_margin */
-	capacity_req = sum_capacity_reqs(cpu_util(cpu), scr);
+#ifdef CONFIG_SCHED_WALT
+	if (walt_disabled || !sysctl_sched_use_walt_cpu_util)
+		capacity_req = sum_capacity_reqs(boosted_cpu_util(cpu), scr);
+	else
+		capacity_req = cpu_util_freq(cpu);
+#else
+	capacity_req = sum_capacity_reqs(boosted_cpu_util(cpu), scr);
+#endif
 
 	if (capacity_curr <= capacity_req) {
-		if (sd) {
-			const struct sched_group_energy *const sge = sd->groups->sge;
+		if (sched_feat(ENERGY_AWARE)) {
+			const struct sched_group_energy *const sge = cpu_core_energy(cpu);
 			int nr_cap_states = sge->nr_cap_states;
 			int idx, tmp_idx;
-			int opp_jump_step;
+			int opp_jump_step = 1;
 
 			for (idx = 0; idx < nr_cap_states; idx++) {
 				if (sge->cap_states[idx].cap > capacity_curr+3)
 					break;
 			}
 
-			if (idx < nr_cap_states/3)
-				opp_jump_step = 2; /* far step */
-			else
-				opp_jump_step = 1; /* near step */
+			jump_step(idx, nr_cap_states, &opp_jump_step);
 
 			tmp_idx = idx + (opp_jump_step - 1);
 
@@ -3049,15 +3113,60 @@ static void sched_freq_tick(int cpu)
 		capacity_req = capacity_req * SCHED_CAPACITY_SCALE / capacity_orig_of(cpu);
 
 		/*
-		 * If free room ~5% impact, jump to 1 more index hihger OPP.
+		 * If free room impact, jump to 1 more index hihger OPP.
 		 * Whatever it should be better than capacity_max.
 		 */
 		set_cfs_cpu_capacity(cpu, true, capacity_req, SCHE_ONESHOT);
 	}
 }
+
+#ifdef CONFIG_SCHED_WALT
+static void sched_freq_tick_walt(int cpu)
+{
+	unsigned long cpu_utilization = cpu_util_freq(cpu);
+	unsigned long capacity_curr = capacity_curr_of(cpu);
+
+	if (walt_disabled || !sysctl_sched_use_walt_cpu_util)
+		return sched_freq_tick_pelt(cpu);
+
+	/*
+	 * Add a margin to the WALT utilization to check if we will need to
+	 * increase frequency.
+	 * NOTE: WALT tracks a single CPU signal for all the scheduling
+	 * classes, thus this margin is going to be added to the DL class as
+	 * well, which is something we do not do in sched_freq_tick_pelt case.
+	 */
+	if (add_capacity_margin(cpu_utilization) <= capacity_curr)
+		return;
+
+	/*
+	 * It is likely that the load is growing so we
+	 * keep the added margin in our request as an
+	 * extra boost.
+	 * Remember CPU utilization in sched_capacity_reqs should be normalised.
+	 */
+	cpu_utilization = cpu_utilization * SCHED_CAPACITY_SCALE / capacity_orig_of(cpu);
+	set_cfs_cpu_capacity(cpu, true, cpu_utilization, SCHE_TICK);
+
+}
+#define _sched_freq_tick(cpu) sched_freq_tick_walt(cpu)
+#else
+#define _sched_freq_tick(cpu) sched_freq_tick_pelt(cpu)
+#endif /* CONFIG_SCHED_WALT */
+
+static void sched_freq_tick(int cpu)
+{
+	if (!sched_freq())
+		return;
+
+	if (is_margin_less())
+		_sched_freq_tick_marginless(cpu);
+	else
+		_sched_freq_tick(cpu);
+}
 #else
 static inline void sched_freq_tick(int cpu) { }
-#endif
+#endif /* CONFIG_CPU_FREQ_GOV_SCHED */
 
 /*
  * This function gets called by the timer code, with HZ frequency.
@@ -3103,6 +3212,10 @@ void scheduler_tick(void)
 
 #ifdef CONFIG_MTK_SCHED_CPULOAD
 	cal_cpu_load(cpu);
+#endif
+
+#ifdef CONFIG_MTK_SCHED_RQAVG_KS
+	sched_max_util_task_tracking();
 #endif
 
 #ifdef CONFIG_MTK_SCHED_SYSHINT
@@ -4697,6 +4810,8 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	cpumask_var_t cpus_allowed, new_mask;
 	struct task_struct *p;
 	int retval;
+	int dest_cpu;
+	cpumask_t allowed_mask;
 
 	get_online_cpus();
 	rcu_read_lock();
@@ -4766,22 +4881,26 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 	}
 #endif
 again:
-	retval = __set_cpus_allowed_ptr(p, new_mask, true);
-	if (retval)
-		pr_debug("SCHED: set_cpus_allowed_ptr status %d\n", retval);
-
-	if (!retval) {
-		cpuset_cpus_allowed(p, cpus_allowed);
-		if (!cpumask_subset(new_mask, cpus_allowed)) {
-			/*
-			 * We must have raced with a concurrent cpuset
-			 * update. Just reset the cpus_allowed to the
-			 * cpuset's cpus_allowed
-			 */
-			cpumask_copy(new_mask, cpus_allowed);
-			goto again;
+	cpumask_andnot(&allowed_mask, new_mask, cpu_isolated_mask);
+	dest_cpu = cpumask_any_and(cpu_active_mask, &allowed_mask);
+	if (dest_cpu < nr_cpu_ids) {
+		retval = __set_cpus_allowed_ptr(p, new_mask, true);
+		if (!retval) {
+			cpuset_cpus_allowed(p, cpus_allowed);
+			if (!cpumask_subset(new_mask, cpus_allowed)) {
+				/*
+				 * We must have raced with a concurrent cpuset
+				 * update. Just reset the cpus_allowed to the
+				 * cpuset's cpus_allowed
+				 */
+				cpumask_copy(new_mask, cpus_allowed);
+				goto again;
+			}
 		}
+	} else {
+		retval = -EINVAL;
 	}
+
 out_free_new_mask:
 	free_cpumask_var(new_mask);
 out_free_cpus_allowed:
@@ -5533,19 +5652,55 @@ static struct task_struct fake_task = {
 	.sched_class = &fake_sched_class,
 };
 
+ /*
+ * Remove a task from the runqueue and pretend that it's migrating. This
+ * should prevent migrations for the detached task and disallow further
+ * changes to tsk_cpus_allowed.
+ */
+static void
+detach_one_task(struct task_struct *p, struct rq *rq, struct list_head *tasks)
+{
+	lockdep_assert_held(&rq->lock);
+
+	p->on_rq = TASK_ON_RQ_MIGRATING;
+	deactivate_task(rq, p, 0);
+	list_add(&p->se.group_node, tasks);
+}
+
+static void attach_tasks(struct list_head *tasks, struct rq *rq)
+{
+	struct task_struct *p;
+
+	lockdep_assert_held(&rq->lock);
+
+	while (!list_empty(tasks)) {
+		p = list_first_entry(tasks, struct task_struct, se.group_node);
+		list_del_init(&p->se.group_node);
+
+		WARN_ON(task_rq(p) != rq);
+		activate_task(rq, p, 0);
+		p->on_rq = TASK_ON_RQ_QUEUED;
+	}
+}
+
 /*
- * Migrate all tasks from the rq, sleeping tasks will be migrated by
- * try_to_wake_up()->select_task_rq().
+ * Migrate all tasks (not pinned if pinned argument say so) from the rq,
+ * sleeping tasks will be migrated by try_to_wake_up()->select_task_rq().
  *
  * Called with rq->lock held even though we'er in stop_machine() and
  * there's no concurrency possible, we hold the required locks anyway
  * because of lock validation efforts.
  */
-static void migrate_tasks(struct rq *dead_rq)
+static void migrate_tasks(struct rq *dead_rq, bool migrate_pinned_tasks)
 {
 	struct rq *rq = dead_rq;
 	struct task_struct *next, *stop = rq->stop;
 	int dest_cpu;
+	LIST_HEAD(tasks);
+	unsigned int num_pinned_kthreads = 1; /* this thread */
+	cpumask_t avail_cpus;
+
+	cpumask_andnot(&avail_cpus, cpu_online_mask, cpu_isolated_mask);
 
 	/*
 	 * Fudge the rq selection such that the below task selection loop
@@ -5582,6 +5737,14 @@ static void migrate_tasks(struct rq *dead_rq)
 		BUG_ON(!next);
 		next->sched_class->put_prev_task(rq, next);
 
+		if (!migrate_pinned_tasks && next->flags & PF_KTHREAD &&
+			!cpumask_intersects(&avail_cpus, &next->cpus_allowed)) {
+			detach_one_task(next, rq, &tasks);
+			num_pinned_kthreads += 1;
+			lockdep_unpin_lock(&rq->lock);
+			continue;
+		}
+
 		/*
 		 * Rules for changing task_struct::cpus_allowed are holding
 		 * both pi_lock and rq->lock, such that holding either
@@ -5607,7 +5770,7 @@ static void migrate_tasks(struct rq *dead_rq)
 		}
 
 		/* Find suitable destination for @next, with force if needed. */
-		dest_cpu = select_fallback_rq(dead_rq->cpu, next);
+		dest_cpu = select_fallback_rq(dead_rq->cpu, next, false);
 
 		rq = __migrate_task(rq, next, dest_cpu);
 		if (rq != dead_rq) {
@@ -5619,7 +5782,318 @@ static void migrate_tasks(struct rq *dead_rq)
 	}
 
 	rq->stop = stop;
+
+	if (num_pinned_kthreads > 1)
+		attach_tasks(&tasks, rq);
 }
+
+static void set_rq_online(struct rq *rq);
+static void set_rq_offline(struct rq *rq);
+
+int do_isolation_work_cpu_stop(void *data)
+{
+	unsigned int cpu = smp_processor_id();
+	struct rq *rq = cpu_rq(cpu);
+
+	local_irq_disable();
+
+	sched_ttwu_pending();
+	/* Update our root-domain */
+	raw_spin_lock(&rq->lock);
+
+	if (rq->rd) {
+		WARN_ON(!cpumask_test_cpu(cpu, rq->rd->span));
+		set_rq_offline(rq);
+	}
+
+	migrate_tasks(rq, false);
+	raw_spin_unlock(&rq->lock);
+
+	/*
+	 * We might have been in tickless state. Clear NOHZ flags to avoid
+	 * us being kicked for helping out with balancing
+	 */
+	nohz_balance_clear_nohz_mask(cpu);
+
+	local_irq_enable();
+	return 0;
+}
+
+static void init_sched_groups_capacity(int cpu, struct sched_domain *sd);
+
+static void sched_update_group_capacities(int cpu)
+{
+	struct sched_domain *sd;
+
+	mutex_lock(&sched_domains_mutex);
+	rcu_read_lock();
+
+	for_each_domain(cpu, sd) {
+		int balance_cpu = group_balance_cpu(sd->groups);
+
+		init_sched_groups_capacity(cpu, sd);
+		/*
+		 * Need to ensure this is also called with balancing
+		 * cpu.
+		*/
+		if (cpu != balance_cpu)
+			init_sched_groups_capacity(balance_cpu, sd);
+	}
+
+	rcu_read_unlock();
+	mutex_unlock(&sched_domains_mutex);
+}
+
+static unsigned int cpu_isolation_vote[NR_CPUS];
+
+int sched_isolate_count(const cpumask_t *mask, bool include_offline)
+{
+	cpumask_t count_mask = CPU_MASK_NONE;
+
+	if (include_offline) {
+		cpumask_complement(&count_mask, cpu_online_mask);
+		cpumask_or(&count_mask, &count_mask, cpu_isolated_mask);
+		cpumask_and(&count_mask, &count_mask, mask);
+	} else {
+		cpumask_and(&count_mask, mask, cpu_isolated_mask);
+	}
+
+	return cpumask_weight(&count_mask);
+}
+
+/*
+ * 1) CPU is isolated and cpu is offlined:
+ *	Unisolate the core.
+ * 2) CPU is not isolated and CPU is offlined:
+ *	No action taken.
+ * 3) CPU is offline and request to isolate
+ *	Request ignored.
+ * 4) CPU is offline and isolated:
+ *	Not a possible state.
+ * 5) CPU is online and request to isolate
+ *	Normal case: Isolate the CPU
+ * 6) CPU is not isolated and comes back online
+ *	Nothing to do
+ *
+ * Note: The client calling sched_isolate_cpu() is repsonsible for ONLY
+ * calling sched_deisolate_cpu() on a CPU that the client previously isolated.
+ * Client is also responsible for deisolating when a core goes offline
+ * (after CPU is marked offline).
+ */
+int _sched_isolate_cpu(int cpu)
+{
+	struct rq *rq = cpu_rq(cpu);
+	cpumask_t avail_cpus;
+	int ret_code = 0;
+	u64 start_time = 0;
+
+	if (trace_sched_isolate_enabled())
+		start_time = sched_clock();
+
+	cpu_maps_update_begin();
+
+	cpumask_andnot(&avail_cpus, cpu_online_mask, cpu_isolated_mask);
+
+	/* We cannot isolate ALL cpus in the system */
+	if (cpumask_weight(&avail_cpus) == 1) {
+		ret_code = -EINVAL;
+		goto out;
+	}
+
+	if (!cpu_online(cpu)) {
+		ret_code = -EINVAL;
+		goto out;
+	}
+
+	if (++cpu_isolation_vote[cpu] > 1)
+		goto out;
+
+	set_cpu_isolated(cpu, true);
+	update_cpu_isolation_mask_to_mcdi_controller(cpu_isolated_mask->bits[0]);
+
+	cpumask_clear_cpu(cpu, &avail_cpus);
+
+	/* Migrate timers */
+	smp_call_function_any(&avail_cpus, hrtimer_quiesce_cpu, &cpu, 1);
+	smp_call_function_any(&avail_cpus, timer_quiesce_cpu, &cpu, 1);
+
+	stop_cpus(cpumask_of(cpu), do_isolation_work_cpu_stop, 0);
+
+	calc_load_migrate(rq);
+	update_max_interval();
+	sched_update_group_capacities(cpu);
+
+out:
+	cpu_maps_update_done();
+	trace_sched_isolate(cpu, cpumask_bits(cpu_isolated_mask)[0],
+			    start_time, 1);
+	printk_deferred("%s: prio=%d, cpu=%d, isolation_cpus=0x%lx\n",
+			__func__, iso_prio, cpu, cpu_isolated_mask->bits[0]);
+	return ret_code;
+}
+
+/*
+ * Note: The client calling sched_isolate_cpu() is repsonsible for ONLY
+ * calling sched_deisolate_cpu() on a CPU that the client previously isolated.
+ * Client is also responsible for deisolating when a core goes offline
+ * (after CPU is marked offline).
+ */
+int __sched_deisolate_cpu_unlocked(int cpu)
+{
+	int ret_code = 0;
+	struct rq *rq = cpu_rq(cpu);
+	u64 start_time = 0;
+
+	if (trace_sched_isolate_enabled())
+		start_time = sched_clock();
+
+	if (!cpu_isolation_vote[cpu]) {
+		ret_code = -EINVAL;
+		goto out;
+	}
+
+	if (--cpu_isolation_vote[cpu])
+		goto out;
+
+	if (cpu_online(cpu)) {
+		unsigned long flags;
+
+		raw_spin_lock_irqsave(&rq->lock, flags);
+		rq->age_stamp = sched_clock_cpu(cpu);
+		if (rq->rd) {
+			WARN_ON(!cpumask_test_cpu(cpu, rq->rd->span));
+			set_rq_online(rq);
+		}
+		raw_spin_unlock_irqrestore(&rq->lock, flags);
+	}
+
+	set_cpu_isolated(cpu, false);
+	update_cpu_isolation_mask_to_mcdi_controller(cpu_isolated_mask->bits[0]);
+
+	update_max_interval();
+	sched_update_group_capacities(cpu);
+
+	if (cpu_online(cpu)) {
+		/* Kick CPU to immediately do load balancing */
+		if (!test_and_set_bit(NOHZ_BALANCE_KICK, nohz_flags(cpu)))
+			smp_send_reschedule(cpu);
+	}
+
+out:
+	trace_sched_isolate(cpu, cpumask_bits(cpu_isolated_mask)[0],
+			    start_time, 0);
+	printk_deferred("%s: prio=%d, cpu=%d, isolation_cpus=0x%lx\n",
+			__func__, iso_prio, cpu, cpu_isolated_mask->bits[0]);
+	return ret_code;
+}
+
+int _sched_deisolate_cpu(int cpu)
+{
+	int ret_code;
+
+	cpu_maps_update_begin();
+	ret_code = __sched_deisolate_cpu_unlocked(cpu);
+	cpu_maps_update_done();
+	return ret_code;
+}
+
+void iso_cpumask_init(void)
+{
+	cpumask_copy(&cpu_all_masks, cpu_possible_mask);
+	cpumask_setall(&available_cpus);
+}
+
+/* Use available_cpus to determine cpu isolated or deisolated */
+int set_cpu_isolation(enum iso_prio_t prio, struct cpumask *cpumask_ptr)
+{
+	struct cpumask iso_mask;
+	struct cpumask deiso_mask;
+	int i = 0;
+
+	if (prio > iso_prio)
+		return -1;
+
+	if (!cpumask_ptr)
+		return -1;
+
+	might_sleep();
+	mutex_lock(&sched_isolation_mutex);
+	iso_prio = prio;
+
+	/* cpumask of isolated */
+	cpumask_or(&iso_mask, cpumask_ptr, cpu_isolated_mask);
+	cpumask_complement(&iso_mask, &iso_mask);
+
+	/* cpumask of de-isolated */
+	cpumask_and(&deiso_mask, cpumask_ptr, cpu_isolated_mask);
+
+	/* set cpu isolated */
+	if (!cpumask_empty(&iso_mask)) {
+		for_each_cpu(i, &iso_mask)
+			_sched_isolate_cpu(i);
+	}
+
+	/* set cpu de-isolated */
+	if (!cpumask_empty(&deiso_mask)) {
+		for_each_cpu(i, &deiso_mask)
+			_sched_deisolate_cpu(i);
+	}
+
+	/* all possible cpu de-isolated*/
+	if (cpumask_empty(cpu_isolated_mask)) {
+		iso_prio = ISO_UNSET;
+		cpumask_setall(&available_cpus);
+	}
+	mutex_unlock(&sched_isolation_mutex);
+
+	return 0;
+}
+
+/* de-isolated all cpu */
+int unset_cpu_isolation(enum iso_prio_t prio)
+{
+	int err = -1;
+
+	err = set_cpu_isolation(prio, &cpu_all_masks);
+
+	return err;
+}
+
+/*
+ * Set cpu to be isolated
+ * Success: return 0
+ */
+int sched_isolate_cpu(int cpu)
+{
+	int err = -1;
+
+	if (cpu >= nr_cpu_ids)
+		return err;
+
+	cpumask_clear_cpu(cpu, &available_cpus);
+	err = set_cpu_isolation(ISO_CUSTOMIZE, &available_cpus); /* set cpu isolation */
+
+	return err;
+}
+EXPORT_SYMBOL(sched_isolate_cpu);
+
+/*
+ * Set cpu to be deisolated
+ * Success: return 0
+ */
+int sched_deisolate_cpu(int cpu)
+{
+	int err = -1;
+
+	if (cpu >= nr_cpu_ids)
+		return err;
+
+	cpumask_set_cpu(cpu, &available_cpus);
+	err = set_cpu_isolation(ISO_CUSTOMIZE, &available_cpus);
+
+	return err;
+}
+EXPORT_SYMBOL(sched_deisolate_cpu);
 #endif /* CONFIG_HOTPLUG_CPU */
 
 #if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_SYSCTL)
@@ -5871,7 +6345,8 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 			BUG_ON(!cpumask_test_cpu(cpu, rq->rd->span));
 			set_rq_offline(rq);
 		}
-		migrate_tasks(rq);
+		migrate_tasks(rq, true);
+
 		BUG_ON(rq->nr_running != 1); /* the migration thread */
 		raw_spin_unlock_irqrestore(&rq->lock, flags);
 		break;
@@ -6098,6 +6573,7 @@ static int sd_degenerate(struct sched_domain *sd)
 			 SD_BALANCE_FORK |
 			 SD_BALANCE_EXEC |
 			 SD_SHARE_CPUCAPACITY |
+			 SD_ASYM_CPUCAPACITY |
 			 SD_SHARE_PKG_RESOURCES |
 			 SD_SHARE_POWERDOMAIN |
 			 SD_SHARE_CAP_STATES)) {
@@ -6129,6 +6605,7 @@ sd_parent_degenerate(struct sched_domain *sd, struct sched_domain *parent)
 				SD_BALANCE_NEWIDLE |
 				SD_BALANCE_FORK |
 				SD_BALANCE_EXEC |
+				SD_ASYM_CPUCAPACITY |
 				SD_SHARE_CPUCAPACITY |
 				SD_SHARE_PKG_RESOURCES |
 				SD_PREFER_SIBLING |
@@ -6630,11 +7107,14 @@ build_sched_groups(struct sched_domain *sd, int cpu)
 static void init_sched_groups_capacity(int cpu, struct sched_domain *sd)
 {
 	struct sched_group *sg = sd->groups;
+	cpumask_t avail_mask;
 
 	WARN_ON(!sg);
 
 	do {
-		sg->group_weight = cpumask_weight(sched_group_cpus(sg));
+		cpumask_andnot(&avail_mask, sched_group_cpus(sg),
+							cpu_isolated_mask);
+		sg->group_weight = cpumask_weight(&avail_mask);
 		sg = sg->next;
 	} while (sg != sd->groups);
 
@@ -6813,6 +7293,7 @@ static int sched_domains_curr_level;
  * SD_SHARE_PKG_RESOURCES - describes shared caches
  * SD_NUMA                - describes NUMA topologies
  * SD_SHARE_POWERDOMAIN   - describes shared power domain
+ * SD_ASYM_CPUCAPACITY    - describes mixed capacity topologies
  * SD_SHARE_CAP_STATES    - describes shared capacity states
  *
  * Odd one out:
@@ -6823,6 +7304,7 @@ static int sched_domains_curr_level;
 	 SD_SHARE_PKG_RESOURCES |	\
 	 SD_NUMA |			\
 	 SD_ASYM_PACKING |		\
+	 SD_ASYM_CPUCAPACITY |          \
 	 SD_SHARE_POWERDOMAIN |		\
 	 SD_SHARE_CAP_STATES)
 
@@ -7650,17 +8132,16 @@ static int cpuset_cpu_active(struct notifier_block *nfb, unsigned long action,
 		 * operation in the resume sequence, just build a single sched
 		 * domain, ignoring cpusets.
 		 */
-		num_cpus_frozen--;
-		if (likely(num_cpus_frozen)) {
-			partition_sched_domains(1, NULL, NULL);
+		partition_sched_domains(1, NULL, NULL);
+		if (--num_cpus_frozen)
 			break;
-		}
 
 		/*
 		 * This is the last CPU online operation. So fall through and
 		 * restore the original sched domains by considering the
 		 * cpuset configurations.
 		 */
+		cpuset_force_rebuild();
 
 	case CPU_ONLINE:
 		cpuset_update_active_cpus(true);

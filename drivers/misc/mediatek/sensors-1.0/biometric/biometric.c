@@ -373,7 +373,8 @@ static struct platform_driver biometric_driver = {
 
 static int biometric_real_driver_init(void)
 {
-	int err = 0, i = 0;
+	int i = 0;
+	int err = -1;
 
 	BIOMETRIC_LOG(" biometric_real_driver_init +\n");
 
@@ -450,6 +451,7 @@ static const struct file_operations biometric_fops = {
 static int biometric_misc_init(struct biometric_context *cxt)
 {
 	int err = 0;
+
 	cxt->mdev.minor = ID_EKG;/* MISC_DYNAMIC_MINOR; */
 	cxt->mdev.name = BIO_MISC_DEV_NAME;
 	cxt->mdev.fops = &biometric_fops;

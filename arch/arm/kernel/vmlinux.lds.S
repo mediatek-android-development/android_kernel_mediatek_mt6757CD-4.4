@@ -152,12 +152,6 @@ SECTIONS
 
 	NOTES
 
-#ifdef CONFIG_MTK_AEE_IPANIC
-	.mrdump ALIGN (0x400): {
-	}
-#endif
-
-
 #ifndef CONFIG_XIP_KERNEL
 # ifdef CONFIG_ARM_KERNMEM_PERMS
 	. = ALIGN(1<<SECTION_SHIFT);

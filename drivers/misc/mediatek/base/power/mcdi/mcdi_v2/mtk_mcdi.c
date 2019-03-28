@@ -38,6 +38,7 @@
 #include <mtk_mcdi_profile.h>
 
 #include <trace/events/mtk_idle_event.h>
+#include <mt-plat/mtk_secure_api.h>
 
 
 /* #define WORST_LATENCY_DBG */
@@ -49,6 +50,7 @@
 #define NF_CMD_BUF          128
 #define LOG_BUF_LEN         1024
 
+static int mcupm_fw_load_success = -1;
 static unsigned long mcdi_cnt_cpu[NF_CPU];
 static unsigned long mcdi_cnt_cluster[NF_CLUSTER];
 
@@ -139,6 +141,28 @@ unsigned int get_pwr_stat_check_map(int type, int idx)
 	return cpu_cluster_pwr_stat_map[type][idx];
 }
 
+void wakeup_all_cpu(void)
+{
+	int cpu = 0;
+
+	for (cpu = 0; cpu < NF_CPU; cpu++) {
+		if (cpu_online(cpu))
+			smp_send_reschedule(cpu);
+	}
+}
+
+void wait_until_all_cpu_powered_on(void)
+{
+	while (!(mcdi_get_gov_data_num_mcusys() == 0x0))
+		;
+}
+
+void mcdi_wakeup_all_cpu(void)
+{
+	wakeup_all_cpu();
+
+	wait_until_all_cpu_powered_on();
+}
 /* debugfs */
 static char dbg_buf[4096] = { 0 };
 static char cmd_buf[512] = { 0 };
@@ -266,18 +290,19 @@ static ssize_t mcdi_profile_read(struct file *filp,
 			       char __user *userbuf, size_t count, loff_t *f_pos)
 {
 	int i, len = 0;
-	unsigned int cnt[10] = {0};
+	unsigned int cnt[8] = {0};
 	char *p = dbg_buf;
 	unsigned int ratio_raw = 0;
 	unsigned int ratio_int = 0;
 	unsigned int ratio_fraction = 0;
 	unsigned int ratio_dur = 0;
 
-	for (i = 0; i < 4; i++) {
+	/* distribution */
+	for (i = 0; i < 3; i++) {
 		cnt[i]   = mcdi_read(PROF_OFF_CNT_REG(i));
-		cnt[i+5] = mcdi_read(PROF_ON_CNT_REG(i));
-		cnt[4]  += cnt[i];
-		cnt[9]  += cnt[i+5];
+		cnt[i+4] = mcdi_read(PROF_ON_CNT_REG(i));
+		cnt[3]  += cnt[i];
+		cnt[7]  += cnt[i+4];
 	}
 
 	mcdi_log("mcdi cpu off    : max_id = 0x%x, avg = %4dus, max = %5dus, cnt = %d\n",
@@ -302,15 +327,13 @@ static ssize_t mcdi_profile_read(struct file *filp,
 		mcdi_read(Cluster_ON_LATENCY_REG(0xC)));
 	mcdi_log("\n");
 
-	if (cnt[4] > 0 && cnt[9] > 0) {
-		mcdi_log("pwr off latency    < 25 us : %2d%% (%d)\n", (100 * cnt[0]) / cnt[4], cnt[0]);
-		mcdi_log("pwr off latency  25-100 us : %2d%% (%d)\n", (100 * cnt[1]) / cnt[4], cnt[1]);
-		mcdi_log("pwr off latency 100-500 us : %2d%% (%d)\n", (100 * cnt[2]) / cnt[4], cnt[2]);
-		mcdi_log("pwr off latency   > 500 us : %2d%% (%d)\n", (100 * cnt[3]) / cnt[4], cnt[3]);
-		mcdi_log("pwr on  latency    < 25 us : %2d%% (%d)\n", (100 * cnt[5]) / cnt[9], cnt[5]);
-		mcdi_log("pwr on  latency  25-100 us : %2d%% (%d)\n", (100 * cnt[6]) / cnt[9], cnt[6]);
-		mcdi_log("pwr on  latency 100-500 us : %2d%% (%d)\n", (100 * cnt[7]) / cnt[9], cnt[7]);
-		mcdi_log("pwr on  latency   > 500 us : %2d%% (%d)\n", (100 * cnt[8]) / cnt[9], cnt[8]);
+	if (cnt[3] > 0 && cnt[7] > 0) {
+		mcdi_log("pwr off latency  < 100 us : %2d%% (%d)\n", (100 * cnt[0]) / cnt[3], cnt[0]);
+		mcdi_log("pwr off latency 100-500 us : %2d%% (%d)\n", (100 * cnt[1]) / cnt[3], cnt[1]);
+		mcdi_log("pwr off latency   > 500 us : %2d%% (%d)\n", (100 * cnt[2]) / cnt[3], cnt[2]);
+		mcdi_log("pwr on  latency  < 100 us : %2d%% (%d)\n", (100 * cnt[4]) / cnt[7], cnt[4]);
+		mcdi_log("pwr on  latency 100-500 us : %2d%% (%d)\n", (100 * cnt[5]) / cnt[7], cnt[5]);
+		mcdi_log("pwr on  latency   > 500 us : %2d%% (%d)\n", (100 * cnt[6]) / cnt[7], cnt[6]);
 	}
 
 #ifdef WORST_LATENCY_DBG
@@ -335,6 +358,7 @@ static ssize_t mcdi_profile_read(struct file *filp,
 
 	mcdi_log("\nOFF %% (cpu):\n");
 
+	mcdi_log("ratio_dur=%d\n", ratio_dur);
 	for (i = 0; i < NF_CPU; i++) {
 		ratio_raw      = 100 * mcdi_read(SYSRAM_PROF_RATIO_REG + i * 0x8 + 0x4);
 		ratio_int      = ratio_raw / ratio_dur;
@@ -403,6 +427,7 @@ static ssize_t mcdi_profile_write(struct file *filp,
 
 		pr_info("mcdi_reg: 0x%lx=0x%x(%d)\n",
 			param, mcdi_read(mcdi_sysram_base + param), mcdi_read(mcdi_sysram_base + param));
+
 		return count;
 
 	} else if (!strncmp(cmd_str, "enable", strlen("enable"))) {
@@ -649,6 +674,19 @@ void mcdi_heart_beat_log_dump(void)
 	pr_info("%s\n", get_mcdi_buf(buf));
 }
 
+/* if success, return 1. If fail, return 0 */
+static int is_mcupm_fw_load_success(void)
+{
+	if (mcupm_fw_load_success == -1) {
+		mcupm_fw_load_success =
+			mt_secure_call(MTK_SIP_KERNEL_MCUPM_FW_LOAD_STATUS, 0, 0, 0);
+
+		if (!mcupm_fw_load_success)
+			pr_err("[MCDI] load mcupmfw fail\n");
+	}
+	return mcupm_fw_load_success;
+}
+
 int mcdi_enter(int cpu)
 {
 	int cluster_idx = cluster_idx_get(cpu);
@@ -658,6 +696,9 @@ int mcdi_enter(int cpu)
 	mcdi_profile_ts(MCDI_PROFILE_ENTER);
 
 	state = mcdi_governor_select(cpu, cluster_idx);
+
+	if (!is_mcupm_fw_load_success())
+		state = MCDI_STATE_WFI;
 
 	mcdi_profile_ts(MCDI_PROFILE_MCDI_GOVERNOR_SELECT_LEAVE);
 
@@ -750,22 +791,6 @@ int mcdi_enter(int cpu)
 	return 0;
 }
 
-void wakeup_all_cpu(void)
-{
-	int cpu = 0;
-
-	for (cpu = 0; cpu < NF_CPU; cpu++) {
-		if (cpu_online(cpu))
-			smp_send_reschedule(cpu);
-	}
-}
-
-void wait_until_all_cpu_powered_on(void)
-{
-	while (!(mcdi_mbox_read(MCDI_MBOX_CPU_CLUSTER_PWR_STAT) == 0x0))
-		;
-}
-
 bool mcdi_pause(bool paused)
 {
 	struct mcdi_feature_status feature_stat;
@@ -777,10 +802,7 @@ bool mcdi_pause(bool paused)
 
 	if (paused) {
 		mcdi_state_pause(true);
-
-		wakeup_all_cpu();
-
-		wait_until_all_cpu_powered_on();
+		mcdi_wakeup_all_cpu();
 	} else {
 		mcdi_state_pause(false);
 	}
@@ -823,6 +845,11 @@ void update_avail_cpu_mask_to_mcdi_controller(unsigned int cpu_mask)
 	mcdi_mbox_write(MCDI_MBOX_AVAIL_CPU_MASK, cpu_mask);
 }
 
+void update_cpu_isolation_mask_to_mcdi_controller(unsigned int iso_mask)
+{
+
+}
+
 bool is_cpu_pwr_on_event_pending(void)
 {
 	return (!(mcdi_mbox_read(MCDI_MBOX_PENDING_ON_EVENT) == 0));
@@ -839,14 +866,23 @@ static int mcdi_cpu_callback(struct notifier_block *nfb,
 	case CPU_DOWN_PREPARE_FROZEN:
 		mcdi_pause(true);
 		break;
+	}
 
+	return NOTIFY_OK;
+}
+
+static int mcdi_cpu_callback_leave_hotplug(struct notifier_block *nfb,
+				   unsigned long action, void *hcpu)
+{
+	switch (action) {
 	case CPU_ONLINE:
 	case CPU_ONLINE_FROZEN:
 	case CPU_UP_CANCELED:
 	case CPU_UP_CANCELED_FROZEN:
 	case CPU_DOWN_FAILED:
 	case CPU_DOWN_FAILED_FROZEN:
-	case CPU_POST_DEAD:
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
 		mcdi_avail_cpu_cluster_update();
 
 		mcdi_pause(false);
@@ -862,9 +898,15 @@ static struct notifier_block mcdi_cpu_notifier = {
 	.priority   = INT_MAX,
 };
 
+static struct notifier_block mcdi_cpu_notifier_leave_hotplug = {
+	.notifier_call = mcdi_cpu_callback_leave_hotplug,
+	.priority   = INT_MIN,
+};
+
 static int mcdi_hotplug_cb_init(void)
 {
 	register_cpu_notifier(&mcdi_cpu_notifier);
+	register_cpu_notifier(&mcdi_cpu_notifier_leave_hotplug);
 
 	return 0;
 }
@@ -902,8 +944,6 @@ static int __init mcdi_init(void)
 	mcdi_sysram_init();
 
 	mcdi_pm_qos_init();
-
-	mcdi_mcupm_debug_sram_init();
 
 	mcdi_enable_mcupm_cluster_counter();
 

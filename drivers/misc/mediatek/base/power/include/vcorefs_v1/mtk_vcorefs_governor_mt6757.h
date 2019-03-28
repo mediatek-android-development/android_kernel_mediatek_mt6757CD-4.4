@@ -60,7 +60,6 @@ enum dvfs_kicker {
 	KIR_CPU,
 	KIR_THERMAL,
 	KIR_FB,
-	KIR_FBT,
 	NUM_KICKER,
 
 	/* internal kicker */

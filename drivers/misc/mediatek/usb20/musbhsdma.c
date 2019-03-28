@@ -469,6 +469,8 @@ irqreturn_t dma_controller_irq(int irq, void *private_data)
 								    MUSB_TXCSR);
 					u16 txcsr;
 
+					host_tx_refcnt_inc(epnum);
+
 					/*
 					 * The programming guide says that we
 					 * must clear DMAENAB before DMAMODE.
@@ -481,9 +483,13 @@ irqreturn_t dma_controller_irq(int irq, void *private_data)
 					txcsr &= ~MUSB_TXCSR_DMAMODE;
 					txcsr |= MUSB_TXCSR_TXPKTRDY;
 					musb_writew(mbase, offset, txcsr);
-				}
-				musb_dma_completion(musb, musb_channel->epnum,
-						    musb_channel->transmit);
+
+					if (musb_host_db_workaround)
+						wait_tx_done(epnum, 1000000000);
+
+				} else
+					musb_dma_completion(musb, musb_channel->epnum,
+							musb_channel->transmit);
 			}
 		}
 	}

@@ -96,10 +96,6 @@
 #undef CMDQ_PWR_AWARE
 #endif
 
-#ifdef CMDQ_SECURE_PATH_HW_LOCK
-#undef CMDQ_SECURE_PATH_NORMAL_IRQ
-#endif
-
 typedef u64 CMDQ_VARIABLE;
 /*
 * SPR / CPR / VAR naming rule and number
@@ -137,8 +133,9 @@ typedef u64 CMDQ_VARIABLE;
 #define CMDQ_DELAY_SET_DURATION_CPR	(1)
 #define CMDQ_DELAY_SET_RESULT_CPR	(2)
 #define CMDQ_DELAY_SET_MAX_CPR		(3)
-#define CMDQ_DELAY_THD_SIZE		(64 * 64)	/* delay inst in bytes */
+#define CMDQ_DELAY_THD_SIZE		(64)	/* delay inst in bytes */
 
+#define CMDQ_MAX_USER_PROP_SIZE		(1024)
 /* #define CMDQ_DUMP_GIC (0) */
 /* #define CMDQ_PROFILE_MMP (0) */
 
@@ -215,17 +212,18 @@ enum CMDQ_SCENARIO_ENUM {
 	CMDQ_SCENARIO_DISP_CONFIG_PRIMARY_PQ = 31,
 	CMDQ_SCENARIO_DISP_CONFIG_SUB_PQ = 32,
 	CMDQ_SCENARIO_DISP_CONFIG_OD = 33,
+	CMDQ_SCENARIO_DISP_VFP_CHANGE = 34,
 
-	CMDQ_SCENARIO_RDMA2_DISP = 34,
+	CMDQ_SCENARIO_RDMA2_DISP = 35,
 
-	CMDQ_SCENARIO_HIGHP_TRIGGER_LOOP = 35,	/* for primary trigger loop enable pre-fetch usage */
-	CMDQ_SCENARIO_LOWP_TRIGGER_LOOP = 36,	/* for low priority monitor loop to polling bus status */
+	CMDQ_SCENARIO_HIGHP_TRIGGER_LOOP = 36,	/* for primary trigger loop enable pre-fetch usage */
+	CMDQ_SCENARIO_LOWP_TRIGGER_LOOP = 37,	/* for low priority monitor loop to polling bus status */
 
-	CMDQ_SCENARIO_KERNEL_CONFIG_GENERAL = 37,
+	CMDQ_SCENARIO_KERNEL_CONFIG_GENERAL = 38,
 
-	CMDQ_SCENARIO_TIMER_LOOP = 38,
-	CMDQ_SCENARIO_MOVE = 39,
-	CMDQ_SCENARIO_SRAM_LOOP = 40,
+	CMDQ_SCENARIO_TIMER_LOOP = 39,
+	CMDQ_SCENARIO_MOVE = 40,
+	CMDQ_SCENARIO_SRAM_LOOP = 41,
 
 	CMDQ_MAX_SCENARIO_COUNT	/* ALWAYS keep at the end */
 };
@@ -416,6 +414,9 @@ struct cmdqCommandStruct {
 	uint32_t debugRegDump;
 	/* [Reserved] This is for CMDQ driver usage itself. Not for client. Do not access this field from User Space */
 	cmdqU32Ptr_t privateData;
+	/* task property */
+	u32 prop_size;
+	cmdqU32Ptr_t prop_addr;
 	struct cmdqProfileMarkerStruct profileMarker;
 	cmdqU32Ptr_t userDebugStr;
 	uint32_t userDebugStrLen;

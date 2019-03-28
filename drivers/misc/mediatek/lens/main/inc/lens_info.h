@@ -32,12 +32,15 @@
 #define AFDRV_BU63169AF "BU63169AF"
 #define AFDRV_BU6424AF "BU6424AF"
 #define AFDRV_BU6429AF "BU6429AF"
+#define AFDRV_BU64748AF "BU64748AF"
 #define AFDRV_BU64745GWZAF "BU64745GWZAF"
 #define AFDRV_DW9714A "DW9714A"
 #define AFDRV_DW9714AF "DW9714AF"
+#define AFDRV_DW9763AF "DW9763AF"
 #define AFDRV_DW9718AF "DW9718AF"
 #define AFDRV_DW9718SAF "DW9718SAF"
 #define AFDRV_DW9719TAF "DW9719TAF"
+#define AFDRV_DW9800WAF "DW9800WAF"
 #define AFDRV_DW9814AF "DW9814AF"
 #define AFDRV_FM50AF "FM50AF"
 #define AFDRV_GAF001AF "GAF001AF"
@@ -50,6 +53,9 @@
 #define AFDRV_LC898212XDAF_F "LC898212XDAF_F"
 #define AFDRV_LC898214AF "LC898214AF"
 #define AFDRV_LC898217AF "LC898217AF"
+#define AFDRV_LC898217AFA "LC898217AFA"
+#define AFDRV_LC898217AFB "LC898217AFB"
+#define AFDRV_LC898217AFC "LC898217AFC"
 #define AFDRV_MT9P017AF "MT9P017AF"
 #define AFDRV_OV8825AF "OV8825AF"
 #define AFDRV_WV511AAF "WV511AAF"
@@ -98,12 +104,22 @@ struct stAF_MotorOisInfo {
 };
 
 /* Structures */
+#define OIS_DATA_NUM 8
+#define OIS_DATA_MASK (OIS_DATA_NUM - 1)
+struct stAF_OisPosInfo {
+	int64_t TimeStamp[OIS_DATA_NUM];
+	int i4OISHallPosX[OIS_DATA_NUM];
+	int i4OISHallPosY[OIS_DATA_NUM];
+};
+
+/* Structures */
 struct stAF_DrvList {
 	u8 uEnable;
 	u8 uDrvName[32];
 	int (*pAF_SetI2Cclient)(struct i2c_client *pstAF_I2Cclient, spinlock_t *pAF_SpinLock, int *pAF_Opened);
 	long (*pAF_Ioctl)(struct file *a_pstFile, unsigned int a_u4Command, unsigned long a_u4Param);
 	int (*pAF_Release)(struct inode *a_pstInode, struct file *a_pstFile);
+	int (*pAF_OisGetHallPos)(int *PosX, int *PosY);
 };
 
 #define I2CBUF_MAXSIZE 10
@@ -168,5 +184,7 @@ struct stAF_MotorI2CSendCmd {
 #define AFIOC_S_SETPOWERCTRL _IOW(AF_MAGIC, 13, u32)
 
 #define AFIOC_S_SETLENSTEST  _IOW(AF_MAGIC, 14, u32)
+
+#define AFIOC_G_OISPOSINFO _IOR(AF_MAGIC, 15, struct stAF_OisPosInfo)
 
 #endif

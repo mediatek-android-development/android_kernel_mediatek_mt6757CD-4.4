@@ -41,18 +41,26 @@
 #include "SCP_power_monitor.h"
 #include <asm/arch_timer.h>
 
-/* ALGIN TO SCP SENSOR_DATA_SIZE AT FILE CONTEXTHUB_FW.H, ALGIN
+/* ALGIN TO SCP SENSOR_IPI_SIZE AT FILE CONTEXTHUB_FW.H, ALGIN
  * TO SCP_SENSOR_HUB_DATA UNION, ALGIN TO STRUCT DATA_UNIT_T
- * SIZEOF(STRUCT DATA_UNIT_T) = SCP_SENSOR_HUB_DATA = SENSOR_DATA_SIZE
+ * SIZEOF(STRUCT DATA_UNIT_T) = SCP_SENSOR_HUB_DATA = SENSOR_IPI_SIZE
  * BUT AT THE MOMENT AP GET DATA THROUGH IPI, WE ONLY TRANSFER
  * 44 BYTES DATA_UNIT_T, THERE ARE 4 BYTES HEADER IN SCP_SENSOR_HUB_DATA
  * HEAD
  */
-#define SENSOR_DATA_SIZE 48
+#define SENSOR_IPI_SIZE 48
 /*
  * experience number for delay_count per DELAY_COUNT sensor input delay 10ms
  * msleep(10) system will schedule to hal process then read input node
  */
+#define SENSOR_IPI_HEADER_SIZE 4
+#define SENSOR_IPI_PACKET_SIZE (SENSOR_IPI_SIZE - SENSOR_IPI_HEADER_SIZE)
+#define SENSOR_DATA_SIZE 44
+
+#if SENSOR_DATA_SIZE > SENSOR_IPI_PACKET_SIZE
+#error "SENSOR_DATA_SIZE > SENSOR_IPI_PACKET_SIZE, out of memory"
+#endif
+
 #define DELAY_COUNT			32
 #define SYNC_TIME_CYCLC		10
 #define SCP_sensorHub_DEV_NAME        "SCP_sensorHub"
@@ -72,7 +80,7 @@ struct curr_wp_queue {
 };
 
 struct SCP_sensorHub_data {
-	struct work_struct power_up_work;
+	/* struct work_struct power_up_work; */
 
 	struct sensorHub_hw *hw;
 	struct work_struct direct_push_work;
@@ -92,12 +100,45 @@ static struct SensorState mSensorState[ID_SENSOR_MAX_HANDLE + 1];
 static DEFINE_MUTEX(mSensorState_mtx);
 static atomic_t power_status = ATOMIC_INIT(SENSOR_POWER_DOWN);
 static DECLARE_WAIT_QUEUE_HEAD(chre_kthread_wait);
+static DECLARE_WAIT_QUEUE_HEAD(power_reset_wait);
 static uint8_t chre_kthread_wait_condition;
+static uint8_t power_reset_wait_condition;
 static struct SCP_sensorHub_data *obj_data;
 #define SCP_TAG                  "[sensorHub] "
 #define SCP_FUN(f)               pr_debug(SCP_TAG"%s\n", __func__)
 #define SCP_PR_ERR(fmt, args...)    pr_err(SCP_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
 #define SCP_LOG(fmt, args...)    pr_debug(SCP_TAG fmt, ##args)
+
+enum scp_ipi_status __attribute__((weak)) scp_ipi_registration(enum ipi_id id,
+	void (*ipi_handler)(int id, void *data, unsigned int len),
+	const char *name)
+{
+	return SCP_IPI_ERROR;
+}
+
+void __attribute__((weak)) scp_A_register_notify(struct notifier_block *nb)
+{
+}
+
+enum scp_ipi_status __attribute__((weak)) scp_ipi_send(enum ipi_id id, void *buf,
+	unsigned int  len, unsigned int wait, enum scp_core_id scp_id)
+{
+	return SCP_IPI_ERROR;
+}
+
+phys_addr_t __attribute__((weak)) scp_get_reserve_mem_virt(enum scp_reserve_mem_id_t id)
+{
+	return 0;
+}
+
+phys_addr_t __attribute__((weak)) scp_get_reserve_mem_phys(enum scp_reserve_mem_id_t id)
+{
+	return 0;
+}
+
+void __attribute__((weak)) scp_register_feature(enum feature_id id)
+{
+}
 
 /* arch counter is 13M, mult is 161319385, shift is 21 */
 static inline uint64_t arch_counter_to_ns(uint64_t cyc)
@@ -168,7 +209,7 @@ struct ipi_master {
 
 struct ipi_transfer {
 	const unsigned char	*tx_buf;
-	unsigned char		rx_buf[SENSOR_DATA_SIZE];
+	unsigned char		rx_buf[SENSOR_IPI_SIZE];
 	unsigned int		len;
 	struct list_head transfer_list;
 };
@@ -223,11 +264,11 @@ static int ipi_txrx_bufs(struct ipi_transfer *t)
 	hw->context = &hw->done;
 	do {
 		status = scp_ipi_send(IPI_SENSOR, (unsigned char *)hw->tx, hw->len, 0, SCP_A_ID);
-		if (status == ERROR) {
+		if (status == SCP_IPI_ERROR) {
 			SCP_PR_ERR("scp_ipi_send fail\n");
 			return -1;
 		}
-		if (status == BUSY) {
+		if (status == SCP_IPI_BUSY) {
 			if (retry++ == 1000) {
 				SCP_PR_ERR("retry fail\n");
 				return -1;
@@ -235,7 +276,7 @@ static int ipi_txrx_bufs(struct ipi_transfer *t)
 			if (retry % 100 == 0)
 				usleep_range(1000, 2000);
 		}
-	} while (status == BUSY);
+	} while (status == SCP_IPI_BUSY);
 
 	if (retry >= 100)
 		SCP_PR_ERR("retry time:%d\n", retry);
@@ -266,7 +307,7 @@ static void ipi_work(struct work_struct *work)
 		list_del(&m->queue);
 		spin_unlock(&master.lock);
 		list_for_each_entry(t, &m->transfers, transfer_list) {
-			if (!t->tx_buf && !t->rx_buf && t->len) {
+			if (!t->tx_buf && t->len) {
 				status = -EINVAL;
 				SCP_PR_ERR("transfer param wrong :%d\n", status);
 				break;
@@ -340,7 +381,8 @@ static int scp_ipi_txrx(const unsigned char *txbuf, unsigned int n_tx,
 
 static int SCP_sensorHub_ipi_txrx(unsigned char *txrxbuf)
 {
-	return scp_ipi_txrx(txrxbuf, SENSOR_DATA_SIZE, txrxbuf, SENSOR_DATA_SIZE);
+	return scp_ipi_txrx(txrxbuf,
+		SENSOR_IPI_SIZE, txrxbuf, SENSOR_IPI_SIZE);
 }
 
 static int SCP_sensorHub_ipi_master_init(void)
@@ -365,7 +407,7 @@ int scp_sensorHub_req_send(SCP_SENSOR_HUB_DATA_P data, uint *len, unsigned int w
 	 *	data->req.action);
 	 */
 
-	if (*len > SENSOR_DATA_SIZE) {
+	if (*len > SENSOR_IPI_SIZE) {
 		SCP_PR_ERR("!!\n");
 		return -1;
 	}
@@ -468,121 +510,142 @@ static int SCP_sensorHub_direct_push_work(void *data)
 }
 static void SCP_sensorHub_enable_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	SCP_SENSOR_HUB_DATA_P req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
+	SCP_SENSOR_HUB_DATA_P req;
+
+	if (txrx_cmd.context == NULL) {
+		SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
+		return;
+	}
+
+	req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
 
 	if (req->req.sensorType != rsp->rsp.sensorType || req->req.action != rsp->rsp.action) {
 		SCP_PR_ERR("sensor type %d != %d action %d != %d\n",
 			req->req.sensorType, rsp->rsp.sensorType, req->req.action, rsp->rsp.action);
 	} else {
-		if (txrx_cmd.context == NULL)
-			SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
-		else {
-			memcpy(txrx_cmd.rx, rsp, rx_len);
-			txrx_cmd.count = rx_len;
-			complete(txrx_cmd.context);
-		}
+		memcpy(txrx_cmd.rx, rsp, rx_len);
+		txrx_cmd.count = rx_len;
+		complete(txrx_cmd.context);
 	}
 }
 static void SCP_sensorHub_set_delay_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	SCP_SENSOR_HUB_DATA_P req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
+	SCP_SENSOR_HUB_DATA_P req;
+
+	if (txrx_cmd.context == NULL) {
+		SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
+		return;
+	}
+
+	req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
 
 	if (req->req.sensorType != rsp->rsp.sensorType || req->req.action != rsp->rsp.action) {
 		SCP_PR_ERR("sensor type %d != %d action %d != %d\n",
 			req->req.sensorType, rsp->rsp.sensorType, req->req.action, rsp->rsp.action);
 	} else {
-		if (txrx_cmd.context == NULL)
-			SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
-		else {
-			memcpy(txrx_cmd.rx, rsp, rx_len);
-			txrx_cmd.count = rx_len;
-			complete(txrx_cmd.context);
-		}
+		memcpy(txrx_cmd.rx, rsp, rx_len);
+		txrx_cmd.count = rx_len;
+		complete(txrx_cmd.context);
 	}
 }
 static void SCP_sensorHub_get_data_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	SCP_SENSOR_HUB_DATA_P req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
+	SCP_SENSOR_HUB_DATA_P req;
+
+	if (txrx_cmd.context == NULL) {
+		SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
+		return;
+	}
+
+	req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
 
 	if (req->req.sensorType != rsp->rsp.sensorType || req->req.action != rsp->rsp.action) {
 		SCP_PR_ERR("sensor type %d != %d action %d != %d\n",
 			req->req.sensorType, rsp->rsp.sensorType, req->req.action, rsp->rsp.action);
 	} else {
-		if (txrx_cmd.context == NULL)
-			SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
-		else {
-			memcpy(txrx_cmd.rx, rsp, rx_len);
-			txrx_cmd.count = rx_len;
-			complete(txrx_cmd.context);
-		}
+		memcpy(txrx_cmd.rx, rsp, rx_len);
+		txrx_cmd.count = rx_len;
+		complete(txrx_cmd.context);
 	}
 }
 static void SCP_sensorHub_batch_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	SCP_SENSOR_HUB_DATA_P req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
+	SCP_SENSOR_HUB_DATA_P req;
+
+	if (txrx_cmd.context == NULL) {
+		SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
+		return;
+	}
+
+	req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
 
 	if (req->req.sensorType != rsp->rsp.sensorType || req->req.action != rsp->rsp.action) {
 		SCP_PR_ERR("sensor type %d != %d action %d != %d\n",
 			req->req.sensorType, rsp->rsp.sensorType, req->req.action, rsp->rsp.action);
 	} else {
-		if (txrx_cmd.context == NULL)
-			SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
-		else {
-			memcpy(txrx_cmd.rx, rsp, rx_len);
-			txrx_cmd.count = rx_len;
-			complete(txrx_cmd.context);
-		}
+		memcpy(txrx_cmd.rx, rsp, rx_len);
+		txrx_cmd.count = rx_len;
+		complete(txrx_cmd.context);
 	}
 }
 static void SCP_sensorHub_set_cfg_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	SCP_SENSOR_HUB_DATA_P req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
+	SCP_SENSOR_HUB_DATA_P req;
+
+	if (txrx_cmd.context == NULL) {
+		SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
+		return;
+	}
+
+	req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
 
 	if (req->req.sensorType != rsp->rsp.sensorType || req->req.action != rsp->rsp.action) {
 		SCP_PR_ERR("sensor type %d != %d action %d != %d\n",
 			req->req.sensorType, rsp->rsp.sensorType, req->req.action, rsp->rsp.action);
 	} else {
-		if (txrx_cmd.context == NULL)
-			SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
-		else {
-			memcpy(txrx_cmd.rx, rsp, rx_len);
-			txrx_cmd.count = rx_len;
-			complete(txrx_cmd.context);
-		}
+		memcpy(txrx_cmd.rx, rsp, rx_len);
+		txrx_cmd.count = rx_len;
+		complete(txrx_cmd.context);
 	}
 }
 static void SCP_sensorHub_set_cust_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	SCP_SENSOR_HUB_DATA_P req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
+	SCP_SENSOR_HUB_DATA_P req;
+
+	if (txrx_cmd.context == NULL) {
+		SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
+		return;
+	}
+
+	req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
 
 	if (req->req.sensorType != rsp->rsp.sensorType || req->req.action != rsp->rsp.action) {
 		SCP_PR_ERR("sensor type %d != %d action %d != %d\n",
 			req->req.sensorType, rsp->rsp.sensorType, req->req.action, rsp->rsp.action);
 	} else {
-		if (txrx_cmd.context == NULL)
-			SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
-		else {
-			memcpy(txrx_cmd.rx, rsp, rx_len);
-			txrx_cmd.count = rx_len;
-			complete(txrx_cmd.context);
-		}
+		memcpy(txrx_cmd.rx, rsp, rx_len);
+		txrx_cmd.count = rx_len;
+		complete(txrx_cmd.context);
 	}
 }
 static void SCP_sensorHub_batch_timeout_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	SCP_SENSOR_HUB_DATA_P req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
+	SCP_SENSOR_HUB_DATA_P req;
+
+	if (txrx_cmd.context == NULL) {
+		SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
+		return;
+	}
+
+	req = (SCP_SENSOR_HUB_DATA_P)txrx_cmd.tx;
 
 	if (req->req.sensorType != rsp->rsp.sensorType || req->req.action != rsp->rsp.action) {
 		SCP_PR_ERR("sensor type %d != %d action %d != %d\n",
 			req->req.sensorType, rsp->rsp.sensorType, req->req.action, rsp->rsp.action);
 	} else {
-		if (txrx_cmd.context == NULL)
-			SCP_PR_ERR("after ipi transfer timeout ack occur then dropped this\n");
-		else {
-			memcpy(txrx_cmd.rx, rsp, rx_len);
-			txrx_cmd.count = rx_len;
-			complete(txrx_cmd.context);
-		}
+		memcpy(txrx_cmd.rx, rsp, rx_len);
+		txrx_cmd.count = rx_len;
+		complete(txrx_cmd.context);
 	}
 }
 static void SCP_sensorHub_set_timestamp_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
@@ -608,7 +671,7 @@ static void SCP_sensorHub_moving_average(SCP_SENSOR_HUB_DATA_P rsp)
 	uint64_t ipi_transfer_time = 0;
 
 	if (READ_ONCE(rtc_compensation_suspend)) {
-		SCP_PR_ERR("rtc_compensation_suspend is suspended, so drop run algo\n");
+		pr_err_ratelimited("rtc_compensation_suspend is suspended, so drop run algo\n");
 		return;
 	}
 	ap_now_time = ktime_get_boot_ns();
@@ -620,7 +683,7 @@ static void SCP_sensorHub_moving_average(SCP_SENSOR_HUB_DATA_P rsp)
 }
 static void SCP_sensorHub_notify_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 {
-	struct SCP_sensorHub_data *obj = obj_data;
+	/* struct SCP_sensorHub_data *obj = obj_data; */
 #if 0
 	struct data_unit_t *event;
 	int handle = 0;
@@ -661,7 +724,9 @@ static void SCP_sensorHub_notify_cmd(SCP_SENSOR_HUB_DATA_P rsp, int rx_len)
 	case SCP_INIT_DONE:
 		atomic_set(&power_status, SENSOR_POWER_UP);
 		scp_power_monitor_notify(SENSOR_POWER_UP, NULL);
-		schedule_work(&obj->power_up_work);
+		/* schedule_work(&obj->power_up_work); */
+		WRITE_ONCE(power_reset_wait_condition, true);
+		wake_up(&power_reset_wait);
 		break;
 #endif
 	default:
@@ -708,7 +773,7 @@ static void SCP_sensorHub_IPI_handler(int id, void *data, unsigned int len)
 	SCP_SENSOR_HUB_DATA_P rsp = (SCP_SENSOR_HUB_DATA_P) data;
 	const struct SCP_sensorHub_Cmd *cmd;
 
-	if (len > SENSOR_DATA_SIZE) {
+	if (len > SENSOR_IPI_SIZE) {
 		SCP_PR_ERR("SCP_sensorHub_IPI_handler len=%d error\n", len);
 		return;
 	}
@@ -830,6 +895,13 @@ static void SCP_sensorHub_init_sensor_state(void)
 	mSensorState[ID_FLOOR_COUNTER].sensorType = ID_FLOOR_COUNTER;
 	mSensorState[ID_FLOOR_COUNTER].rate = SENSOR_RATE_ONCHANGE;
 	mSensorState[ID_FLOOR_COUNTER].timestamp_filter = false;
+
+	mSensorState[ID_FLAT].sensorType = ID_FLAT;
+	mSensorState[ID_FLAT].rate = SENSOR_RATE_ONESHOT;
+	mSensorState[ID_FLAT].timestamp_filter = false;
+
+	mSensorState[ID_RGBW].sensorType = ID_RGBW;
+	mSensorState[ID_RGBW].timestamp_filter = false;
 }
 
 static void init_sensor_config_cmd(struct ConfigCmd *cmd, int handle)
@@ -867,12 +939,15 @@ static int SCP_sensorHub_batch(int handle, int flag, long long samplingPeriodNs,
 {
 	struct ConfigCmd cmd;
 	int ret = 0;
+	uint64_t rate = 1024000000000ULL;
 
 	if (mSensorState[handle].sensorType || (handle == ID_ACCELEROMETER &&
 				mSensorState[handle].sensorType == ID_ACCELEROMETER)) {
 		if (samplingPeriodNs > 0 && mSensorState[handle].rate != SENSOR_RATE_ONCHANGE &&
-			mSensorState[handle].rate != SENSOR_RATE_ONESHOT)
-			mSensorState[handle].rate = 1024000000000ULL / samplingPeriodNs;
+			mSensorState[handle].rate != SENSOR_RATE_ONESHOT) {
+			rate = div64_u64(rate, samplingPeriodNs);
+			mSensorState[handle].rate = rate;
+		}
 		mSensorState[handle].latency = maxBatchReportLatencyNs;
 		init_sensor_config_cmd(&cmd, handle);
 		if (atomic_read(&power_status) == SENSOR_POWER_UP) {
@@ -927,11 +1002,11 @@ static int SCP_sensorHub_report_data(struct data_unit_t *data_t)
 	/* int64_t now_enter_timestamp = 0;
 	 * now_enter_timestamp = ktime_get_boot_ns();
 	 * SCP_PR_ERR("type:%d,now time:%lld, scp time: %lld\n",
-	 *	data_t->sensor_type, now_enter_timestamp, (data_t->time_stamp + data_t->time_stamp_gpt));
+	 *	data_t->sensor_type, now_enter_timestamp, data_t->time_stamp);
 	*/
 	sensor_type = data_t->sensor_type;
-	data_t->time_stamp_gpt = get_filter_output(&moving_average_algo);
-	/* pr_err("hongxu compensation_offset=%lld\n", data_t->time_stamp_gpt); */
+	data_t->time_stamp += get_filter_output(&moving_average_algo);
+	/* pr_debug("compensation_offset=%lld\n", get_filter_output(&moving_average_algo)); */
 	alt = ACCESS_ONCE(mSensorState[sensor_type].alt);
 	if (!alt) {
 		raw_enable = ACCESS_ONCE(mSensorState[sensor_type].enable);
@@ -956,7 +1031,8 @@ static int SCP_sensorHub_report_data(struct data_unit_t *data_t)
 			need_send = true;
 		else {
 			/* timestamp filter, drop events which timestamp equal to each other at 1 ms */
-			timestamp_ms = (int64_t)(data_t->time_stamp + data_t->time_stamp_gpt) / 1000000;
+			timestamp_ms = (int64_t)data_t->time_stamp;
+			timestamp_ms = div_s64(timestamp_ms, 1000000);
 			if (last_timestamp_ms[sensor_type] != timestamp_ms) {
 				last_timestamp_ms[sensor_type] = timestamp_ms;
 				need_send = true;
@@ -1022,7 +1098,7 @@ static int SCP_sensorHub_server_dispatch_data(uint32_t *currWp)
 				err = SCP_sensorHub_report_data(&event);
 				if (err < 0) {
 					usleep_range(2000, 4000);
-					SCP_PR_ERR("event buffer full, so sleep some time\n");
+					pr_err_ratelimited("event buffer full, so sleep some time\n");
 				}
 			} while (err < 0);
 			rp += SENSOR_DATA_SIZE;
@@ -1034,7 +1110,7 @@ static int SCP_sensorHub_server_dispatch_data(uint32_t *currWp)
 				err = SCP_sensorHub_report_data(&event);
 				if (err < 0) {
 					usleep_range(2000, 4000);
-					SCP_PR_ERR("event buffer full, so sleep some time\n");
+					pr_err_ratelimited("event buffer full, so sleep some time\n");
 				}
 			} while (err < 0);
 			rp += SENSOR_DATA_SIZE;
@@ -1046,7 +1122,7 @@ static int SCP_sensorHub_server_dispatch_data(uint32_t *currWp)
 				err = SCP_sensorHub_report_data(&event);
 				if (err < 0) {
 					usleep_range(2000, 4000);
-					SCP_PR_ERR("event buffer full, so sleep some time\n");
+					pr_err_ratelimited("event buffer full, so sleep some time\n");
 				}
 			} while (err < 0);
 			rp += SENSOR_DATA_SIZE;
@@ -1284,7 +1360,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 	switch (sensorType) {
 	case ID_ACCELEROMETER:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->accelerometer_t.x = data_t->accelerometer_t.x;
 		data->accelerometer_t.y = data_t->accelerometer_t.y;
 		data->accelerometer_t.z = data_t->accelerometer_t.z;
@@ -1295,7 +1370,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_GRAVITY:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->accelerometer_t.x = data_t->accelerometer_t.x;
 		data->accelerometer_t.y = data_t->accelerometer_t.y;
 		data->accelerometer_t.z = data_t->accelerometer_t.z;
@@ -1303,7 +1377,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_LINEAR_ACCELERATION:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->accelerometer_t.x = data_t->accelerometer_t.x;
 		data->accelerometer_t.y = data_t->accelerometer_t.y;
 		data->accelerometer_t.z = data_t->accelerometer_t.z;
@@ -1311,24 +1384,20 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_LIGHT:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->light = data_t->light;
 		break;
 	case ID_PROXIMITY:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->proximity_t.steps = data_t->proximity_t.steps;
 		data->proximity_t.oneshot = data_t->proximity_t.oneshot;
 		break;
 	case ID_PRESSURE:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->pressure_t.pressure = data_t->pressure_t.pressure;
 		data->pressure_t.status = data_t->pressure_t.status;
 		break;
 	case ID_GYROSCOPE:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->gyroscope_t.x = data_t->gyroscope_t.x;
 		data->gyroscope_t.y = data_t->gyroscope_t.y;
 		data->gyroscope_t.z = data_t->gyroscope_t.z;
@@ -1339,7 +1408,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_GYROSCOPE_UNCALIBRATED:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->uncalibrated_gyro_t.x = data_t->uncalibrated_gyro_t.x;
 		data->uncalibrated_gyro_t.y = data_t->uncalibrated_gyro_t.y;
 		data->uncalibrated_gyro_t.z = data_t->uncalibrated_gyro_t.z;
@@ -1350,14 +1418,12 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_RELATIVE_HUMIDITY:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->relative_humidity_t.relative_humidity =
 		data_t->relative_humidity_t.relative_humidity;
 		data->relative_humidity_t.status = data_t->relative_humidity_t.status;
 		break;
 	case ID_MAGNETIC:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->magnetic_t.x = data_t->magnetic_t.x;
 		data->magnetic_t.y = data_t->magnetic_t.y;
 		data->magnetic_t.z = data_t->magnetic_t.z;
@@ -1368,7 +1434,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_MAGNETIC_UNCALIBRATED:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->uncalibrated_mag_t.x = data_t->uncalibrated_mag_t.x;
 		data->uncalibrated_mag_t.y = data_t->uncalibrated_mag_t.y;
 		data->uncalibrated_mag_t.z = data_t->uncalibrated_mag_t.z;
@@ -1379,7 +1444,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_GEOMAGNETIC_ROTATION_VECTOR:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->magnetic_t.x = data_t->magnetic_t.x;
 		data->magnetic_t.y = data_t->magnetic_t.y;
 		data->magnetic_t.z = data_t->magnetic_t.z;
@@ -1388,7 +1452,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_ORIENTATION:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->orientation_t.azimuth = data_t->orientation_t.azimuth;
 		data->orientation_t.pitch = data_t->orientation_t.pitch;
 		data->orientation_t.roll = data_t->orientation_t.roll;
@@ -1396,7 +1459,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_ROTATION_VECTOR:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->orientation_t.azimuth = data_t->orientation_t.azimuth;
 		data->orientation_t.pitch = data_t->orientation_t.pitch;
 		data->orientation_t.roll = data_t->orientation_t.roll;
@@ -1405,7 +1467,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_GAME_ROTATION_VECTOR:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->orientation_t.azimuth = data_t->orientation_t.azimuth;
 		data->orientation_t.pitch = data_t->orientation_t.pitch;
 		data->orientation_t.roll = data_t->orientation_t.roll;
@@ -1414,29 +1475,24 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_STEP_COUNTER:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->step_counter_t.accumulated_step_count
 		    = data_t->step_counter_t.accumulated_step_count;
 		break;
 	case ID_STEP_DETECTOR:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->step_detector_t.step_detect = data_t->step_detector_t.step_detect;
 		break;
 	case ID_SIGNIFICANT_MOTION:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->smd_t.state = data_t->smd_t.state;
 		break;
 	case ID_HEART_RATE:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->heart_rate_t.bpm = data_t->heart_rate_t.bpm;
 		data->heart_rate_t.status = data_t->heart_rate_t.status;
 		break;
 	case ID_PEDOMETER:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->pedometer_t.accumulated_step_count =
 		    data_t->pedometer_t.accumulated_step_count;
 		data->pedometer_t.accumulated_step_length =
@@ -1446,7 +1502,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_ACTIVITY:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->activity_data_t.probability[STILL] =
 		    data_t->activity_data_t.probability[STILL];
 		data->activity_data_t.probability[STANDING] =
@@ -1474,32 +1529,26 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_IN_POCKET:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->inpocket_event.state = data_t->inpocket_event.state;
 		break;
 	case ID_PICK_UP_GESTURE:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->gesture_data_t.probability = data_t->gesture_data_t.probability;
 		break;
 	case ID_TILT_DETECTOR:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->tilt_event.state = data_t->tilt_event.state;
 		break;
 	case ID_WAKE_GESTURE:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->gesture_data_t.probability = data_t->gesture_data_t.probability;
 		break;
 	case ID_GLANCE_GESTURE:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->gesture_data_t.probability = data_t->gesture_data_t.probability;
 		break;
 	case ID_PDR:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->pdr_event.x = data_t->pdr_event.x;
 		data->pdr_event.y = data_t->pdr_event.y;
 		data->pdr_event.z = data_t->pdr_event.z;
@@ -1507,7 +1556,6 @@ int sensor_get_data_from_hub(uint8_t sensorType, struct data_unit_t *data)
 		break;
 	case ID_FLOOR_COUNTER:
 		data->time_stamp = data_t->time_stamp;
-		data->time_stamp_gpt = data_t->time_stamp_gpt;
 		data->floor_counter_t.accumulated_floor_count
 		    = data_t->floor_counter_t.accumulated_floor_count;
 		break;
@@ -1814,53 +1862,64 @@ int sensor_set_cmd_to_hub(uint8_t sensorType, CUST_ACTION action, void *data)
 	return err;
 }
 
-static void sensorHub_power_up_work(struct work_struct *work)
+static int sensorHub_power_up_work(void *data)
 {
 	int ret = 0;
 	int handle = 0, flush_cnt = 0;
 	struct ConfigCmd cmd;
 	struct SCP_sensorHub_data *obj = obj_data;
 
-	/* firstly we should update dram information */
-	/* 1. reset wp queue head and tail */
-	obj->wp_queue.head = 0;
-	obj->wp_queue.tail = 0;
-	/* 2. init dram information */
-	obj->SCP_sensorFIFO = (struct sensorFIFO *)scp_get_reserve_mem_virt(SENS_MEM_ID);
-	WARN_ON(obj->SCP_sensorFIFO == NULL);
-	obj->SCP_sensorFIFO->wp = 0;
-	obj->SCP_sensorFIFO->rp = 0;
-	obj->SCP_sensorFIFO->FIFOSize =
-		(SCP_SENSOR_HUB_FIFO_SIZE - offsetof(struct sensorFIFO, data)) / SENSOR_DATA_SIZE * SENSOR_DATA_SIZE;
-	SCP_LOG("obj->SCP_sensorFIFO = %p, wp = %d, rp = %d, size = %d\n", obj->SCP_sensorFIFO,
-		obj->SCP_sensorFIFO->wp, obj->SCP_sensorFIFO->rp, obj->SCP_sensorFIFO->FIFOSize);
-#ifndef CHRE_POWER_RESET_NOTIFY
-	/* 3. wait for chre init done when don't support power reset feature */
-	msleep(2000);
-#endif
-	/* 4. send dram information to scp */
-	sensor_send_dram_info_to_hub();
-	/* secondly we enable sensor which sensor is enable by framework */
-	mutex_lock(&mSensorState_mtx);
-	for (handle = 0; handle < ID_SENSOR_MAX_HANDLE + 1; handle++) {
-		if ((mSensorState[handle].sensorType || (handle == ID_ACCELEROMETER &&
-				mSensorState[handle].sensorType == ID_ACCELEROMETER)) && mSensorState[handle].enable) {
-			init_sensor_config_cmd(&cmd, handle);
-			SCP_LOG("restoring: handle=%d, enable=%d, rate=%d, latency=%lld\n", handle,
-				mSensorState[handle].enable, mSensorState[handle].rate, mSensorState[handle].latency);
-			ret = nanohub_external_write((const uint8_t *)&cmd, sizeof(struct ConfigCmd));
-			if (ret < 0)
-				SCP_PR_ERR("failed registerlistener handle:%d, cmd:%d\n", handle, cmd.cmd);
 
-			cmd.cmd = CONFIG_CMD_FLUSH;
-			for (flush_cnt = 0; flush_cnt < atomic_read(&mSensorState[handle].flushCnt); flush_cnt++) {
+	for (;;) {
+		wait_event(power_reset_wait, READ_ONCE(power_reset_wait_condition));
+		WRITE_ONCE(power_reset_wait_condition, false);
+
+		/* firstly we should update dram information */
+		/* 1. reset wp queue head and tail */
+		obj->wp_queue.head = 0;
+		obj->wp_queue.tail = 0;
+		/* 2. init dram information */
+		obj->SCP_sensorFIFO = (struct sensorFIFO *)(long)scp_get_reserve_mem_virt(SENS_MEM_ID);
+		WARN_ON(obj->SCP_sensorFIFO == NULL);
+		obj->SCP_sensorFIFO->wp = 0;
+		obj->SCP_sensorFIFO->rp = 0;
+		obj->SCP_sensorFIFO->FIFOSize =
+				(SCP_SENSOR_HUB_FIFO_SIZE - offsetof(struct sensorFIFO, data)) /
+				SENSOR_DATA_SIZE * SENSOR_DATA_SIZE;
+		SCP_LOG("obj->SCP_sensorFIFO = %p, wp = %d, rp = %d, size = %d\n", obj->SCP_sensorFIFO,
+			obj->SCP_sensorFIFO->wp, obj->SCP_sensorFIFO->rp, obj->SCP_sensorFIFO->FIFOSize);
+#ifndef CHRE_POWER_RESET_NOTIFY
+		/* 3. wait for chre init done when don't support power reset feature */
+		msleep(2000);
+#endif
+		/* 4. send dram information to scp */
+		sensor_send_dram_info_to_hub();
+		/* secondly we enable sensor which sensor is enable by framework */
+		mutex_lock(&mSensorState_mtx);
+		for (handle = 0; handle < ID_SENSOR_MAX_HANDLE + 1; handle++) {
+			if ((mSensorState[handle].sensorType || (handle == ID_ACCELEROMETER &&
+					mSensorState[handle].sensorType == ID_ACCELEROMETER)) &&
+					mSensorState[handle].enable) {
+				init_sensor_config_cmd(&cmd, handle);
+				SCP_LOG("restoring: handle=%d, enable=%d, rate=%d, latency=%lld\n", handle,
+					mSensorState[handle].enable, mSensorState[handle].rate,
+					mSensorState[handle].latency);
 				ret = nanohub_external_write((const uint8_t *)&cmd, sizeof(struct ConfigCmd));
 				if (ret < 0)
-					SCP_PR_ERR("failed flush handle:%d\n", handle);
+					pr_notice("failed registerlistener handle:%d, cmd:%d\n", handle, cmd.cmd);
+
+				cmd.cmd = CONFIG_CMD_FLUSH;
+				for (flush_cnt = 0; flush_cnt < atomic_read(&mSensorState[handle].flushCnt);
+					flush_cnt++) {
+					ret = nanohub_external_write((const uint8_t *)&cmd, sizeof(struct ConfigCmd));
+					if (ret < 0)
+						pr_notice("failed flush handle:%d\n", handle);
+				}
 			}
 		}
+		mutex_unlock(&mSensorState_mtx);
 	}
-	mutex_unlock(&mSensorState_mtx);
+	return 0;
 }
 static int sensorHub_ready_event(struct notifier_block *this, unsigned long event, void *ptr)
 {
@@ -1876,7 +1935,9 @@ static int sensorHub_ready_event(struct notifier_block *this, unsigned long even
 	if (event == SCP_EVENT_READY) {
 		atomic_set(&power_status, SENSOR_POWER_UP);
 		scp_power_monitor_notify(SENSOR_POWER_UP, ptr);
-		schedule_work(&obj->power_up_work);
+		/* schedule_work(&obj->power_up_work); */
+		WRITE_ONCE(power_reset_wait_condition, true);
+		wake_up(&power_reset_wait);
 	}
 #endif
 	return NOTIFY_DONE;
@@ -1890,6 +1951,7 @@ static int sensorHub_probe(struct platform_device *pdev)
 	struct SCP_sensorHub_data *obj;
 	int err = 0, index;
 	struct task_struct *task = NULL;
+	struct task_struct *task_power_reset = NULL;
 	struct sched_param param = { .sched_priority = MAX_RT_PRIO - 1 };
 
 	SCP_FUN();
@@ -1948,12 +2010,18 @@ static int sensorHub_probe(struct platform_device *pdev)
 	/* this call back can get scp power down status */
 	scp_A_register_notify(&sensorHub_ready_notifier);
 	/* this call back can get scp power UP status */
-	INIT_WORK(&obj->power_up_work, sensorHub_power_up_work);
+	/* INIT_WORK(&obj->power_up_work, sensorHub_power_up_work); */
+	task_power_reset = kthread_run(sensorHub_power_up_work, NULL, "scp_power_reset");
+	if (IS_ERR(task_power_reset)) {
+		SCP_PR_ERR("sensorHub_power_up_work create fail!\n");
+		goto exit;
+	}
 
 	SCP_sensorHub_init_flag = 0;
 	SCP_LOG("init done, data_unit_t size: %d, SCP_SENSOR_HUB_DATA size:%d\n",
 		(int)sizeof(struct data_unit_t), (int)sizeof(SCP_SENSOR_HUB_DATA));
-	WARN_ON(sizeof(struct data_unit_t) != SENSOR_DATA_SIZE || sizeof(SCP_SENSOR_HUB_DATA) != SENSOR_DATA_SIZE);
+	WARN_ON(sizeof(struct data_unit_t) != SENSOR_DATA_SIZE
+		|| sizeof(SCP_SENSOR_HUB_DATA) != SENSOR_IPI_SIZE);
 	return 0;
 exit:
 	SCP_PR_ERR("%s: err = %d\n", __func__, err);
@@ -2081,12 +2149,12 @@ static int sensorHub_pm_event(struct notifier_block *notifier, unsigned long pm_
 {
 	switch (pm_event) {
 	case PM_POST_SUSPEND:
-		SCP_LOG("resume\n");
+		SCP_LOG("resume bootime=%lld\n", ktime_get_boot_ns());
 		WRITE_ONCE(rtc_compensation_suspend, false);
 		sensor_send_timestamp_to_hub();
 		return NOTIFY_DONE;
 	case PM_SUSPEND_PREPARE:
-		SCP_LOG("suspend\n");
+		SCP_LOG("suspend bootime=%lld\n", ktime_get_boot_ns());
 		WRITE_ONCE(rtc_compensation_suspend, true);
 		return NOTIFY_DONE;
 	default:

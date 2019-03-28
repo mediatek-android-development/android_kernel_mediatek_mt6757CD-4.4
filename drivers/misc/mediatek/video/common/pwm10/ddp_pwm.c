@@ -26,7 +26,8 @@
 	defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
 	defined(CONFIG_MACH_ELBRUS) || defined(CONFIG_MACH_MT6799) || \
 	defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6763) || \
-	defined(CONFIG_MACH_MT6739) || defined(CONFIG_MACH_MT6758)
+	defined(CONFIG_MACH_MT6739) || defined(CONFIG_MACH_MT6758) || \
+	defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
 #include <ddp_clkmgr.h>
 #endif
 #endif
@@ -53,10 +54,9 @@
 static int pwm_dbg_en;
 #define PWM_ERR(fmt, arg...) pr_err("[PWM] " fmt "\n", ##arg)
 #define PWM_NOTICE(fmt, arg...) pr_warn("[PWM] " fmt "\n", ##arg)
-#define PWM_MSG(fmt, arg...) \
-	do { if (pwm_dbg_en) pr_debug("[PWM][MSG] " fmt "\n", ##arg); } while (0)
+#define PWM_MSG(fmt, arg...) pr_debug("[PWM] " fmt "\n", ##arg)
 #define PWM_DBG(fmt, arg...) \
-	do { if (pwm_dbg_en) pr_debug("[PWM] " fmt "\n", ##arg); } while (0)
+	do { if (pwm_dbg_en) pr_warn("[PWM] " fmt "\n", ##arg); } while (0)
 
 #define PWM_LOG_BUFFER_SIZE 8
 
@@ -295,15 +295,17 @@ static int disp_pwm_config(enum DISP_MODULE_ENUM module, struct disp_ddp_path_co
 static void disp_pwm_trigger_refresh(enum disp_pwm_id_t id, int quick)
 {
 	if (g_ddp_notify != NULL) {
-#if defined(CONFIG_MTK_AAL_SUPPORT) && defined(DISP_PATH_DELAYED_TRIGGER_33ms_SUPPORT)
-		if (quick) { /* Turn off backlight immediately */
-			g_ddp_notify(DISP_MODULE_PWM0, DISP_PATH_EVENT_TRIGGER);
-		} else {
-			/*
-			 * If AAL is present, AAL will dominate the refresh rate,
-			 * maybe 17ms or 33ms. 33ms will be the upper bound of latency.
-			 */
-			g_ddp_notify(DISP_MODULE_PWM0, DISP_PATH_EVENT_DELAYED_TRIGGER_33ms);
+#if defined(DISP_PATH_DELAYED_TRIGGER_33ms_SUPPORT)
+		if (disp_aal_is_support() == true) {
+			if (quick) { /* Turn off backlight immediately */
+				g_ddp_notify(DISP_MODULE_PWM0, DISP_PATH_EVENT_TRIGGER);
+			} else {
+				/*
+				* If AAL is present, AAL will dominate the refresh rate,
+				* maybe 17ms or 33ms. 33ms will be the upper bound of latency.
+				*/
+				g_ddp_notify(DISP_MODULE_PWM0, DISP_PATH_EVENT_DELAYED_TRIGGER_33ms);
+			}
 		}
 #else
 		g_ddp_notify(DISP_MODULE_PWM0, DISP_PATH_EVENT_TRIGGER);
@@ -574,11 +576,11 @@ static int ddp_pwm_power_on(enum DISP_MODULE_ENUM module, void *handle)
 	enum disp_pwm_id_t id = pwm_get_id_from_module(module);
 	int ret = -1;
 
-#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) \
-	|| defined(CONFIG_MACH_MT6739)
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || \
+	defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6739)
 	/* pwm ccf api */
 	ddp_clk_prepare_enable(ddp_get_module_clk_id(module));
-#elif defined(CONFIG_MACH_MT6763)
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6771)
 	ddp_clk_prepare_enable(ddp_get_module_clk_id(module));
 	ddp_clk_prepare_enable(TOP_MUX_DISP_PWM);
 #else
@@ -628,11 +630,11 @@ static int ddp_pwm_power_off(enum DISP_MODULE_ENUM module, void *handle)
 
 	disp_pwm_backlight_status(id, 1);
 
-#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) \
-	|| defined(CONFIG_MACH_MT6739)
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || \
+	defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6739)
 	/* pwm ccf api */
 	ddp_clk_disable_unprepare(ddp_get_module_clk_id(module));
-#elif defined(CONFIG_MACH_MT6763)
+#elif defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6771)
 	ddp_clk_disable_unprepare(ddp_get_module_clk_id(module));
 	ddp_clk_disable_unprepare(TOP_MUX_DISP_PWM);
 #else
@@ -704,7 +706,8 @@ bool disp_pwm_is_osc(void)
 #if defined(CONFIG_MACH_MT6757) || defined(CONFIG_MACH_KIBOPLUS) || \
 	defined(CONFIG_MACH_MT6799) || defined(CONFIG_MACH_MT6759) || \
 	defined(CONFIG_MACH_MT6763) || defined(CONFIG_MACH_MT6739) || \
-	defined(CONFIG_MACH_MT6758)
+	defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6775) || \
+	defined(CONFIG_MACH_MT6771)
 
 	is_osc = disp_pwm_mux_is_osc();
 #endif

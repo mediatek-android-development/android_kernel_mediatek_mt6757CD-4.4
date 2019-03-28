@@ -41,6 +41,7 @@
 #include <ext_wd_drv.h>
 #endif
 #include "aee-common.h"
+#include <ipanic.h>
 #include <mt-plat/mtk_secure_api.h>
 #ifdef CONFIG_MTK_EIC_HISTORY_DUMP
 #include <linux/irqchip/mtk-eic.h>
@@ -49,6 +50,7 @@
 #include <mt-plat/mtk_ram_console.h>
 #endif
 #include <mrdump_private.h>
+#include <mt-plat/upmu_common.h>
 
 #define THREAD_INFO(sp) ((struct thread_info *) \
 				((unsigned long)(sp) & ~(THREAD_SIZE - 1)))
@@ -431,6 +433,8 @@ static void aee_save_reg_stack_sram(int cpu)
 	}
 
 	mrdump_mini_per_cpu_regs(cpu, &regs_buffer_bin[cpu].regs, regs_buffer_bin[cpu].tsk);
+
+	mrdump_save_per_cpu_reg(cpu, &regs_buffer_bin[cpu].regs);
 }
 
 void aee_wdt_irq_info(void)
@@ -534,6 +538,12 @@ void aee_wdt_atf_info(unsigned int cpu, struct pt_regs *regs)
 		aee_wdt_printf("Invalid atf_aee_debug_virt_addr, no register dump\n");
 	}
 
+	/* add __per_cpu_offset */
+	mrdump_mini_add_entry((unsigned long)__per_cpu_offset, MRDUMP_MINI_SECTION_SIZE);
+
+	/* add info for minidump */
+	mrdump_mini_ke_cpu_regs(regs);
+
 #ifdef CONFIG_MTK_SCHED_MONITOR
 #ifdef CONFIG_MTK_RAM_CONSOLE
 	aee_rr_rec_fiq_step(AEE_FIQ_STEP_WDT_IRQ_SCHED);
@@ -561,7 +571,7 @@ void aee_wdt_atf_info(unsigned int cpu, struct pt_regs *regs)
 #endif
 		__mrdump_create_oops_dump(AEE_REBOOT_MODE_WDT, regs, "WDT/HWT");
 
-	emergency_restart();
+	aee_exception_reboot();
 }
 
 void notrace aee_wdt_atf_entry(void)
@@ -574,14 +584,27 @@ void notrace aee_wdt_atf_entry(void)
 	int cpu = get_HW_cpuid();
 #ifdef CONFIG_MTK_RAM_CONSOLE
 #ifdef CONFIG_MTK_WATCHDOG
-	if (mtk_rgu_status_is_sysrst() || mtk_rgu_status_is_eintrst())
+	if (mtk_rgu_status_is_sysrst() || mtk_rgu_status_is_eintrst()) {
+#ifdef CONFIG_MTK_PMIC_COMMON
+		if (pmic_get_register_value(PMIC_JUST_SMART_RST) == 1) {
+			pr_notice("SMART RESET: TRUE\n");
+			aee_sram_fiq_log("SMART RESET: TRUE\n");
+		} else {
+			pr_notice("SMART RESET: FALSE\n");
+			aee_sram_fiq_log("SMART RESET: FALSE\n");
+		}
+#endif
 		aee_rr_rec_exp_type(4);
-	else
+	} else
 		aee_rr_rec_exp_type(1);
 #else
 	aee_rr_rec_exp_type(1);
 #endif
 #endif
+
+	/* for per-cpu control registers */
+	mrdump_save_ctrlreg();
+
 	__disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2();
 
 	if (atf_aee_debug_virt_addr) {

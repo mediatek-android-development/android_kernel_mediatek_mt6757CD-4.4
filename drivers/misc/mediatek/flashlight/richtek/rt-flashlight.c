@@ -581,14 +581,5 @@ module_exit(flashlight_class_exit);
 
 MODULE_DESCRIPTION("Flashlight Class Device");
 MODULE_AUTHOR("Patrick Chang <patrick_chang@richtek.com>");
-MODULE_VERSION("1.0.3_MTK");
+MODULE_VERSION("1.0.2_G");
 MODULE_LICENSE("GPL");
-
-/*
- * Version Note
- * 1.0.3_MTK
- * (1) Remove typedef
- *
- * 1.0.2_MTK
- * (1) Initial Release
- */

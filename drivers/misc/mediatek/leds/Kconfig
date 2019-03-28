@@ -30,3 +30,7 @@ config BACKLIGHT_SUPPORT_LM3697
 	  Set y to support.
 	  Set n to disable.
 	  Charge pump driver for external backlight.
+
+config LED_BREATHLIGHT_AW2013
+    tristate "breathlight aw2013"
+    default n

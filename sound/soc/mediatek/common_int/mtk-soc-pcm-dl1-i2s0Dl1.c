@@ -62,9 +62,6 @@
 #include "mtk-soc-afe-control.h"
 #include "mtk-soc-pcm-platform.h"
 
-#ifdef CONFIG_MTK_ACAO_SUPPORT
-#include "mtk_mcdi_governor_hint.h"
-#endif
 
 static struct afe_mem_control_t *pI2S0dl1MemControl;
 static struct snd_dma_buffer Dl1I2S0_Playback_dma_buf;
@@ -107,7 +104,7 @@ static int Audio_I2S0dl1_hdoutput_Get(struct snd_kcontrol *kcontrol,
 static int Audio_I2S0dl1_hdoutput_Set(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
-	pr_warn("%s()\n", __func__);
+	/* pr_debug("%s()\n", __func__); */
 	if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(I2S0dl1_HD_output)) {
 		pr_warn("return -EINVAL\n");
 		return -EINVAL;
@@ -212,6 +209,7 @@ static int mtk_pcm_I2S0dl1_hw_params(struct snd_pcm_substream *substream,
 
 	substream->runtime->dma_bytes = params_buffer_bytes(hw_params);
 	if (substream->runtime->dma_bytes <= GetPLaybackSramFullSize() &&
+	    !pI2S0dl1MemControl->mAssignDRAM &&
 	    AllocateAudioSram(&substream->runtime->dma_addr,
 			      &substream->runtime->dma_area,
 			      substream->runtime->dma_bytes,
@@ -219,6 +217,7 @@ static int mtk_pcm_I2S0dl1_hw_params(struct snd_pcm_substream *substream,
 			      params_format(hw_params), false) == 0) {
 		SetHighAddr(Soc_Aud_Digital_Block_MEM_DL1, false, substream->runtime->dma_addr);
 	} else {
+		pr_debug("%s(), use DRAM\n", __func__);
 		substream->runtime->dma_area = Dl1I2S0_Playback_dma_buf.area;
 		substream->runtime->dma_addr = Dl1I2S0_Playback_dma_buf.addr;
 		SetHighAddr(Soc_Aud_Digital_Block_MEM_DL1, true, substream->runtime->dma_addr);
@@ -268,10 +267,6 @@ static int mtk_pcm_I2S0dl1_open(struct snd_pcm_substream *substream)
 	runtime->hw = mtk_I2S0dl1_hardware;
 
 	AudDrv_Clk_On();
-
-#ifdef CONFIG_MTK_ACAO_SUPPORT
-	system_idle_hint_request(SYSTEM_IDLE_HINT_USER_AUDIO, 1);
-#endif
 
 	memcpy((void *)(&(runtime->hw)), (void *)&mtk_I2S0dl1_hardware,
 	       sizeof(struct snd_pcm_hardware));
@@ -329,9 +324,8 @@ static int mtk_pcm_I2S0dl1_close(struct snd_pcm_substream *substream)
 				DisableALLbySampleRate(substream->runtime->rate);
 			}
 #if 0
-			EnableI2SDivPower(AUDIO_APLL12_DIV1, false);
-			EnableI2SDivPower(AUDIO_APLL12_DIV3, false);
-#else
+			/* EnableI2SDivPower(AUDIO_APLL12_DIV1, false); */
+			/* EnableI2SDivPower(AUDIO_APLL12_DIV3, false); */
 			EnableI2SCLKDiv(Soc_Aud_I2S1_MCKDIV, false);
 			EnableI2SCLKDiv(Soc_Aud_I2S3_MCKDIV, false);
 #endif
@@ -345,10 +339,6 @@ static int mtk_pcm_I2S0dl1_close(struct snd_pcm_substream *substream)
 	AudDrv_Clk_Off();
 
 	vcore_dvfs(&vcore_dvfs_enable, true);
-
-#ifdef CONFIG_MTK_ACAO_SUPPORT
-	system_idle_hint_request(SYSTEM_IDLE_HINT_USER_AUDIO, 0);
-#endif
 
 	return 0;
 }
@@ -406,13 +396,13 @@ static int mtk_pcm_I2S0dl1_prepare(struct snd_pcm_substream *substream)
 				EnableALLbySampleRate(runtime->rate);
 				EnableAPLLTunerbySampleRate(runtime->rate);
 			}
-
+#if 0
 			SetCLkMclk(Soc_Aud_I2S1, runtime->rate); /* select I2S */
 			SetCLkMclk(Soc_Aud_I2S3, runtime->rate);
-#if 0
-			EnableI2SDivPower(AUDIO_APLL12_DIV1, true);
-			EnableI2SDivPower(AUDIO_APLL12_DIV3, true);
-#else
+
+			/* EnableI2SDivPower(AUDIO_APLL12_DIV1, true); */
+			/* EnableI2SDivPower(AUDIO_APLL12_DIV3, true); */
+
 			EnableI2SCLKDiv(Soc_Aud_I2S1_MCKDIV, true);
 			EnableI2SCLKDiv(Soc_Aud_I2S3_MCKDIV, true);
 #endif

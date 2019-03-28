@@ -1479,8 +1479,10 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 	struct free_area *area;
 	struct page *page;
 
+#ifdef CONFIG_ZONE_MOVABLE_CMA
 	if (IS_ZONE_MOVABLE_CMA_ZONE(zone) && migratetype == MIGRATE_MOVABLE)
 		migratetype = MIGRATE_CMA;
+#endif
 
 	/* Find a page of the appropriate size in the preferred list */
 	for (current_order = order; current_order < MAX_ORDER; ++current_order) {
@@ -7090,7 +7092,8 @@ bool is_free_buddy_page(struct page *page)
 int free_reserved_memory(phys_addr_t start_phys,
 				phys_addr_t end_phys) {
 
-	void *start_virt, *end_virt;
+	phys_addr_t pos;
+	unsigned long pages = 0;
 
 	if (end_phys <= start_phys) {
 
@@ -7104,9 +7107,12 @@ int free_reserved_memory(phys_addr_t start_phys,
 			, __func__, &start_phys, &end_phys);
 		return -1;
 	}
-	start_virt = (void *)__phys_to_virt(start_phys);
-	end_virt = (void *)__phys_to_virt(end_phys);
-	free_reserved_area(start_virt, end_virt, -1, "modem");
+	for (pos = start_phys; pos < end_phys; pos += PAGE_SIZE, pages++)
+		free_reserved_page(phys_to_page(pos));
+
+	if (pages)
+		pr_info("Freeing modem memory: %ldK from phys %llx\n",
+			pages << (PAGE_SHIFT - 10), (unsigned long long)start_phys);
 	mtk_memcfg_record_freed_reserved(start_phys, end_phys);
 
 	return 0;

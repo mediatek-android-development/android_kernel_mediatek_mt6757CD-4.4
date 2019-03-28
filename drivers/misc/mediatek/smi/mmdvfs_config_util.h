@@ -15,6 +15,7 @@
 #ifndef __MMDVFS_CONFIG_UTIL_H__
 #define __MMDVFS_CONFIG_UTIL_H__
 
+#include <linux/module.h>
 #include "mtk_smi.h"
 #include "mmdvfs_mgr.h"
 
@@ -101,6 +102,12 @@ struct mmdvfs_profile {
 	struct mmdvfs_video_property video_limit;
 };
 
+struct mmdvfs_profile_mask {
+	const char *profile_name;
+	int smi_scenario_id;
+	int mask_opp;
+};
+
 /* HW Configuration Management */
 
 struct mmdvfs_clk_desc {
@@ -140,6 +147,12 @@ struct mmdvfs_step_to_profile_mapping {
 	struct mmdvfs_hw_configurtion hw_config;
 };
 
+/* For a single mmdvfs step's profiles and associated hardware configuration */
+struct mmdvfs_step_to_qos_step {
+	int mmdvfs_step;
+	int qos_step;
+};
+
 /* For VPU DVFS configuration */
 struct mmdvfs_vpu_steps_setting {
 	int vpu_dvfs_step;
@@ -171,7 +184,7 @@ struct mmdvfs_adaptor {
 	struct mmdvfs_video_property *codec_setting);
 	int (*apply_hw_configurtion_by_step)(struct mmdvfs_adaptor *self, int mmdvfs_step, int current_step);
 	int (*apply_vcore_hw_configurtion_by_step)(struct mmdvfs_adaptor *self, int mmdvfs_step);
-	int (*apply_clk_hw_configurtion_by_step)(struct mmdvfs_adaptor *self, int mmdvfs_step);
+	int (*apply_clk_hw_configurtion_by_step)(struct mmdvfs_adaptor *self, int mmdvfs_step, bool to_high);
 	int (*get_cam_sys_clk)(struct mmdvfs_adaptor *self, int mmdvfs_step);
 	/* static members */
 	void (*single_profile_dump_func)(struct mmdvfs_profile *profile);
@@ -237,7 +250,13 @@ extern struct mmdvfs_step_util *g_mmdvfs_step_util;
 extern struct mmdvfs_step_util *g_mmdvfs_non_force_step_util;
 
 extern struct mmdvfs_thresholds_dvfs_handler *g_mmdvfs_thresholds_dvfs_handler;
+extern u32 camera_bw_config;
 
 void mmdvfs_config_util_init(void);
 
+#ifdef CONFIG_MTK_QOS_SUPPORT
+void mmdvfs_qos_update(struct mmdvfs_step_util *step_util, int new_step);
+int set_qos_scenario(const char *val, const struct kernel_param *kp);
+int get_qos_scenario(char *buf, const struct kernel_param *kp);
+#endif
 #endif /* __MMDVFS_CONFIG_UTIL_H__ */

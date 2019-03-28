@@ -14,7 +14,7 @@
  *
  * Filename:
  * ---------
- *     GC2365mipi_Sensor.c
+ *     GC2366mipi_Sensor.c
  *
  * Project:
  * --------
@@ -46,8 +46,8 @@
 
 
 #include "gc2366mipi_Sensor.h"
-#define GC2366_DEFAULT_DUMMY_PIXEL_NUMS   0x2bf	/* HB */
-#define GC2366_DEFAULT_DUMMY_LINE_NUMS    0x10	/* VB */
+/*#define GC2366_DEFAULT_DUMMY_PIXEL_NUMS   0x2bf	HB */
+/*#define GC2366_DEFAULT_DUMMY_LINE_NUMS    0x10	VB */
 
 
 /****************************Modify Following Strings for Debug****************************/
@@ -165,7 +165,7 @@ static struct imgsensor_struct imgsensor = {
 	.gain = 0x40,		/* current gain */
 	.dummy_pixel = 0,	/* current dummypixel */
 	.dummy_line = 0,	/* current dummyline */
-	.current_fps = 300,
+	.current_fps = 300,	/* full size current fps : 24fps for PIP, 30fps for Normal or ZSD */
 	.autoflicker_en = KAL_FALSE,
 	.test_pattern = KAL_FALSE,
 	.current_scenario_id = MSDK_SCENARIO_ID_CAMERA_PREVIEW,	/* current scenario id */
@@ -211,23 +211,17 @@ static void write_cmos_sensor(kal_uint32 addr, kal_uint32 para)
 
 static void set_dummy(void)
 {
-	kal_uint32 hb = 0;
-	kal_uint32 vb = 0;
+	kal_uint32 vb = 16;
+	kal_uint32 basic_line = 1224;
 
 	LOG_INF("dummyline = %d, dummypixels = %d\n", imgsensor.dummy_line, imgsensor.dummy_pixel);
 
-	hb = imgsensor.dummy_pixel + GC2366_DEFAULT_DUMMY_PIXEL_NUMS;
-	vb = imgsensor.dummy_line + GC2366_DEFAULT_DUMMY_LINE_NUMS;
+	vb = imgsensor.frame_length - basic_line;
+	vb = (vb < 16) ? 16 : vb;
 
-	/* Set VB */
-	/* vb = (vb>>2)<<2; */
 	write_cmos_sensor(0x07, (vb >> 8) & 0x1F);
 	write_cmos_sensor(0x08, vb & 0xFF);
-	/* mdelay(50); */
-	/* end */
 
-
-/* end */
 }				/*    set_dummy  */
 
 static kal_uint32 return_sensor_id(void)
@@ -375,7 +369,7 @@ static kal_uint16 set_gain(kal_uint16 gain)
 		temp = iReg;
 		write_cmos_sensor(0xb1, temp >> 6);
 		write_cmos_sensor(0xb2, (temp << 2) & 0xfc);
-		LOG_INF("GC2365MIPI analogic gain 1x, GC2365MIPI add pregain = %d\n", temp);
+		LOG_INF("GC2366MIPI analogic gain 1x, GC2366MIPI add pregain = %d\n", temp);
 	} else if ((iReg >= ANALOG_GAIN_2) && (iReg < ANALOG_GAIN_3)) {
 		write_cmos_sensor(0xfe, 0x00);
 		/* analog gain */
@@ -384,7 +378,7 @@ static kal_uint16 set_gain(kal_uint16 gain)
 		temp = 64 * iReg / ANALOG_GAIN_2;
 		write_cmos_sensor(0xb1, temp >> 6);
 		write_cmos_sensor(0xb2, (temp << 2) & 0xfc);
-		LOG_INF("GC2365MIPI analogic gain 1.375x , GC2365MIPI add pregain = %d\n", temp);
+		LOG_INF("GC2366MIPI analogic gain 1.375x , GC2366MIPI add pregain = %d\n", temp);
 	} else if ((iReg >= ANALOG_GAIN_3) && (iReg < ANALOG_GAIN_4)) {
 		write_cmos_sensor(0xfe, 0x00);
 		/* analog gain */
@@ -393,7 +387,7 @@ static kal_uint16 set_gain(kal_uint16 gain)
 		temp = 64 * iReg / ANALOG_GAIN_3;
 		write_cmos_sensor(0xb1, temp >> 6);
 		write_cmos_sensor(0xb2, (temp << 2) & 0xfc);
-		LOG_INF("GC2365MIPI analogic gain 1.891x , GC2365MIPI add pregain = %d\n", temp);
+		LOG_INF("GC2366MIPI analogic gain 1.891x , GC2366MIPI add pregain = %d\n", temp);
 	} else if ((iReg >= ANALOG_GAIN_4) && (iReg < ANALOG_GAIN_5)) {
 		write_cmos_sensor(0xfe, 0x00);
 		/* analog gain */
@@ -402,7 +396,7 @@ static kal_uint16 set_gain(kal_uint16 gain)
 		temp = 64 * iReg / ANALOG_GAIN_4;
 		write_cmos_sensor(0xb1, temp >> 6);
 		write_cmos_sensor(0xb2, (temp << 2) & 0xfc);
-		LOG_INF("GC2365MIPI analogic gain 2.625x , GC2365MIPI add pregain = %d\n", temp);
+		LOG_INF("GC2366MIPI analogic gain 2.625x , GC2366MIPI add pregain = %d\n", temp);
 	} else if ((iReg >= ANALOG_GAIN_5) && (iReg < ANALOG_GAIN_6)) {
 		write_cmos_sensor(0xfe, 0x00);
 		/* analog gain */
@@ -411,7 +405,7 @@ static kal_uint16 set_gain(kal_uint16 gain)
 		temp = 64 * iReg / ANALOG_GAIN_5;
 		write_cmos_sensor(0xb1, temp >> 6);
 		write_cmos_sensor(0xb2, (temp << 2) & 0xfc);
-		LOG_INF("GC2365MIPI analogic gain 3.734x , GC2365MIPI add pregain = %d\n", temp);
+		LOG_INF("GC2366MIPI analogic gain 3.734x , GC2366MIPI add pregain = %d\n", temp);
 	} else if ((iReg >= ANALOG_GAIN_6) && (iReg < ANALOG_GAIN_7)) {
 		write_cmos_sensor(0xfe, 0x00);
 		/* analog gain */
@@ -420,7 +414,7 @@ static kal_uint16 set_gain(kal_uint16 gain)
 		temp = 64 * iReg / ANALOG_GAIN_6;
 		write_cmos_sensor(0xb1, temp >> 6);
 		write_cmos_sensor(0xb2, (temp << 2) & 0xfc);
-		LOG_INF("GC2365MIPI analogic gain 5.250x , GC2365MIPI add pregain = %d\n", temp);
+		LOG_INF("GC2366MIPI analogic gain 5.250x , GC2366MIPI add pregain = %d\n", temp);
 	} else {
 		write_cmos_sensor(0xfe, 0x00);
 		/* analog gain */
@@ -429,7 +423,7 @@ static kal_uint16 set_gain(kal_uint16 gain)
 		temp = 64 * iReg / ANALOG_GAIN_7;
 		write_cmos_sensor(0xb1, temp >> 6);
 		write_cmos_sensor(0xb2, (temp << 2) & 0xfc);
-		LOG_INF("GC2365MIPI analogic gain 7.516x , GC2365MIPI add pregain = %d\n", temp);
+		LOG_INF("GC2366MIPI analogic gain 7.516x , GC2366MIPI add pregain = %d\n", temp);
 	}
 	return gain;
 
@@ -841,7 +835,7 @@ static kal_uint32 open(void)
 		imgsensor.i2c_write_id = imgsensor_info.i2c_addr_table[i];
 		spin_unlock(&imgsensor_drv_lock);
 		do {
-			sensor_id = return_sensor_id();
+			sensor_id = return_sensor_id() + 1;
 			if (sensor_id == imgsensor_info.sensor_id) {
 				LOG_INF("i2c write id: 0x%x, sensor id: 0x%x\n",
 					imgsensor.i2c_write_id, sensor_id);
@@ -1535,4 +1529,4 @@ UINT32 GC2366_MIPI_RAW_SensorInit(PSENSOR_FUNCTION_STRUCT *pfFunc)
 	if (pfFunc != NULL)
 		*pfFunc = &sensor_func;
 	return ERROR_NONE;
-}				/*    GC2365MIPI_RAW_SensorInit    */
+}				/*    GC2366MIPI_RAW_SensorInit    */

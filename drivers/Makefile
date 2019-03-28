@@ -4,7 +4,7 @@
 # 15 Sep 2000, Christoph Hellwig <hch@infradead.org>
 # Rewritten to use lists instead of if-statements.
 #
-subdir-ccflags-y += -Werror
+#subdir-ccflags-y += -Werror
 
 obj-y				+= irqchip/
 obj-y				+= bus/
@@ -176,3 +176,10 @@ obj-$(CONFIG_STM)		+= hwtracing/stm/
 obj-$(CONFIG_ANDROID)		+= android/
 obj-$(CONFIG_NVMEM)		+= nvmem/
 obj-$(CONFIG_FPGA)		+= fpga/
+
+ifeq ($(VANZO_DEVICE_NAME_SUPPORT),yes)
+subdir-ccflags-y += -DVANZO_DEVICE_NAME_SUPPORT
+endif
+ifeq ($(VANZO_FEATURE_FAKE_DUAL_CAMERA_BY_NAME),yes)
+subdir-ccflags-y += -DVANZO_FEATURE_FAKE_DUAL_CAMERA_BY_NAME
+endif

@@ -332,6 +332,7 @@ extern void sched_destroy_group(struct task_group *tg);
 extern void sched_offline_group(struct task_group *tg);
 
 extern void sched_move_task(struct task_struct *tsk);
+extern int find_best_idle_cpu(struct task_struct *p, bool prefer_idle);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 extern int sched_group_set_shares(struct task_group *tg, unsigned long shares);
@@ -1322,6 +1323,7 @@ extern const struct sched_class idle_sched_class;
 extern void update_group_capacity(struct sched_domain *sd, int cpu);
 
 extern void trigger_load_balance(struct rq *rq);
+extern void nohz_balance_clear_nohz_mask(int cpu);
 
 extern void idle_enter_fair(struct rq *this_rq);
 extern void idle_exit_fair(struct rq *this_rq);
@@ -1411,6 +1413,10 @@ extern int inc_nr_heavy_running(int invoker, struct task_struct *p, int inc, boo
 
 #ifdef CONFIG_MTK_SCHED_CPULOAD
 extern void cal_cpu_load(int cpu);
+#endif
+
+#ifdef CONFIG_MTK_SCHED_RQAVG_KS
+extern void sched_max_util_task_tracking(void);
 #endif
 
 #endif
@@ -1568,9 +1574,19 @@ static inline unsigned long __cpu_util(int cpu, int delta)
 	unsigned long capacity = capacity_orig_of(cpu);
 
 #ifdef CONFIG_SCHED_WALT
+	/*
+	 * [FIXME] mark ee4cebd75ed7: power is out of control
+	 * while cumulative_runnable_avg for task placement.
+	 */
+#if 0
 	if (!walt_disabled && sysctl_sched_use_walt_cpu_util)
-		util = (cpu_rq(cpu)->prev_runnable_sum << SCHED_LOAD_SHIFT) /
-			walt_ravg_window;
+		util = div64_u64(cpu_rq(cpu)->cumulative_runnable_avg,
+				walt_ravg_window >> SCHED_LOAD_SHIFT);
+#else
+	if (!walt_disabled && sysctl_sched_use_walt_cpu_util)
+		util = div64_u64(cpu_rq(cpu)->prev_runnable_sum,
+				walt_ravg_window >> SCHED_LOAD_SHIFT);
+#endif
 #endif
 	delta += util;
 	if (delta < 0)
@@ -1582,6 +1598,19 @@ static inline unsigned long __cpu_util(int cpu, int delta)
 static inline unsigned long cpu_util(int cpu)
 {
 	return __cpu_util(cpu, 0);
+}
+
+static inline unsigned long cpu_util_freq(int cpu)
+{
+	unsigned long util = cpu_rq(cpu)->cfs.avg.util_avg;
+	unsigned long capacity = capacity_orig_of(cpu);
+
+#ifdef CONFIG_SCHED_WALT
+	if (!walt_disabled && sysctl_sched_use_walt_cpu_util)
+		util = div64_u64(cpu_rq(cpu)->prev_runnable_sum,
+				walt_ravg_window >> SCHED_LOAD_SHIFT);
+#endif
+	return (util >= capacity) ? capacity : util;
 }
 
 unsigned long boosted_cpu_util(int cpu);
@@ -1608,11 +1637,11 @@ enum cpu_dvfs_sched_type {
 	SCHE_IOWAIT,
 	SCHE_RT,
 	SCHE_DL,
-
+	SCHE_TICK,
 	NUM_SCHE_TYPE
 };
 
-#define DEFAULT_CAP_MARGIN_DVFS 1024 /* ~0% margin */
+#define DEFAULT_CAP_MARGIN_DVFS 1280 /* ~20% margin */
 
 extern unsigned int capacity_margin;
 extern unsigned int capacity_margin_dvfs;
@@ -2089,3 +2118,5 @@ static inline void account_reset_rq(struct rq *rq)
 #ifdef CONFIG_MTK_SCHED_INTEROP
 extern bool is_rt_throttle(int cpu);
 #endif
+
+extern inline bool energy_aware(void);

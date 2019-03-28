@@ -32,8 +32,11 @@
 #else
 #include "mt_cpufreq.h"
 #endif
-#include "mtk_gpufreq.h"
-
+#if defined(THERMAL_VPU_SUPPORT)
+#if defined(CONFIG_MTK_VPU_SUPPORT)
+#include "vpu_dvfs.h"
+#endif
+#endif
 /*=============================================================
 * Local variable definition
 *=============================================================
@@ -46,12 +49,17 @@
 */
 static unsigned int apthermolmt_prev_cpu_pwr_lim;
 static unsigned int apthermolmt_curr_cpu_pwr_lim = 0x7FFFFFFF;
+#if defined(THERMAL_VPU_SUPPORT)
+static unsigned int apthermolmt_prev_vpu_pwr_lim;
+static unsigned int apthermolmt_curr_vpu_pwr_lim = 0x7FFFFFFF;
+#endif
 static unsigned int apthermolmt_prev_gpu_pwr_lim;
 static unsigned int apthermolmt_curr_gpu_pwr_lim = 0x7FFFFFFF;
 
 static struct apthermolmt_user _dummy = {
 	.log = "dummy ",
 	.cpu_limit = 0x7FFFFFFF,
+	.vpu_limit = 0x7FFFFFFF,
 	.gpu_limit = 0x7FFFFFFF,
 	.ptr = &_dummy
 };
@@ -59,6 +67,7 @@ static struct apthermolmt_user _dummy = {
 static struct apthermolmt_user _gp = {
 	.log = "set_gp_power ",
 	.cpu_limit = 0x7FFFFFFF,
+	.vpu_limit = 0x7FFFFFFF,
 	.gpu_limit = 0x7FFFFFFF,
 	.ptr = &_gp
 };
@@ -118,6 +127,7 @@ int apthermolmt_register_user(struct apthermolmt_user *handle, char *log)
 			_users[i] = handle;
 			handle->log = log;
 			handle->cpu_limit = 0x7FFFFFFF;
+			handle->vpu_limit = 0x7FFFFFFF;
 			handle->gpu_limit = 0x7FFFFFFF;
 			handle->ptr = &_users[i];
 			return 0;
@@ -190,6 +200,46 @@ void apthermolmt_set_cpu_power_limit(struct apthermolmt_user *handle, unsigned i
 }
 EXPORT_SYMBOL(apthermolmt_set_cpu_power_limit);
 
+#if defined(THERMAL_VPU_SUPPORT)
+void apthermolmt_set_vpu_power_limit(struct apthermolmt_user *handle, unsigned int limit)
+{
+	unsigned int final_limit;
+
+	if (!handle || !(handle->ptr))
+		return;
+
+	/* decide min VPU limit */
+	handle->vpu_limit = limit;
+
+#if AP_THERMO_LMT_MAX_USERS == 3
+	final_limit = MIN(_users[0]->vpu_limit, _users[1]->vpu_limit);
+	final_limit = MIN(final_limit, _users[2]->vpu_limit);
+#else
+#error "handle this!"
+#endif
+
+	apthermolmt_prev_vpu_pwr_lim = apthermolmt_curr_vpu_pwr_lim;
+	apthermolmt_curr_vpu_pwr_lim = final_limit;
+
+	if (apthermolmt_prev_vpu_pwr_lim != apthermolmt_curr_vpu_pwr_lim) {
+#if defined(CONFIG_MTK_VPU_SUPPORT)
+		int opp = 0;
+
+		if (final_limit != 0x7FFFFFFF) {
+			for (opp = 0; opp < VPU_OPP_NUM - 1; opp++) {
+				if (final_limit >= vpu_power_table[opp].power)
+					break;
+			}
+			vpu_thermal_en_throttle_cb(0xff, opp);
+		} else
+			vpu_thermal_dis_throttle_cb();
+#endif
+		tscpu_dprintk("%s %u\n", __func__, final_limit);
+	}
+}
+EXPORT_SYMBOL(apthermolmt_set_vpu_power_limit);
+#endif
+
 void apthermolmt_set_gpu_power_limit(struct apthermolmt_user *handle, unsigned int limit)
 {
 	unsigned int final_limit;
@@ -257,4 +307,12 @@ unsigned int apthermolmt_get_gpu_power_limit(void)
 	return apthermolmt_curr_gpu_pwr_lim;
 }
 EXPORT_SYMBOL(apthermolmt_get_gpu_power_limit);
+
+#if defined(THERMAL_VPU_SUPPORT)
+unsigned int apthermolmt_get_vpu_power_limit(void)
+{
+	return apthermolmt_curr_vpu_pwr_lim;
+}
+EXPORT_SYMBOL(apthermolmt_get_vpu_power_limit);
+#endif
 

@@ -352,8 +352,8 @@ unsigned int m4u_do_mva_alloc_start_from(unsigned long va, unsigned int mva, uns
 	unsigned int mvaRegionStart;
 	unsigned long startRequire, endRequire, sizeRequire;
 	unsigned long irq_flags;
-	unsigned short startIdx = mva >> MVA_BLOCK_SIZE_ORDER;
-	unsigned short region_start, region_end, next_region_start = 0;
+	short startIdx = mva >> MVA_BLOCK_SIZE_ORDER;
+	short region_start, region_end, next_region_start = 0;
 
 	if (size == 0)
 		return 0;
@@ -500,7 +500,7 @@ unsigned int m4u_do_mva_alloc_start_from(unsigned long va, unsigned int mva, uns
 #define RightWrong(x) ((x) ? "correct" : "error")
 int m4u_do_mva_free(unsigned int mva, unsigned int size)
 {
-	unsigned short startIdx;
+	unsigned short startIdx = mva >> MVA_BLOCK_SIZE_ORDER;
 	unsigned short nr;
 	unsigned short endIdx;
 	unsigned int startRequire, endRequire, sizeRequire;
@@ -508,14 +508,14 @@ int m4u_do_mva_free(unsigned int mva, unsigned int size)
 	unsigned long irq_flags;
 
 	spin_lock_irqsave(&gMvaGraph_lock, irq_flags);
-	startIdx = mva >> MVA_BLOCK_SIZE_ORDER;
-	if (startIdx == 0 || startIdx > 4095) {
+	if (startIdx == 0 || startIdx > MVA_MAX_BLOCK_NR) {
 		spin_unlock_irqrestore(&gMvaGraph_lock, irq_flags);
+
+		M4UMSG("mvaGraph index is 0. mva=0x%x\n", mva);
 		return -1;
 	}
 	nr = mvaGraph[startIdx] & MVA_BLOCK_NR_MASK;
 	endIdx = startIdx + nr - 1;
-
 	/* -------------------------------- */
 	/* check the input arguments */
 	/* right condition: startIdx is not NULL && region is busy && right module && right size */

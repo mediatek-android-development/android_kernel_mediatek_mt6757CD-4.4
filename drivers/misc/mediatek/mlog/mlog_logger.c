@@ -47,8 +47,8 @@
 #include <mtk/ion_drv.h>
 #endif
 
-#include <mt-plat/mlog_logger.h>
 #include "mlog_internal.h"
+#include "mlog_logger.h"
 
 #define CONFIG_MLOG_BUF_SHIFT   16	/* 64KB for 32bit, 128kB for 64bit */
 
@@ -108,6 +108,10 @@
 #define V_FILTER_ALL        (V_PSWPIN | V_PSWPOUT | V_PGFMFAULT)
 #define P_FILTER_ALL        (P_ADJ | P_RSS | P_RSWAP | P_SWPIN | P_SWPOUT | P_FMFAULT)
 #define B_FILTER_ALL        (B_NORMAL | B_HIGH)
+
+#define MLOG_TRIGGER_TIMER  0
+#define MLOG_TRIGGER_LMK    1
+#define MLOG_TRIGGER_LTK    2
 
 static uint meminfo_filter = M_FILTER_ALL;
 static uint vmstat_filter = V_FILTER_ALL;
@@ -946,6 +950,67 @@ ssize_t dmlog_read(struct file *file, char __user *buf, size_t len, loff_t *ppos
 		cond_resched();
 	}
 	return size;
+}
+
+/* Get mlog_buffer & its offset */
+void mlog_get_buffer(char **ptr, int *size)
+{
+#ifdef CONFIG_MTK_ENG_BUILD
+#define MLOG_MSG_LENGTH	(3072)
+#define MLOG_PRINT(args...)	do {\
+					v = MLOG_BUF(start++);\
+					offset = sprintf(msg_pos, args);\
+					msg_pos += offset;\
+					msg_stored += offset;\
+				} while (0)
+
+	static char mlog_msg[MLOG_MSG_LENGTH];
+	unsigned start, end;
+	long v;
+	char *msg_pos;
+	int msg_stored = 0, offset, i;
+
+	msg_pos = mlog_msg;
+	start = mlog_start;
+	end = mlog_end;
+	while ((end - start) <= (mlog_buf_len + 1)) {
+		v = MLOG_BUF(start);
+		start += 1;
+		if (v != MLOG_ID)
+			continue;
+
+		/* bypss type */
+		start += 1;
+
+		/* time */
+		if (MLOG_MSG_LENGTH < (msg_stored + 16))
+			break;
+
+		MLOG_PRINT("%ld.", v);
+		MLOG_PRINT("%ld", v);
+
+		/* status */
+		for (i = 0; i < 17; i++) {
+			if (MLOG_MSG_LENGTH < (msg_stored + 22))
+				break;
+
+			MLOG_PRINT(" %ld", v);
+		}
+
+		if (MLOG_MSG_LENGTH < (msg_stored + 1))
+			break;
+
+		MLOG_PRINT("\n");
+	}
+
+	*ptr = mlog_msg;
+	*size = msg_stored;
+
+#undef MLOG_MSG_LENGTH
+#undef MLOG_PRINT
+#else
+	pr_info("%s: not eng build\n", __func__);
+#endif
 }
 
 static void mlog_timer_handler(unsigned long data)

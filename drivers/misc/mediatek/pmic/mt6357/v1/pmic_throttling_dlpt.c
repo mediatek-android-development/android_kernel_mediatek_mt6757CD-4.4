@@ -428,10 +428,10 @@ int bat_percent_notify_handler(void *unused)
 #if defined(CONFIG_MTK_SMART_BATTERY)
 		bat_per_val = bat_get_ui_percentage();
 #endif
-#ifdef CONFIG_MTK_KERNEL_POWER_OFF_CHARGING
+#if defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
 		if ((upmu_get_rgs_chrdet() == 0) && (g_battery_percent_level == 0)
-		    && (bat_per_val <= BAT_PERCENT_LINIT)) {
-#else
+			&& (bat_per_val <= BAT_PERCENT_LINIT)) {
+#elif !defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
 		if ((g_battery_percent_level == 0) && (bat_per_val <= BAT_PERCENT_LINIT)) {
 #endif
 			g_battery_percent_level = 1;
@@ -439,7 +439,6 @@ int bat_percent_notify_handler(void *unused)
 		} else if ((g_battery_percent_level == 1) && (bat_per_val > BAT_PERCENT_LINIT)) {
 			g_battery_percent_level = 0;
 			exec_battery_percent_callback(BATTERY_PERCENT_LEVEL_0);
-		} else {
 		}
 		bat_percent_notify_flag = false;
 
@@ -723,24 +722,18 @@ static int get_rac_val(void)
 	int retry_count = 0;
 
 	do {
-		/*adc and fg-------------------------------------------------------- */
+		/* Trigger ADC PTIM mode to get VBAT and current */
 		do_ptim(true);
-
-		pmic_spm_crit2("[1,Trigger ADC PTIM mode] volt1=%d, curr_1=%d\n", ptim_bat_vol,
-			       ptim_R_curr);
 		volt_1 = ptim_bat_vol;
 		curr_1 = ptim_R_curr;
 
-		pmic_spm_crit2("[2,enable dummy load]");
+		/* enable dummy load */
 		enable_dummy_load(1);
 		mdelay(50);
 		/*Wait --------------------------------------------------------------*/
 
-		/*adc and fg-------------------------------------------------------- */
+		/* Trigger ADC PTIM mode again to get new VBAT and current */
 		do_ptim(true);
-
-		pmic_spm_crit2("[3,Trigger ADC PTIM mode again] volt2=%d, curr_2=%d\n",
-			       ptim_bat_vol, ptim_R_curr);
 		volt_2 = ptim_bat_vol;
 		curr_2 = ptim_R_curr;
 
@@ -760,16 +753,13 @@ static int get_rac_val(void)
 
 		} else {
 			ret = -1;
-			pmic_spm_crit2("[4,Calculate Rac] bypass due to (curr_x-curr_y) < 40mA\n");
+			pmic_spm_crit2("[Calculate Rac] bypass due to (curr_x-curr_y) < 40mA\n");
 		}
 
-		pmic_spm_crit2
-		    ("volt_1 = %d,volt_2 = %d,curr_1 = %d,curr_2 = %d,rac_cal = %d,ret = %d,retry_count = %d\n",
-		     volt_1, volt_2, curr_1, curr_2, rac_cal, ret, retry_count);
-
-		pmic_spm_crit2(" %d,%d,%d,%d,%d,%d,%d\n",
-			       volt_1, volt_2, curr_1, curr_2, rac_cal, ret, retry_count);
-
+		pmic_spm_crit2(
+			"v1=%d,v2=%d,c1=%d,c2=%d,rac_cal=%d,ret=%d,retry=%d,v_diff=%d,c_diff=%d\n",
+			volt_1, volt_2, curr_1, curr_2, rac_cal, ret,
+			retry_count, (volt_1 - volt_2), (curr_2 - curr_1));
 
 		/*------------------------*/
 		retry_count++;
@@ -1095,8 +1085,6 @@ void dlpt_notify_task(unsigned long data)
 	dlpt_notify_flag = true;
 	wake_up_interruptible(&dlpt_notify_waiter);
 	PMICLOG("dlpt_notify_task is called\n");
-
-	return;
 }
 
 void dlpt_notify_init(void)

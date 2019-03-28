@@ -48,6 +48,7 @@ extern unsigned int DISP_GetScreenHeight(void);
 #define MMDVFS_EVENT_UI_IDLE_EXIT 3
 #define MMDVFS_CLIENT_ID_ISP 0
 
+#define QOS_ALL_SCENARIO 99
 enum {
 	MMDVFS_CAM_MON_SCEN = SMI_BWC_SCEN_CNT, MMDVFS_SCEN_MHL, MMDVFS_SCEN_MJC, MMDVFS_SCEN_DISP,
 	MMDVFS_SCEN_ISP, MMDVFS_SCEN_VP_HIGH_RESOLUTION, MMDVFS_SCEN_VPU, MMDVFS_MGR,
@@ -105,6 +106,9 @@ typedef int (*clk_switch_cb)(int ori_mmsys_clk_mode, int update_mmsys_clk_mode);
 typedef int (*vdec_ctrl_cb)(void);
 typedef int (*mmdvfs_state_change_cb)(struct mmdvfs_state_change_event *event);
 typedef int (*mmdvfs_prepare_action_cb)(struct mmdvfs_prepare_action_event *event);
+/* num: Display HRT capability drop times 100 */
+/* ex: 150 => display HRT capability decrease 1.5 layer */
+typedef int (*disp_hrt_change_cb)(int num);
 
 /* MMDVFS V2 only APIs */
 extern int mmdvfs_notify_mmclk_switch_request(int event);
@@ -126,6 +130,8 @@ extern int is_mmdvfs_disabled(void);
 extern int force_always_on_mm_clks(void);
 extern int mmdvfs_get_stable_isp_clk(void);
 extern int get_mmdvfs_clk_mux_mask(void);
+extern void mmdvfs_set_disp_hrt_cb(disp_hrt_change_cb change_cb);
+extern void mmdvfs_set_md_on(bool to_on);
 
 #ifdef MMDVFS_STANDALONE
 #define vcorefs_request_dvfs_opp(scen, mode) do { \
@@ -171,7 +177,10 @@ extern int primary_display_switch_mode_for_mmdvfs(int sess_mode, unsigned int se
 #define MMDVFS_PROFILE_WHY2 (11)
 #define MMDVFS_PROFILE_ALA (12)
 #define MMDVFS_PROFILE_BIA (13)
-
+#define MMDVFS_PROFILE_VIN (14)
+#define MMDVFS_PROFILE_ZIO (15)
+#define MMDVFS_PROFILE_SYL (16)
+#define MMDVFS_PROFILE_CAN (17)
 
 /* Macro used to resovling step setting ioctl command */
 #define MMDVFS_IOCTL_CMD_STEP_FIELD_LEN (8)

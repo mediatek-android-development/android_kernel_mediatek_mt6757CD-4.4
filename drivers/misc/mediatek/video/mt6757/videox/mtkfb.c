@@ -393,7 +393,7 @@ EXPORT_SYMBOL(mtkfb_get_backlight_pwm);
 void mtkfb_waitVsync(void)
 {
 	if (primary_display_is_sleepd()) {
-		DISPCHECK("[MTKFB_VSYNC]:mtkfb has suspend, return directly\n");
+		DISPMSG("[MTKFB_VSYNC]:mtkfb has suspend, return directly\n");
 		msleep(20);
 		return;
 	}
@@ -855,7 +855,7 @@ static int mtkfb_check_var(struct fb_var_screeninfo *var, struct fb_info *fbi)
 	if (var->yres + var->yoffset > var->yres_virtual)
 		var->yoffset = var->yres_virtual - var->yres;
 
-	DISPCHECK("mtkfb_check_var,xres=%u,yres=%u,x_virt=%u,y_virt=%u,xoffset=%u,yoffset=%u,bits_per_pixel=%u)\n",
+	DISPMSG("mtkfb_check_var,xres=%u,yres=%u,x_virt=%u,y_virt=%u,xoffset=%u,yoffset=%u,bits_per_pixel=%u)\n",
 		var->xres, var->yres, var->xres_virtual, var->yres_virtual,
 		var->xoffset, var->yoffset, var->bits_per_pixel);
 
@@ -1493,19 +1493,7 @@ static int mtkfb_ioctl(struct fb_info *info, unsigned int cmd, unsigned long arg
 			if (copy_from_user(&var, argp, sizeof(var)))
 				return -EFAULT;
 
-			/* invalidate params from userspace */
-			if (var.xres > MTK_FB_XRES || var.yres > MTK_FB_YRES ||
-			    var.xres_virtual > MTK_FB_XRESV ||
-			    var.yres_virtual > MTK_FB_YRESV ||
-			    var.xoffset > MTK_FB_XRES ||
-			    var.yoffset > MTK_FB_YRESV * (MTK_FB_PAGES - 1)) {
-				DISPERR("invalidate params from userspace\n");
-				return -EFAULT;
-			}
 			info->var.yoffset = var.yoffset;
-			/*  check var.yoffset passed by user space */
-			if (info->var.yres + info->var.yoffset > info->var.yres_virtual)
-				info->var.yoffset = info->var.yres_virtual - info->var.yres;
 			init_framebuffer(info);
 
 			return mtkfb_pan_display_impl(&var, info);
@@ -2630,7 +2618,7 @@ static void mtkfb_early_suspend(void)
 	if (disp_helper_get_stage() != DISP_HELPER_STAGE_NORMAL)
 		return;
 
-	DISPCHECK("[FB Driver] enter early_suspend\n");
+	DISPMSG("[FB Driver] enter early_suspend\n");
 
 	/* mt65xx_leds_brightness_set(MT65XX_LED_TYPE_LCD, LED_OFF); */
 
@@ -2643,7 +2631,7 @@ static void mtkfb_early_suspend(void)
 		return;
 	}
 
-	DISPCHECK("[FB Driver] leave early_suspend\n");
+	DISPMSG("[FB Driver] leave early_suspend\n");
 
 }
 
@@ -2665,7 +2653,7 @@ static void mtkfb_late_resume(void)
 	if (disp_helper_get_stage() != DISP_HELPER_STAGE_NORMAL)
 		return;
 
-	DISPCHECK("[FB Driver] enter late_resume\n");
+	DISPMSG("[FB Driver] enter late_resume\n");
 
 	ret = primary_display_resume();
 
@@ -2674,7 +2662,7 @@ static void mtkfb_late_resume(void)
 		return;
 	}
 
-	DISPCHECK("[FB Driver] leave late_resume\n");
+	DISPMSG("[FB Driver] leave late_resume\n");
 
 }
 

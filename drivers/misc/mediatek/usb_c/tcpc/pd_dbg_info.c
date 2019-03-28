@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 Richtek Technology Corp.
+ * Copyright (C) 2016 MediaTek Inc.
  *
  * Power Delivery Debug Information
  *
@@ -83,7 +83,7 @@ static inline bool pd_dbg_print_out(void)
 		pd_dbg_buffer[index].buf[OUT_BUF_MAX + i] = temp;
 	}
 
-	pr_info("PD dbg info///\n");
+	/* pr_info("PD dbg info///\n"); */
 	pd_dbg_buffer[index].used = 0;
 	msleep(MSG_POLLING_MS);
 	return true;

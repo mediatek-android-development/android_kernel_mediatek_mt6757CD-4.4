@@ -219,6 +219,9 @@ enum SPM_WAKE_SRC_LIST {
 	WAKE_SRC_R12_APSRC_SLEEP = (1U << 31)
 };
 
+/* define WAKE_SRC_CONN2AP for conn use */
+#define WAKE_SRC_CONN2AP WAKE_SRC_R12_CONN2AP_SPM_WAKEUP_B
+
 #if 1
 extern const char *wakesrc_str[32];
 #else

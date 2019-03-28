@@ -137,17 +137,17 @@ const char musb_driver_name[] = MUSB_DRIVER_NAME;
 struct musb *_mu3d_musb;
 
 
-u32 debug_level = K_WARNIN;
-u32 fake_CDP;
+int debug_level = K_WARNIN;
+int fake_CDP;
 
 module_param(debug_level, int, 0644);
 MODULE_PARM_DESC(debug_level, "Debug Print Log Lvl");
-module_param(fake_CDP, int, 0644);
+module_param(fake_CDP, int, 0400);
 
 #ifdef EP_PROFILING
-u32 is_prof = 1;
+int is_prof = 1;
 
-module_param(is_prof, int, 0644);
+module_param(is_prof, int, 0400);
 MODULE_PARM_DESC(is_prof, "profiling each EP");
 #endif
 
@@ -184,7 +184,7 @@ static struct kernel_param_ops musb_speed_param_ops = {
 	.set = set_musb_speed,
 	.get = param_get_int,
 };
-module_param_cb(speed, &musb_speed_param_ops, &musb_speed, S_IRUGO | S_IWUSR);
+module_param_cb(speed, &musb_speed_param_ops, &musb_speed, 0644);
 MODULE_PARM_DESC(debug, "USB speed configuration. default = 1, spuper speed.");
 #endif
 
@@ -1676,6 +1676,10 @@ static int __init musb_core_init(u16 musb_type, struct musb *musb)
 	_ex_mu3d_hal_init_qmu();
 
 	musb_save_context(musb);
+#if defined(CONFIG_USB_MU3D_DRV_36BIT)
+	dma_set_mask_and_coherent(musb->controller, DMA_BIT_MASK(36));
+	dma_set_coherent_mask(musb->controller, DMA_BIT_MASK(36));
+#endif
 #endif
 
 	return 0;
@@ -1714,6 +1718,13 @@ irqreturn_t musb_interrupt(struct musb *musb)
 	os_printk(K_DEBUG, "IRQ %s usb%04x tx%04x rx%04x\n",
 		  (devctl & USB_DEVCTL_HOSTMODE) ? "host" : "peripheral",
 		  musb->int_usb, musb->int_tx, musb->int_rx);
+
+	if (unlikely(!musb->softconnect)) {
+		os_printk(K_WARNIN, "!softconnect, IRQ %s usb%04x tx%04x rx%04x\n",
+				(devctl & USB_DEVCTL_HOSTMODE) ? "host" : "peripheral",
+				musb->int_usb, musb->int_tx, musb->int_rx);
+		return IRQ_HANDLED;
+	}
 
 	/* the core can interrupt us for multiple reasons; docs have
 	 * a generic interrupt flowchart to follow
@@ -1925,6 +1936,7 @@ musb_srp_store(struct device *dev, struct device_attribute *attr, const char *bu
 
 static DEVICE_ATTR(srp, 0644, NULL, musb_srp_store);
 DEVICE_ATTR(cmode, 0664, musb_cmode_show, musb_cmode_store);
+DEVICE_ATTR(saving, 0664, musb_saving_mode_show, musb_saving_mode_store);
 
 #ifdef CONFIG_MTK_UART_USB_SWITCH
 DEVICE_ATTR(portmode, 0664, musb_portmode_show, musb_portmode_store);
@@ -1942,6 +1954,7 @@ static struct attribute *musb_attributes[] = {
 	&dev_attr_vbus.attr,
 	&dev_attr_srp.attr,
 	&dev_attr_cmode.attr,
+	&dev_attr_saving.attr,
 #ifdef CONFIG_MTK_UART_USB_SWITCH
 	&dev_attr_portmode.attr,
 	&dev_attr_tx.attr,

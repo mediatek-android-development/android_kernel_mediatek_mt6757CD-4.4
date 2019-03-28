@@ -126,13 +126,18 @@ static int Auddrv_BTCVSD_Address_Map(void)
 	struct device_node *node = NULL;
 	void __iomem *base;
 	u32 offset[5] = { 0, 0, 0, 0, 0 };
+	int ret;
 
 	node = of_find_compatible_node(NULL, NULL, "mediatek,audio_bt_cvsd");
 	if (node == NULL)
 		pr_debug("BTCVSD get node failed\n");
 
 	/*get INFRA_MISC offset, conn_bt_cvsd_mask, cvsd_mcu_read_offset, write_offset, packet_indicator */
-	of_property_read_u32_array(node, "offset", offset, ARRAY_SIZE(offset));
+	ret = of_property_read_u32_array(node, "offset", offset, ARRAY_SIZE(offset));
+	if (ret) {
+		pr_warn("%s(), get offest fail, ret %d\n", __func__, ret);
+		return ret;
+	}
 	infra_misc_offset = offset[0];
 	conn_bt_cvsd_mask = offset[1];
 	cvsd_mcu_read_offset = offset[2];
@@ -540,7 +545,7 @@ static int btcvsd_rx_timestamp_set(const unsigned int __user *data, unsigned int
 static int btcvsd_tx_timeout_get(struct snd_kcontrol *kcontrol,
 				      struct snd_ctl_elem_value *ucontrol)
 {
-	pr_debug("%s(), btcvsd tx timeout %d\n",
+	LOGBT("%s(), btcvsd tx timeout %d\n",
 		 __func__, btcvsd_tx_timeout() ? 1 : 0);
 	ucontrol->value.integer.value[0] = btcvsd_tx_timeout() ? 1 : 0;
 	/*btcvsd_tx_reset_timeout();*/

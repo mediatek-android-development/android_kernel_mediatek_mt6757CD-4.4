@@ -74,6 +74,18 @@ enum dvfs_opp {
 	OPP_2,
 	NUM_OPP,
 };
+#elif defined(CONFIG_MACH_MT6775)
+enum dvfs_opp {
+	OPP_UNREQ = -1,
+	OPP_0 = 0,
+	OPP_1,
+	OPP_2,
+	OPP_3,
+	OPP_4,
+	OPP_5,
+	OPP_6,
+	NUM_OPP,
+};
 #else
 enum dvfs_opp {
 	OPP_UNREQ = -1,
@@ -124,8 +136,10 @@ struct opp_profile {
 #define VCORE_BASE_UV           500000
 #elif defined(CONFIG_MACH_MT6739)        /* PMIC MT6357 */
 #define VCORE_BASE_UV           518750
-#elif defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758)       /* PMIC MT6355 */
+#elif defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6775)
 #define VCORE_BASE_UV           406250
+#elif defined(CONFIG_MACH_MT6771)        /* PMIC MT6358 */
+#define VCORE_BASE_UV           500000
 #else
 #error "Not set pmic config properly!"
 #endif
@@ -149,6 +163,9 @@ bool vcorefs_dram_dfs_en(void);
 bool vcorefs_mm_clk_en(void);
 bool vcorefs_i_hwpath_en(void);
 int vcorefs_module_init(void);
+extern void vcorefs_set_vcore_dvs_en(bool val);
+extern void vcorefs_set_ddr_dfs_en(bool val);
+extern void vcorefs_set_mm_clk_en(bool val);
 extern int vcorefs_get_num_opp(void);
 extern int vcorefs_get_sw_opp(void);
 extern int vcorefs_get_curr_vcore(void);
@@ -168,5 +185,15 @@ extern bool governor_autok_check(int kicker);
 extern bool governor_autok_lock_check(int kicker, int opp);
 extern int vcorefs_get_hw_opp(void);
 extern int vcorefs_enable_debug_isr(bool enable);
+
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+extern int vcorefs_get_ddr_by_steps(u32 opp);
+extern int dvfsrc_get_bw(int type);
+extern int get_cur_vcore_dvfs_opp(void);
+
+extern void __iomem *qos_sram_base;
+extern int qos_ipi_to_sspm_command(void *buffer, int slot);
+extern void dvfsrc_force_opp(int opp);
+#endif
 
 #endif	/* _MTK_VCOREFS_GOVERNOR_H */

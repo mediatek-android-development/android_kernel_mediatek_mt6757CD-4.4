@@ -40,6 +40,7 @@
 #include <mach/mt_boot.h>
 #endif
 
+#include <linux/pm_runtime.h>
 /**
  * @device tree porting note
  * alps/kernel-3.10/arch/arm64/boot/dts/{platform}.dts
@@ -377,7 +378,8 @@ static long cmdq_driver_create_secure_medadata(struct cmdqCommandStruct *pComman
 	return 0;
 }
 
-static long cmdq_driver_process_command_request(struct cmdqCommandStruct *pCommand)
+static long cmdq_driver_process_command_request(
+	struct cmdqCommandStruct *pCommand, struct CmdqRecExtend *ext)
 {
 	int32_t status = 0;
 	uint32_t *userRegValue = NULL;
@@ -394,8 +396,10 @@ static long cmdq_driver_process_command_request(struct cmdqCommandStruct *pComma
 
 	/* allocate secure medatata */
 	status = cmdq_driver_create_secure_medadata(pCommand);
-	if (status != 0)
+	if (status != 0) {
+		CMDQ_ERR("create secure metadata failed:%d\n", status);
 		return status;
+	}
 
 	/* backup since we are going to replace these */
 	userRegValue = CMDQ_U32_PTR(pCommand->regValue.regValues);
@@ -406,6 +410,7 @@ static long cmdq_driver_process_command_request(struct cmdqCommandStruct *pComma
 	if (status != 0) {
 		/* free secure path metadata */
 		cmdq_driver_destroy_secure_medadata(pCommand);
+		CMDQ_ERR("create reg addr buffer failed:%d\n", status);
 		return status;
 	}
 
@@ -415,13 +420,14 @@ static long cmdq_driver_process_command_request(struct cmdqCommandStruct *pComma
 	pCommand->regValue.count = pCommand->regRequest.count;
 	if (CMDQ_U32_PTR(pCommand->regValue.regValues) == NULL) {
 		kfree(CMDQ_U32_PTR(pCommand->regRequest.regAddresses));
+		CMDQ_ERR("create reg values buffer failed\n");
 		return -ENOMEM;
 	}
 
 	/* scenario id fixup */
 	cmdq_core_fix_command_scenario_for_user_space(pCommand);
 
-	status = cmdqCoreSubmitTask(pCommand, NULL);
+	status = cmdqCoreSubmitTask(pCommand, ext);
 	if (status < 0) {
 		CMDQ_ERR("Submit user commands for execution failed = %d\n", status);
 		cmdq_driver_destroy_secure_medadata(pCommand);
@@ -489,6 +495,40 @@ bool cmdq_driver_support_wait_and_receive_event_in_same_tick(void)
 #endif
 }
 
+static s32 cmdq_driver_copy_task_prop_from_user(void *from, u32 size, void **to)
+{
+	void *task_prop = NULL;
+
+	/* considering backward compatible, we won't return error when argument not available */
+	if (from && size && to) {
+		task_prop = kzalloc(size, GFP_KERNEL);
+		if (!task_prop) {
+			CMDQ_ERR("allocate task_prop failed\n");
+			return -ENOMEM;
+		}
+
+		if (copy_from_user(task_prop, from, size)) {
+			CMDQ_ERR("cannot copy task property from user, size=%d\n", size);
+			kfree(task_prop);
+			return -EFAULT;
+		}
+
+		*to = task_prop;
+	}
+
+	return 0;
+}
+
+static void cmdq_release_task_property(void **prop_addr, u32 *prop_size)
+{
+	if (!prop_addr || !prop_size)
+		return;
+
+	kfree(*prop_addr);
+	*prop_addr = NULL;
+	*prop_size = 0;
+}
+
 static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long param)
 {
 	struct cmdqCommandStruct command;
@@ -502,23 +542,56 @@ static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long para
 	uint32_t userRegCount = 0;
 	/* backup value after task release */
 	uint32_t regCount = 0, regCountUserSpace = 0, regUserToken = 0;
+	struct CmdqRecExtend ext = {
+		.ctrl = cmdq_core_get_controller(),
+		};
 
 	switch (code) {
 	case CMDQ_IOCTL_EXEC_COMMAND:
-		if (copy_from_user(&command, (void *)param, sizeof(struct cmdqCommandStruct)))
+		if (copy_from_user(&command, (void *)param, sizeof(struct cmdqCommandStruct))) {
+			CMDQ_ERR("copy from user failed.\n");
 			return -EFAULT;
+		}
 
 		if (command.regRequest.count > CMDQ_MAX_DUMP_REG_COUNT ||
 			!command.blockSize ||
-			command.blockSize > CMDQ_MAX_COMMAND_SIZE)
+			command.blockSize > CMDQ_MAX_COMMAND_SIZE ||
+			command.prop_size > CMDQ_MAX_USER_PROP_SIZE) {
+			CMDQ_ERR("invalid input reg count:%u block size:%u prop size:%u\n",
+				command.regRequest.count,
+				command.blockSize, command.prop_size);
 			return -EINVAL;
+		}
+
+		/* copy from user again if property is given */
+		status = cmdq_driver_copy_task_prop_from_user((void *)CMDQ_U32_PTR(command.prop_addr),
+			command.prop_size, (void *)CMDQ_U32_PTR(&command.prop_addr));
+		if (status < 0) {
+			CMDQ_ERR("copy prop failed:%d\n", status);
+			return status;
+		}
+
+#ifdef CMDQ_SECURE_PATH_SUPPORT
+		/* assign controller for secure case */
+		if (command.secData.is_secure) {
+			ext.ctrl = cmdq_sec_get_controller();
+			ext.exclusive_thread = cmdq_get_func()->getThreadID(
+				command.scenario, true);
+		}
+#endif
 
 		/* insert private_data for resource reclaim */
 		desc_private.node_private_data = pFile->private_data;
 		command.privateData = (cmdqU32Ptr_t)(unsigned long)&desc_private;
 
-		if (cmdq_driver_process_command_request(&command))
+		status = cmdq_driver_process_command_request(&command, &ext);
+
+		cmdq_release_task_property((void *)CMDQ_U32_PTR(&command.prop_addr), &command.prop_size);
+
+		if (status < 0) {
+			CMDQ_ERR("process command request failed:%d\n", status);
 			return -EFAULT;
+		}
 		break;
 	case CMDQ_IOCTL_QUERY_USAGE:
 		if (cmdqCoreQueryUsage(count))
@@ -530,11 +603,25 @@ static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long para
 		}
 		break;
 	case CMDQ_IOCTL_ASYNC_JOB_EXEC:
-		if (copy_from_user(&job, (void *)param, sizeof(struct cmdqJobStruct)))
+		if (copy_from_user(&job, (void *)param, sizeof(struct cmdqJobStruct))) {
+			CMDQ_ERR("copy from user fail.\n");
 			return -EFAULT;
+		}
 
-		if (job.command.blockSize > CMDQ_MAX_COMMAND_SIZE)
+		if (job.command.blockSize > CMDQ_MAX_COMMAND_SIZE ||
+			job.command.prop_size > CMDQ_MAX_USER_PROP_SIZE) {
+			CMDQ_ERR("block size:%u prop size:%u\n",
+				job.command.blockSize, job.command.prop_size);
 			return -EINVAL;
+		}
+
+		/* copy from user again if property is given */
+		status = cmdq_driver_copy_task_prop_from_user((void *)CMDQ_U32_PTR(job.command.prop_addr),
+			job.command.prop_size, (void *)CMDQ_U32_PTR(&job.command.prop_addr));
+		if (status < 0) {
+			CMDQ_ERR("copy prop fail status:%d\n", status);
+			return status;
+		}
 
 		/* backup */
 		userRegCount = job.command.regRequest.count;
@@ -545,8 +632,13 @@ static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long para
 
 		/* create kernel-space address buffer */
 		status = cmdq_driver_create_reg_address_buffer(&job.command);
-		if (status != 0)
+		if (status != 0) {
+			cmdq_release_task_property((void *)CMDQ_U32_PTR(&job.command.prop_addr),
+				&job.command.prop_size);
+			CMDQ_ERR("create reg addr buf fail:%d cout:%u\n",
+				status, job.command.regRequest.count);
 			return status;
+		}
 
 		/* avoid copy large string */
 		if (job.command.userDebugStrLen > CMDQ_MAX_DBG_STR_LEN)
@@ -555,12 +647,25 @@ static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long para
 		/* scenario id fixup */
 		cmdq_core_fix_command_scenario_for_user_space(&job.command);
 
+#ifdef CMDQ_SECURE_PATH_SUPPORT
+		/* assign controller for secure case */
+		if (job.command.secData.is_secure) {
+			ext.ctrl = cmdq_sec_get_controller();
+			ext.exclusive_thread = cmdq_get_func()->getThreadID(
+				job.command.scenario, true);
+		}
+#endif
+
 		/* allocate secure medatata */
 		status = cmdq_driver_create_secure_medadata(&job.command);
-		if (status != 0)
+		if (status != 0) {
+			cmdq_release_task_property((void *)CMDQ_U32_PTR(&job.command.prop_addr),
+				&job.command.prop_size);
+			CMDQ_ERR("create secure meta fail\n");
 			return status;
+		}
 
-		status = cmdqCoreSubmitTaskAsync(&job.command, NULL, NULL, 0, &pTask);
+		status = cmdqCoreSubmitTaskAsync(&job.command, &ext, NULL, 0, &pTask);
 
 		/* store user space request count in TaskStruct */
 		/* for later retrieval */
@@ -576,6 +681,8 @@ static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long para
 		/* free secure path metadata */
 		cmdq_driver_destroy_secure_medadata(&job.command);
 
+		cmdq_release_task_property((void *)CMDQ_U32_PTR(&job.command.prop_addr),
+						&job.command.prop_size);
 		if (status >= 0) {
 			job.hJob = (unsigned long)pTask;
 			if (copy_to_user((void *)param, (void *)&job, sizeof(struct cmdqJobStruct))) {
@@ -584,6 +691,7 @@ static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long para
 			}
 		} else {
 			job.hJob = (unsigned long)NULL;
+			CMDQ_ERR("submit fail status:%d\n", status);
 			return -EFAULT;
 		}
 		break;
@@ -644,9 +752,8 @@ static long cmdq_ioctl(struct file *pFile, unsigned int code, unsigned long para
 
 		/* make sure the task is running and wait for it */
 		status = cmdqCoreWaitResultAndReleaseTask(pTask,
-							  &jobResult.regValue,
-							  msecs_to_jiffies
-							  (CMDQ_DEFAULT_TIMEOUT_MS));
+				&jobResult.regValue,
+				CMDQ_DEFAULT_TIMEOUT_MS);
 		if (status < 0) {
 			CMDQ_ERR("waitResultAndReleaseTask fail=%d\n", status);
 			/* free kernel space result buffer */
@@ -928,7 +1035,7 @@ static int cmdq_create_debug_entries(void)
 static int cmdq_probe(struct platform_device *pDevice)
 {
 	int status;
-	struct device *object;
+	struct device *cmdq_dev = NULL;
 
 	CMDQ_MSG("CMDQ driver probe begin\n");
 
@@ -958,7 +1065,7 @@ static int cmdq_probe(struct platform_device *pDevice)
 	status = cdev_add(gCmdqCDev, gCmdqDevNo, 1);
 
 	gCMDQClass = class_create(THIS_MODULE, CMDQ_DRIVER_DEVICE_NAME);
-	object = device_create(gCMDQClass, NULL, gCmdqDevNo, NULL, CMDQ_DRIVER_DEVICE_NAME);
+	cmdq_dev = device_create(gCMDQClass, NULL, gCmdqDevNo, NULL, CMDQ_DRIVER_DEVICE_NAME);
 
 	status =
 	    request_irq(cmdq_dev_get_irq_id(), cmdq_irq_handler,
@@ -995,7 +1102,7 @@ static int cmdq_probe(struct platform_device *pDevice)
 #endif
 
 	CMDQ_MSG("CMDQ driver probe end\n");
-
+	cmdq_mdp_get_func()->mdp_probe();
 	return 0;
 }
 
@@ -1081,8 +1188,19 @@ static int __init cmdq_init(void)
 	cmdqCoreRegisterTrackTaskCB(CMDQ_GROUP_MDP,
 			   cmdq_mdp_get_func()->trackTask);
 
+	cmdqCoreRegisterTaskCycleCB(CMDQ_GROUP_MDP,
+		cmdq_mdp_get_func()->beginTask,
+		cmdq_mdp_get_func()->endTask);
+
+	cmdqCoreRegisterTaskCycleCB(CMDQ_GROUP_ISP,
+		cmdq_mdp_get_func()->beginISPTask,
+		cmdq_mdp_get_func()->endISPTask);
+
 	/* Register VENC callback */
 	cmdqCoreRegisterCB(CMDQ_GROUP_VENC, NULL, cmdq_mdp_get_func()->vEncDumpInfo, NULL, NULL);
+
+	cmdqCoreRegisterMonitorTaskCB(CMDQ_GROUP_MDP,
+		cmdq_mdp_get_func()->startTask_atomic, cmdq_mdp_get_func()->finishTask_atomic);
 
 	status = platform_driver_register(&gCmdqDriver);
 	if (status != 0) {

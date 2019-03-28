@@ -37,6 +37,9 @@ obj-y += mtk_ppm_profile.o
 # for IPI to SSPM
 obj-y += mtk_ppm_ipi.o
 
+# for CPI
+obj-y += mtk_ppm_cpi.o
+
 # policies
 obj-y += mtk_ppm_policy_dlpt.o
 #obj-y += mtk_ppm_policy_perfserv.o
@@ -57,4 +60,3 @@ else
 # dummy driver to avoid build error
 obj-y := mtk_ppm_dummy.o
 endif
-

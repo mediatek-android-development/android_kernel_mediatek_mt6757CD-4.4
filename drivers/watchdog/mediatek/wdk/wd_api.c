@@ -648,12 +648,13 @@ void arch_reset(char mode, const char *cmd)
 	} else if (cmd && !strcmp(cmd, "bootloader")) {
 		rtc_mark_fast();
 	} else if (cmd && !strcmp(cmd, "kpoc")) {
-#ifdef CONFIG_MTK_KERNEL_POWER_OFF_CHARGING
 		rtc_mark_kpoc();
-#endif
 	} else {
-		reboot = 1;
+		reboot = WD_SW_RESET_BYPASS_PWR_KEY;
 	}
+
+	if (cmd && !strcmp(cmd, "ddr-reserve"))
+		reboot |= WD_SW_RESET_KEEP_DDR_RESERVE;
 
 	if (res)
 		pr_err("arch_reset, get wd api error %d\n", res);

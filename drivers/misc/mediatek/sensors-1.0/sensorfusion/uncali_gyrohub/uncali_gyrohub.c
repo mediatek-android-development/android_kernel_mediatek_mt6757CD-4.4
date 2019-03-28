@@ -67,6 +67,7 @@ static int uncali_gyro_recv_data(struct data_unit_t *event, void *reserved)
 {
 	int err = 0;
 	int value[6] = {0};
+	int value_temp[6] = {0};
 
 #if defined CONFIG_MTK_SCP_SENSORHUB_V1
 	value[0] = event->uncalibrated_gyro_t.x;
@@ -82,10 +83,17 @@ static int uncali_gyro_recv_data(struct data_unit_t *event, void *reserved)
 	value[3] = event->uncalibrated_gyro_t.x_bias;
 	value[4] = event->uncalibrated_gyro_t.y_bias;
 	value[5] = event->uncalibrated_gyro_t.z_bias;
+	value_temp[0] = event->uncalibrated_gyro_t.temperature;
+	value_temp[1] = event->uncalibrated_gyro_t.temp_result;
 #endif
-	if (event->flush_action == DATA_ACTION)
+	if (event->flush_action == DATA_ACTION) {
 		err = uncali_gyro_data_report(value, event->uncalibrated_gyro_t.status,
-			(int64_t)(event->time_stamp + event->time_stamp_gpt));
+			(int64_t)event->time_stamp);
+		/*pr_debug("report gyro_temp : %d, %d\n", value_temp[0], value_temp[1]);*/
+		if (value_temp[0] != 0)
+			uncali_gyro_temperature_data_report(value_temp, event->uncalibrated_gyro_t.status,
+			(int64_t)event->time_stamp);
+	}
 	else if (event->flush_action == FLUSH_ACTION)
 		err = uncali_gyro_flush_report();
 
@@ -117,7 +125,7 @@ static int uncali_gyrohub_local_init(void)
 	}
 
 	data.get_data = uncali_gyro_get_data;
-	data.vender_div = 7506;
+	data.vender_div = 7505747;
 	err = fusion_register_data_path(&data, ID_GYROSCOPE_UNCALIBRATED);
 	if (err) {
 		UNGYROHUB_PR_ERR("register uncali_gyro data path err\n");

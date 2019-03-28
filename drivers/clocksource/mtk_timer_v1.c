@@ -30,7 +30,7 @@
 #include <linux/sched_clock.h>
 #include <clocksource/arm_arch_timer.h>
 
-#include <mach/mtk_gpt.h>
+#include <mt-plat/mtk_gpt.h>
 #include <mt-plat/sync_write.h>
 
 #include <linux/irqchip/mtk-gic-extend.h> /* for aee dump */
@@ -62,9 +62,20 @@
 
 #ifdef CONFIG_MTK_TIMER_AEE_DUMP
 #ifdef CONFIG_MTK_RAM_CONSOLE
+
 #include <mt-plat/mtk_ram_console.h>
 
-static char gpt_clkevt_aee_dump_buf[128];
+static char     gpt_clkevt_aee_dump_buf[128];
+static uint64_t gpt_time_clkevt_handler_entry;
+static uint64_t gpt_time_clkevt_handler_exit;
+static uint64_t gpt_time_clkevt_set_next_event_entry;
+static uint64_t gpt_time_clkevt_set_next_event_exit;
+static uint64_t gpt_time_int_handler_entry;
+static uint64_t gpt_time_int_handler_exit;
+static unsigned int gpt_time_clkevt_set_next_event_cpu;
+
+#define _MTK_TIMER_DBG_AEE_DUMP
+
 #endif
 #endif
 
@@ -226,31 +237,52 @@ static struct irqaction gpt_irq = {
 	.dev_id = &gpt_clockevent,
 };
 
-static uint64_t gpt_clkevt_last_interrupt_time;
-static uint64_t gpt_clkevt_last_setting_next_event_time;
-
 void mt_gpt_clkevt_aee_dump(void)
 {
-#if defined(CONFIG_MTK_RAM_CONSOLE) && defined(CONFIG_MTK_TIMER_AEE_DUMP)
+#ifdef _MTK_TIMER_DBG_AEE_DUMP
 
 	/*
 	 * Notice: printk cannot be used during AEE flow to avoid lock issues.
 	 */
 
 	struct gpt_device *dev = id_to_dev(GPT_CLKEVT_ID);
+	int cpu_bound;
 
-	/* last interrupt time */
+	/* interrupt, clkevt handler and set next time */
 
 	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
 	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
-		"[GPT] last interrupt time: %llu\n", gpt_clkevt_last_interrupt_time);
+		"[GPT] int handler entry:    %llu\n", gpt_time_int_handler_entry);
 	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
 
-	/* last time of setting next event */
+	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
+	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
+		"[GPT] clkevt handler entry: %llu\n", gpt_time_clkevt_handler_entry);
+	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
 
 	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
 	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
-		"[GPT] last setting next event time: %llu\n", gpt_clkevt_last_setting_next_event_time);
+		"[GPT] set next event entry: %llu\n", gpt_time_clkevt_set_next_event_entry);
+	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
+
+	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
+	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
+		"[GPT] set next event exit:  %llu\n", gpt_time_clkevt_set_next_event_exit);
+	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
+
+	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
+	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
+		"[GPT] clkevt handler exit:  %llu\n", gpt_time_clkevt_handler_exit);
+	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
+
+	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
+	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
+		"[GPT] int handler exit:     %llu\n", gpt_time_int_handler_exit);
+	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
+
+	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
+	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
+		"[GPT] set next event cpu:   %u\n", gpt_time_clkevt_set_next_event_cpu);
 	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
 
 	/* global gpt status */
@@ -287,9 +319,12 @@ void mt_gpt_clkevt_aee_dump(void)
 		"[GPT1] CMP: 0x%x\n", __raw_readl(dev->base_addr + GPT_CMP));
 	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
 
+	cpu_bound = mt_irq_dump_cpu(gpt_clockevent.irq);
+
 	memset(gpt_clkevt_aee_dump_buf, 0, sizeof(gpt_clkevt_aee_dump_buf));
 	snprintf(gpt_clkevt_aee_dump_buf, sizeof(gpt_clkevt_aee_dump_buf),
-		"[GPT1] irq affinity: %d\n", gpt_clockevent.irq_affinity_on);
+		"[GPT1] irq affinity (bc, gic): %d, %d\n",
+		gpt_clockevent.irq_affinity_on, cpu_bound);
 	aee_sram_fiq_log(gpt_clkevt_aee_dump_buf);
 
 	/*
@@ -331,8 +366,15 @@ static inline unsigned int gpt_get_and_ack_irq(void)
  */
 static irqreturn_t gpt_handler(int irq, void *dev_id)
 {
-	unsigned int id = gpt_get_and_ack_irq();
-	struct gpt_device *dev = id_to_dev(id);
+	unsigned int id;
+	struct gpt_device *dev;
+
+#ifdef _MTK_TIMER_DBG_AEE_DUMP
+	gpt_time_int_handler_entry = sched_clock();
+#endif
+
+	id = gpt_get_and_ack_irq();
+	dev = id_to_dev(id);
 
 	if (likely(dev)) {
 		if (!(dev->flags & GPT_ISR))
@@ -341,6 +383,10 @@ static irqreturn_t gpt_handler(int irq, void *dev_id)
 			handlers[id]((unsigned long)dev_id);
 	} else
 		pr_info("GPT id is %d\n", id);
+
+#ifdef _MTK_TIMER_DBG_AEE_DUMP
+	gpt_time_int_handler_exit = sched_clock();
+#endif
 
 	return IRQ_HANDLED;
 }
@@ -523,6 +569,10 @@ static int mt_gpt_clkevt_next_event(unsigned long cycles,
 {
 	struct gpt_device *dev = id_to_dev(GPT_CLKEVT_ID);
 
+#ifdef _MTK_TIMER_DBG_AEE_DUMP
+	gpt_time_clkevt_set_next_event_entry = sched_clock();
+#endif
+
 	/*
 	 * disable irq first because we do not expect interrupt is triggered
 	 * by old compare value.
@@ -576,9 +626,11 @@ static int mt_gpt_clkevt_next_event(unsigned long cycles,
 
 	__gpt_start(dev);
 
-#if defined(CONFIG_MTK_TIMER_AEE_DUMP)
-	gpt_clkevt_last_setting_next_event_time = sched_clock();
+#ifdef _MTK_TIMER_DBG_AEE_DUMP
+	gpt_time_clkevt_set_next_event_exit = sched_clock();
+	gpt_time_clkevt_set_next_event_cpu = smp_processor_id();
 #endif
+
 	return 0;
 }
 
@@ -646,13 +698,10 @@ static void clkevt_handler(unsigned long data)
 {
 	struct clock_event_device *evt = (struct clock_event_device *)data;
 
-#if defined(CONFIG_MTK_TIMER_AEE_DUMP)
-	gpt_clkevt_last_interrupt_time = sched_clock();
-#endif
-
 #if defined(CONFIG_MTK_TIMER_DEBUG) && !defined(CONFIG_MTK_TIMER_BC_IRQ_FORCE_CPU0)
-	int cpu;
-	int err = 0;
+	int cpu, err;
+
+	err = 0;
 
 	cpu = mt_irq_dump_cpu(evt->irq);
 
@@ -673,11 +722,19 @@ static void clkevt_handler(unsigned long data)
 		}
 	}
 
-	if (!err)
+	if (err)
 		mt_irq_dump_status(evt->irq);
 #endif
 
+#ifdef _MTK_TIMER_DBG_AEE_DUMP
+	gpt_time_clkevt_handler_entry = sched_clock();
+#endif
+
 	evt->event_handler(evt);
+
+#ifdef _MTK_TIMER_DBG_AEE_DUMP
+	gpt_time_clkevt_handler_exit = sched_clock();
+#endif
 }
 
 static inline void setup_clksrc(u32 freq)
@@ -1081,6 +1138,5 @@ int gpt_set_clk(unsigned int id, unsigned int clksrc, unsigned int clkdiv)
 EXPORT_SYMBOL(gpt_set_clk);
 
 /************************************************************************************************/
-CLOCKSOURCE_OF_DECLARE(mtk_apxgpt_mt6739, "mediatek,apxgpt", mt_gpt_init);
-CLOCKSOURCE_OF_DECLARE(mtk_apxgpt_mt6763, "mediatek,mt6763-timer", mt_gpt_init);
+CLOCKSOURCE_OF_DECLARE(mtk_apxgpt, "mediatek,apxgpt", mt_gpt_init);
 

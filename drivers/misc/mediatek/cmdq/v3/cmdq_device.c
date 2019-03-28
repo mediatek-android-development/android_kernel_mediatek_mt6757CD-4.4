@@ -89,7 +89,6 @@ void cmdq_dev_init_module_base_VA(void)
 
 void cmdq_dev_deinit_module_base_VA(void)
 {
-	cmdq_dev_free_module_base_VA(cmdq_dev_get_module_base_VA_MMSYS_CONFIG());
 	cmdq_mdp_get_func()->deinitModuleBaseVA();
 }
 
@@ -102,8 +101,10 @@ unsigned long cmdq_dev_alloc_reference_VA_by_name(const char *ref_name)
 	if (node) {
 		VA = (unsigned long)of_iomap(node, 0);
 		of_node_put(node);
+		CMDQ_LOG("DEV: VA ref(%s): 0x%lx\n", ref_name, VA);
+	} else {
+		CMDQ_ERR("DEV: cannot parse node name:%s\n", ref_name);
 	}
-	CMDQ_LOG("DEV: VA ref(%s): 0x%lx\n", ref_name, VA);
 	return VA;
 }
 
@@ -486,9 +487,9 @@ void cmdq_dev_init(struct platform_device *pDevice)
 		gCmdqDev.clk_gce_timer = devm_clk_get(&pDevice->dev, "GCE_TIMER");
 
 		CMDQ_LOG
-		    ("[CMDQ] platform_dev: dev: %p, PA: %pa, VA: %lx, irqId: %d, irqSecId: %d\n",
+		    ("[CMDQ] platform_dev dev:%p PA:%pa VA:%lx irqId:%d irqSecId:%d clk gce:0x%p timer:0x%p\n",
 		     gCmdqDev.pDev, &gCmdqDev.regBasePA, gCmdqDev.regBaseVA, gCmdqDev.irqId,
-		     gCmdqDev.irqSecId);
+		     gCmdqDev.irqSecId, gCmdqDev.clk_gce, gCmdqDev.clk_gce_timer);
 	} while (0);
 
 	if (!enable_4G()) {
@@ -497,6 +498,8 @@ void cmdq_dev_init(struct platform_device *pDevice)
 		CMDQ_LOG("set dma mask result: %d\n", gCmdqDev.dma_mask_result);
 	}
 
+	/* map MMSYS VA */
+	cmdq_mdp_map_mmsys_VA();
 	/* init module VA */
 	cmdq_dev_init_module_base_VA();
 	/* init module clock */
@@ -509,6 +512,8 @@ void cmdq_dev_init(struct platform_device *pDevice)
 
 void cmdq_dev_deinit(void)
 {
+	/* unmap MMSYS VA */
+	cmdq_mdp_unmap_mmsys_VA();
 	cmdq_dev_deinit_module_base_VA();
 
 	/* deinit cmdq device dependent data */

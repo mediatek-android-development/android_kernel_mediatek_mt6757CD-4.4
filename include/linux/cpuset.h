@@ -43,7 +43,9 @@ static inline void cpuset_dec(void)
 
 extern int cpuset_init(void);
 extern void cpuset_init_smp(void);
+extern void cpuset_force_rebuild(void);
 extern void cpuset_update_active_cpus(bool cpu_online);
+extern void cpuset_wait_for_hotplug(void);
 extern void cpuset_cpus_allowed(struct task_struct *p, struct cpumask *mask);
 extern void cpuset_cpus_allowed_fallback(struct task_struct *p);
 extern nodemask_t cpuset_mems_allowed(struct task_struct *p);
@@ -141,8 +143,8 @@ static inline void set_mems_allowed(nodemask_t nodemask)
 }
 
 #ifdef CONFIG_MTK_USER_SPACE_GLOBAL_CPUSET
-void set_user_space_global_cpuset(struct cpumask *global_cpus);
-void unset_user_space_global_cpuset(void);
+void set_user_space_global_cpuset(struct cpumask *global_cpus, int cgroup_id);
+void unset_user_space_global_cpuset(int cgroup_id);
 #endif
 
 #else /* !CONFIG_CPUSETS */
@@ -152,10 +154,14 @@ static inline bool cpusets_enabled(void) { return false; }
 static inline int cpuset_init(void) { return 0; }
 static inline void cpuset_init_smp(void) {}
 
+static inline void cpuset_force_rebuild(void) { }
+
 static inline void cpuset_update_active_cpus(bool cpu_online)
 {
 	partition_sched_domains(1, NULL, NULL);
 }
+
+static inline void cpuset_wait_for_hotplug(void) { }
 
 static inline void cpuset_cpus_allowed(struct task_struct *p,
 				       struct cpumask *mask)

@@ -561,7 +561,7 @@ int ipanic(struct notifier_block *this, unsigned long event, void *ptr)
 	mrdump_mini_ke_cpu_regs(NULL);
 	inner_dcache_flush_all();
 	if (!has_mt_dump_support())
-		emergency_restart();
+		aee_exception_reboot();
 	ipanic_mrdump_mini(AEE_REBOOT_MODE_KERNEL_PANIC, "kernel PANIC");
 	if (!ipanic_data_is_valid(IPANIC_DT_KERNEL_LOG)) {
 		ipanic_klog_region(&dumper);
@@ -648,7 +648,7 @@ void ipanic_recursive_ke(struct pt_regs *regs, struct pt_regs *excp_regs, int cp
 	mrdump_mini_per_cpu_regs(cpu, regs, current);
 	inner_dcache_flush_all();
 	if (!has_mt_dump_support())
-		emergency_restart();
+		aee_exception_reboot();
 	ipanic_mrdump_mini(AEE_REBOOT_MODE_NESTED_EXCEPTION, "Nested Panic");
 
 	ipanic_data_to_sd(IPANIC_DT_CURRENT_TSK, 0);
@@ -732,13 +732,32 @@ void ipanic_zap_console_sem(void)
 	console_unlock();
 }
 
+#if defined(CONFIG_RANDOMIZE_BASE) && defined(CONFIG_ARM64)
+static u64 show_kaslr(void)
+{
+	u64 const kaslr_offset = kimage_vaddr - KIMAGE_VADDR;
+
+	pr_notice("Kernel Offset: 0x%llx from 0x%lx\n", kaslr_offset, KIMAGE_VADDR);
+	return kaslr_offset;
+}
+#else
+static u64 show_kaslr(void)
+{
+	pr_notice("Kernel Offset: disabled\n");
+	return 0;
+}
+#endif
+
 static int ipanic_die(struct notifier_block *self, unsigned long cmd, void *ptr)
 {
 	struct kmsg_dumper dumper;
 	struct die_args *dargs = (struct die_args *)ptr;
+	u64 kaslr_offset;
 
+	kaslr_offset = show_kaslr();
 	print_modules();
 #ifdef CONFIG_MTK_RAM_CONSOLE
+	aee_rr_rec_kaslr_offset(kaslr_offset);
 	aee_rr_rec_exp_type(2);
 	aee_rr_rec_fiq_step(AEE_FIQ_STEP_KE_IPANIC_DIE);
 #endif
@@ -764,7 +783,7 @@ static int ipanic_die(struct notifier_block *self, unsigned long cmd, void *ptr)
 
 	if (!has_mt_dump_support()) {
 		ipanic_zap_console_sem();
-		emergency_restart();
+		aee_exception_reboot();
 	}
 
 	ipanic_mrdump_mini(AEE_REBOOT_MODE_KERNEL_PANIC, "kernel Oops");

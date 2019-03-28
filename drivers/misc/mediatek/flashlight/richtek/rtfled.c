@@ -444,14 +444,5 @@ module_exit(rtfled_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Patrick Chang <patrick_chang@richtek.com");
-MODULE_VERSION("1.0.3_MTK");
+MODULE_VERSION("1.0.2_G");
 MODULE_DESCRIPTION("Richtek Flash LED Driver");
-
-/*
- * Version Note
- * 1.0.3_MTK
- * (1) Remove typedef
- *
- * 1.0.2_MTK
- * (1) Initial Release
- */

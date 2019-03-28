@@ -181,6 +181,7 @@ struct aee_siginfo {
 #define AEEIOCTL_USER_IOCTL_TO_KERNEL_WANING _IOR('p', 0x0E, int)
 #define AEEIOCTL_SET_AEE_FORCE_EXP _IOR('p', 0x0F, int)
 #define AEEIOCTL_GET_AEE_SIGINFO _IOW('p', 0x10, struct aee_siginfo)
+#define AEEIOCTL_SET_HANG_FLAG _IOW('p', 0x11, int)
 
 #define AED_FILE_OPS(entry) \
 	static const struct file_operations proc_##entry##_fops = { \
@@ -218,4 +219,9 @@ extern int aee_dump_ccci_debug_info(int md_id, void **addr, int *size);
 extern void show_stack(struct task_struct *tsk, unsigned long *sp);
 extern int aee_mode;
 extern void aee_kernel_RT_Monitor_api(int lParam);
+extern void mlog_get_buffer(char **ptr, int *size)__attribute__((weak));
+extern void get_msdc_aee_buffer(unsigned long *buff,
+	unsigned long *size)__attribute__((weak));
+extern void show_task_mem(void)__attribute__((weak));
+void show_native_bt_by_pid(int task_pid);
 #endif

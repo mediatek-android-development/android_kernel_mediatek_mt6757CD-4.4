@@ -107,7 +107,7 @@ unsigned long dcm_cci_phys_base;
 
 #ifdef USING_PR_LOG
 #define REG_DUMP(addr) dcm_info("%-30s(0x%08lx): 0x%08x\n", #addr, addr, reg_read(addr))
-#define SECURE_REG_DUMP(addr) dcm_info("%-30s(0x%08lx): 0x%08x\n", #addr, addr, mcsi_a_smc_read_phy(addr##_PHYS))
+#define SECURE_REG_DUMP(addr) dcm_info("%-30s(0x%08lx): 0x%08zx\n", #addr, addr, mcsi_a_smc_read_phy(addr##_PHYS))
 #endif
 
 /** global **/

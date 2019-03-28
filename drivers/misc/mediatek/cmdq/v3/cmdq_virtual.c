@@ -192,29 +192,26 @@ uint64_t cmdq_virtual_flag_from_scenario_legacy(enum CMDQ_SCENARIO_ENUM scn)
 		break;
 	case CMDQ_SCENARIO_SUB_DISP:
 		flag = ((1LL << CMDQ_ENG_DISP_OVL1) |
-			(1LL << CMDQ_ENG_DISP_COLOR1) |
 			(1LL << CMDQ_ENG_DISP_GAMMA) |
 			(1LL << CMDQ_ENG_DISP_RDMA1) | (1LL << CMDQ_ENG_DISP_DSI1_CMD));
 		break;
 	case CMDQ_SCENARIO_SUB_ALL:
 		flag = ((1LL << CMDQ_ENG_DISP_OVL1) |
 			(1LL << CMDQ_ENG_DISP_WDMA1) |
-			(1LL << CMDQ_ENG_DISP_COLOR1) |
 			(1LL << CMDQ_ENG_DISP_GAMMA) |
 			(1LL << CMDQ_ENG_DISP_RDMA1) | (1LL << CMDQ_ENG_DISP_DSI1_CMD));
 		break;
 	case CMDQ_SCENARIO_MHL_DISP:
 		flag = ((1LL << CMDQ_ENG_DISP_OVL1) |
-			(1LL << CMDQ_ENG_DISP_COLOR1) |
 			(1LL << CMDQ_ENG_DISP_GAMMA) |
-			(1LL << CMDQ_ENG_DISP_RDMA1) | (1LL << CMDQ_ENG_DISP_DPI));
+			(1LL << CMDQ_ENG_DISP_RDMA1));
 		break;
 	case CMDQ_SCENARIO_RDMA0_DISP:
 		flag = ((1LL << CMDQ_ENG_DISP_RDMA0) |
 			(1LL << CMDQ_ENG_DISP_UFOE) | (1LL << CMDQ_ENG_DISP_DSI0_CMD));
 		break;
 	case CMDQ_SCENARIO_RDMA2_DISP:
-		flag = ((1LL << CMDQ_ENG_DISP_RDMA2) | (1LL << CMDQ_ENG_DISP_DPI));
+		flag = (1LL << CMDQ_ENG_DISP_RDMA2);
 		break;
 	default:
 		flag = 0LL;
@@ -280,6 +277,7 @@ bool cmdq_virtual_is_disp_scenario(const enum CMDQ_SCENARIO_ENUM scenario)
 	case CMDQ_SCENARIO_DISP_SCREEN_CAPTURE:
 	case CMDQ_SCENARIO_DISP_MIRROR_MODE:
 	case CMDQ_SCENARIO_DISP_CONFIG_OD:
+	case CMDQ_SCENARIO_DISP_VFP_CHANGE:
 		/* color path */
 	case CMDQ_SCENARIO_DISP_COLOR:
 	case CMDQ_SCENARIO_USER_DISP_COLOR:
@@ -357,6 +355,7 @@ int cmdq_virtual_disp_thread(enum CMDQ_SCENARIO_ENUM scenario)
 		return 5;
 
 	case CMDQ_SCENARIO_HIGHP_TRIGGER_LOOP:
+	case CMDQ_SCENARIO_DISP_VFP_CHANGE:
 		return 2;
 
 	case CMDQ_SCENARIO_DISP_ESD_CHECK:
@@ -441,6 +440,7 @@ enum CMDQ_HW_THREAD_PRIORITY_ENUM cmdq_virtual_priority_from_scenario(enum CMDQ_
 	case CMDQ_SCENARIO_DISP_CONFIG_PRIMARY_PQ:
 	case CMDQ_SCENARIO_DISP_CONFIG_SUB_PQ:
 	case CMDQ_SCENARIO_DISP_CONFIG_OD:
+	case CMDQ_SCENARIO_DISP_VFP_CHANGE:
 		/* color path */
 	case CMDQ_SCENARIO_DISP_COLOR:
 	case CMDQ_SCENARIO_USER_DISP_COLOR:
@@ -520,7 +520,7 @@ void cmdq_virtual_get_reg_id_from_hwflag(uint64_t hwflag, enum CMDQ_DATA_REGISTE
 		*valueRegId = CMDQ_DATA_REG_2D_SHARPNESS_1;
 		*destRegId = CMDQ_DATA_REG_2D_SHARPNESS_1_DST;
 		*regAccessToken = CMDQ_SYNC_TOKEN_GPR_SET_2;
-	} else if (hwflag & ((1LL << CMDQ_ENG_DISP_COLOR0 | (1LL << CMDQ_ENG_DISP_COLOR1)))) {
+	} else if (hwflag & (1LL << CMDQ_ENG_DISP_COLOR0)) {
 		*valueRegId = CMDQ_DATA_REG_PQ_COLOR;
 		*destRegId = CMDQ_DATA_REG_PQ_COLOR_DST;
 		*regAccessToken = CMDQ_SYNC_TOKEN_GPR_SET_3;
@@ -769,25 +769,6 @@ void cmdq_virtual_print_status_seq_clock(struct seq_file *m)
 #endif
 }
 
-void cmdq_virtual_enable_common_clock_locked(bool enable)
-{
-#ifdef CMDQ_PWR_AWARE
-	if (enable) {
-		CMDQ_VERBOSE("[CLOCK] Enable SMI & LARB0 Clock\n");
-		/* Use SMI clock API */
-#ifdef CMDQ_CONFIG_SMI
-		smi_bus_enable(SMI_LARB_MMSYS0, "CMDQ");
-#endif
-	} else {
-		CMDQ_VERBOSE("[CLOCK] Disable SMI & LARB0 Clock\n");
-		/* disable, reverse the sequence */
-#ifdef CMDQ_CONFIG_SMI
-		smi_bus_disable(SMI_LARB_MMSYS0, "CMDQ");
-#endif
-	}
-#endif				/* CMDQ_PWR_AWARE */
-}
-
 void cmdq_virtual_enable_gce_clock_locked(bool enable)
 {
 #ifdef CMDQ_PWR_AWARE
@@ -885,12 +866,12 @@ uint64_t cmdq_virtual_flag_from_scenario(enum CMDQ_SCENARIO_ENUM scn)
 		break;
 	case CMDQ_SCENARIO_SUB_DISP:
 		flag = ((1LL << CMDQ_ENG_DISP_OVL1) |
-			(1LL << CMDQ_ENG_DISP_RDMA1) | (1LL << CMDQ_ENG_DISP_DPI));
+			(1LL << CMDQ_ENG_DISP_RDMA1));
 		break;
 	case CMDQ_SCENARIO_SUB_ALL:
 		flag = ((1LL << CMDQ_ENG_DISP_OVL1) |
 			(1LL << CMDQ_ENG_DISP_WDMA1) |
-			(1LL << CMDQ_ENG_DISP_RDMA1) | (1LL << CMDQ_ENG_DISP_DPI));
+			(1LL << CMDQ_ENG_DISP_RDMA1));
 		break;
 	case CMDQ_SCENARIO_RDMA0_DISP:
 		flag = ((1LL << CMDQ_ENG_DISP_RDMA0) | (1LL << CMDQ_ENG_DISP_DSI0_CMD));
@@ -904,7 +885,7 @@ uint64_t cmdq_virtual_flag_from_scenario(enum CMDQ_SCENARIO_ENUM scn)
 		break;
 	case CMDQ_SCENARIO_MHL_DISP:
 	case CMDQ_SCENARIO_RDMA1_DISP:
-		flag = ((1LL << CMDQ_ENG_DISP_RDMA1) | (1LL << CMDQ_ENG_DISP_DPI));
+		flag = ((1LL << CMDQ_ENG_DISP_RDMA1));
 		break;
 	default:
 		flag = 0LL;
@@ -1041,7 +1022,6 @@ void cmdq_virtual_function_setting(void)
 	pFunc->moduleEntrySuspend = cmdq_virtual_can_module_entry_suspend;
 	pFunc->printStatusClock = cmdq_virtual_print_status_clock;
 	pFunc->printStatusSeqClock = cmdq_virtual_print_status_seq_clock;
-	pFunc->enableCommonClockLocked = cmdq_virtual_enable_common_clock_locked;
 	pFunc->enableGCEClockLocked = cmdq_virtual_enable_gce_clock_locked;
 	pFunc->parseErrorModule = cmdq_virtual_parse_error_module_by_hwflag_impl;
 

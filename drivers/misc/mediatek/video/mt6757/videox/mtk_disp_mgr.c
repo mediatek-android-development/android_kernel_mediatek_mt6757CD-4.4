@@ -728,6 +728,11 @@ static int input_config_preprocess(struct disp_frame_cfg_t *cfg)
 					      cfg->input_cfg[i].next_buff_idx, mva_offset,
 					      cfg->input_cfg[i].frm_sequence);
 
+			if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_MEMORY) {
+				mtkfb_update_buf_ticket(session_id, layer_id, cfg->input_cfg[i].next_buff_idx,
+							get_ovl2mem_ticket());
+			}
+
 			disp_sync_put_cached_layer_info(session_id, layer_id, &cfg->input_cfg[i], dst_mva);
 
 			dump_input_cfg_info(&cfg->input_cfg[i], session_id, is_err);
@@ -797,6 +802,10 @@ static int output_config_preprocess(struct disp_frame_cfg_t *cfg)
 		 cfg->output_cfg.pitchUV, cfg->output_cfg.pa, dst_mva,
 		  get_ovl2mem_ticket(), cfg->output_cfg.security);
 
+	if (DISP_SESSION_TYPE(session_id) == DISP_SESSION_MEMORY)
+		mtkfb_update_buf_ticket(session_id, disp_sync_get_output_timeline_id(),
+						cfg->output_cfg.buff_idx, get_ovl2mem_ticket());
+
 	mtkfb_update_buf_info(cfg->session_id,
 			      disp_sync_get_output_interface_timeline_id(),
 			      cfg->output_cfg.buff_idx, 0,
@@ -855,7 +864,6 @@ static int __frame_config(struct frame_queue_t *frame_node)
 		if (!present_fence) {
 			DISPERR("error to get prev_present_fence from fd %d\n",
 				frame_cfg->prev_present_fence_fd);
-			return -EINVAL;
 		}
 	}
 	frame_cfg->prev_present_fence_struct = present_fence;

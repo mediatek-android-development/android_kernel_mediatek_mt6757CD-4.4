@@ -37,6 +37,7 @@
 #include <linux/delay.h>
 #include <linux/dma-mapping.h>
 #include <linux/slab.h>
+#include <linux/usb/composite.h>
 
 #include "musb_core.h"
 #include "mu3d_hal_osal.h"
@@ -125,11 +126,20 @@ static inline void map_dma_buffer(struct musb_request *request,
 
 #endif
 	if (request->request.dma == DMA_ADDR_INVALID) {
-		request->request.dma = dma_map_single(musb->controller,
+		dma_addr_t dma_addr;
+		int ret;
+
+		dma_addr = dma_map_single(musb->controller,
 						      request->request.buf,
 						      length,
 						      request->tx
 						      ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
+		ret = dma_mapping_error(musb->controller, dma_addr);
+		if (unlikely(ret)) {
+			os_printk(K_ERR, "DMA MAPP ERROR, ret:%d\n", ret);
+			return;
+		}
+		request->request.dma = dma_addr;
 		request->map_state = MUSB_MAPPED;
 	} else {
 		dma_sync_single_for_device(musb->controller,
@@ -580,6 +590,76 @@ void musb_g_rx(struct musb *musb, u8 epnum)
 
 /* ------------------------------------------------------------ */
 
+static int is_db_ok(struct musb *musb, struct musb_ep *musb_ep)
+{
+	struct usb_composite_dev *cdev = (musb->g).ep0->driver_data;
+	struct usb_configuration *c = cdev->config;
+	struct usb_gadget *gadget = &(musb->g);
+	int tmp;
+	int ret = 1;
+
+	if (c == NULL) {
+		os_printk(K_INFO, "cdev->config NULL!, UMS case?\n");
+		return 1;
+	}
+
+	for (tmp = 0; tmp < MAX_CONFIG_INTERFACES; tmp++) {
+		struct usb_function *f = c->interface[tmp];
+		struct usb_descriptor_header **descriptors;
+
+		if (!f)
+			break;
+
+		os_printk(K_INFO, "Ifc name=%s\n", f->name);
+
+		switch (gadget->speed) {
+		case USB_SPEED_SUPER:
+			descriptors = f->ss_descriptors;
+			break;
+		case USB_SPEED_HIGH:
+			descriptors = f->hs_descriptors;
+			break;
+		default:
+			descriptors = f->fs_descriptors;
+		}
+
+		for (; *descriptors; ++descriptors) {
+			struct usb_endpoint_descriptor *ep;
+			int is_in;
+			int epnum;
+
+			if ((*descriptors)->bDescriptorType != USB_DT_ENDPOINT)
+				continue;
+
+			ep = (struct usb_endpoint_descriptor *)*descriptors;
+
+			is_in = (ep->bEndpointAddress & 0x80) >> 7;
+			epnum = (ep->bEndpointAddress & 0x0f);
+
+			/*
+			 * Under saving mode, some kinds of EPs have to be set as Single Buffer
+			 * ACM OUT-BULK - Signle
+			 * ACM IN-BULK - Double
+			 * ADB OUT-BULK - Signle
+			 * ADB IN-BULK - Single
+			 */
+
+			/* ep must be matched */
+			if (ep->bEndpointAddress == (musb_ep->end_point).address) {
+
+			if (gadget->speed == USB_SPEED_SUPER) {
+				if (!strcmp(f->name, "Function FS Gadget"))
+					ret = 0;
+			}
+				goto end;
+			}
+		}
+	}
+end:
+	return ret;
+}
+
+
 static int musb_gadget_enable(struct usb_ep *ep, const struct usb_endpoint_descriptor *desc)
 {
 	unsigned long flags;
@@ -714,7 +794,19 @@ static int musb_gadget_enable(struct usb_ep *ep, const struct usb_endpoint_descr
 	 * So at FPGA stage and PIO, just use _ONE_ slot.
 	 */
 #ifdef USE_SSUSB_QMU
-	_ex_mu3d_hal_ep_enable(epnum, dir, type, maxp, 0, MAX_SLOT, 0, 0);
+	if (is_saving_mode()) {
+		if (is_db_ok(musb, musb_ep)) {
+			os_printk(K_INFO, "Saving mode, but EP%d supports DBBUF\n",
+				musb_ep->current_epnum);
+			_ex_mu3d_hal_ep_enable(epnum, dir, type, maxp, 0, MAX_SLOT, 0, 0);
+		} else {
+			os_printk(K_INFO, "EP%d supports single buffer\n", musb_ep->current_epnum);
+			_ex_mu3d_hal_ep_enable(epnum, dir, type, maxp, 0, 0, 0, 0);
+		}
+	} else {
+		os_printk(K_INFO, "EP%d supports DBBUF\n", musb_ep->current_epnum);
+		_ex_mu3d_hal_ep_enable(epnum, dir, type, maxp, 0, MAX_SLOT, 0, 0);
+	}
 #else
 	/*TODO: Check support mulitslots on real ship */
 	_ex_mu3d_hal_ep_enable(epnum, dir, type, maxp, 0, 0, 0, 0);
@@ -998,17 +1090,6 @@ static int musb_gadget_queue(struct usb_ep *ep, struct usb_request *req, gfp_t g
 				u32 val = 0;
 
 				qmu_printk(K_DEBUG, "[TX] Send ZLP\n");
-				if (wait_for_value_us
-					(USB_QMU_TQCSR(request->epnum), TXQ_EPQ_STATE,
-					0, 1, utime) == RET_SUCCESS) {
-					qmu_printk(K_WARNIN, "Q_TX1[%d] %p 0x%x\n", request->epnum,
-					 USB_QMU_TQCSR(request->epnum),
-						os_readl(USB_QMU_TQCSR(request->epnum)));
-				} else {
-					qmu_printk(K_WARNIN, "Q_TX2[%d] %p 0x%x\n", request->epnum,
-					 USB_QMU_TQCSR(request->epnum),
-						os_readl(USB_QMU_TQCSR(request->epnum)));
-				}
 				if (wait_for_value_us
 				    (USB_END_OFFSET(request->epnum, U3D_TX1CSR0), TX_FIFOEMPTY,
 				     TX_FIFOEMPTY, 1, utime) == RET_SUCCESS) {
@@ -1904,6 +1985,7 @@ err:
 	return retval;
 }
 
+#ifdef CONFIG_USB_G_ANDROID
 static void stop_activity(struct musb *musb, struct usb_gadget_driver *driver)
 {
 	int i;
@@ -1938,6 +2020,7 @@ static void stop_activity(struct musb *musb, struct usb_gadget_driver *driver)
 		}
 	}
 }
+#endif
 
 /*
  * Unregister the gadget driver. Used by gadget drivers when
@@ -1949,7 +2032,6 @@ static int musb_gadget_stop(struct usb_gadget *g)
 {
 	struct musb *musb = gadget_to_musb(g);
 	unsigned long flags;
-	struct usb_gadget_driver *driver = musb->gadget_driver;
 
 	if (musb->xceiv->last_event == USB_EVENT_NONE)
 		pm_runtime_get_sync(musb->controller);
@@ -1966,11 +2048,13 @@ static int musb_gadget_stop(struct usb_gadget *g)
 	(void)musb_gadget_vbus_draw(&musb->g, 0);
 
 	musb->xceiv->otg->state = OTG_STATE_UNDEFINED;
-	stop_activity(musb, driver);
+#ifdef CONFIG_USB_G_ANDROID
+	stop_activity(musb, musb->gadget_driver);
+#endif
 	otg_set_peripheral(musb->xceiv->otg, NULL);
 
-
 	musb->is_active = 0;
+	musb->gadget_driver = NULL;
 	musb_platform_try_idle(musb, 0);
 	spin_unlock_irqrestore(&musb->lock, flags);
 
@@ -1982,8 +2066,10 @@ static int musb_gadget_stop(struct usb_gadget *g)
 		 */
 	}
 
+#ifdef CONFIG_USB_G_ANDROID
 	if (!is_otg_enabled(musb))
 		musb_stop(musb);
+#endif
 
 	pm_runtime_put(musb->controller);
 
@@ -2155,6 +2241,19 @@ void musb_g_reset(struct musb *musb) __releases(musb->lock) __acquires(musb->loc
 	musb->g.b_hnp_enable = 0;
 	musb->g.a_alt_hnp_support = 0;
 	musb->g.a_hnp_support = 0;
+
+#ifndef CONFIG_USB_G_ANDROID
+	{
+		struct musb_ep		*ep;
+
+		ep = &musb->endpoints[0].ep_in;
+		if (!list_empty(&ep->req_list)) {
+			os_printk(K_NOTICE, "%s reinit EP[0] req_list\n", __func__);
+			INIT_LIST_HEAD(&ep->req_list);
+		}
+	}
+#endif
+
 
 	/* Normal reset, as B-Device;
 	 * or else after HNP, as A-Device

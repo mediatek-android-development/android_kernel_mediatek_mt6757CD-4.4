@@ -21,6 +21,7 @@
 #include <linux/random.h>
 #include <asm/setup.h>
 #include <mtk_eem.h>
+#include <mtk_spm_idle.h>
 #include <mtk_spm_internal.h>
 #include <mtk_spm_misc.h>
 #include <mtk_spm_pmic_wrap.h>
@@ -39,6 +40,12 @@
 #endif /* CONFIG_MACH_MT6739 */
 #ifdef CONFIG_MTK_DCS
 #include <mt-plat/mtk_meminfo.h>
+#endif
+
+#if defined(CONFIG_MACH_MT6771)
+/* for mp1 vproc control check with mcdi and hps */
+#include "mtk_hps_internal.h"
+#include "mtk_mcdi_governor.h"
 #endif
 
 /**************************************
@@ -71,8 +78,13 @@ const char *wakesrc_str[32] = {
 	[8] = " R12_CCIF0_EVENT_B",
 	[9] = " R12_LOWBATTERY_IRQ_B",
 	[10] = " R12_SSPM_SPM_IRQ_B",
+#if defined(CONFIG_MACH_MT6771)
+	[11] = " R12_SCP_SPM_IRQ_B",
+	[12] = " R12_SCP_WDT_EVENT_B",
+#else /* MT6763 and MT6739 */
 	[11] = " R12_26M_WAKE",
 	[12] = " R12_26M_SLEEP",
+#endif
 	[13] = " R12_PCM_WDT_WAKEUP_B",
 	[14] = " R12_USB_CDSC_B",
 	[15] = " R12_USB_POWERDWN_B",
@@ -339,26 +351,6 @@ void spm_set_dummy_read_addr(int debug)
 #endif /* CONFIG_MACH_MT6739 */
 }
 
-void __spm_set_pcm_wdt(int en)
-{
-	/* enable PCM WDT (normal mode) to start count if needed */
-	if (en) {
-		u32 con1;
-
-		con1 = spm_read(PCM_CON1) & ~(PCM_WDT_WAKE_MODE_LSB);
-		spm_write(PCM_CON1, SPM_REGWR_CFG_KEY | con1);
-
-		if (spm_read(PCM_TIMER_VAL) > PCM_TIMER_MAX)
-			spm_write(PCM_TIMER_VAL, PCM_TIMER_MAX);
-		spm_write(PCM_WDT_VAL, spm_read(PCM_TIMER_VAL) + PCM_WDT_TIMEOUT);
-		spm_write(PCM_CON1, con1 | SPM_REGWR_CFG_KEY | PCM_WDT_EN_LSB);
-	} else {
-		spm_write(PCM_CON1, SPM_REGWR_CFG_KEY | (spm_read(PCM_CON1) &
-		~PCM_WDT_EN_LSB));
-	}
-
-}
-
 int __attribute__ ((weak)) get_dynamic_period(int first_use, int first_wakeup_time,
 					      int battery_capacity_level)
 {
@@ -386,6 +378,58 @@ u32 _spm_get_wake_period(int pwake_time, unsigned int last_wr)
 		period = 36 * 3600;
 
 	return period;
+}
+
+bool __attribute__ ((weak)) mcdi_is_buck_off(int cluster_idx)
+{
+	spm_crit2("NO %s !!!\n", __func__);
+	return false;
+}
+bool __attribute__ ((weak)) cpuhp_is_buck_off(int cluster_idx)
+{
+	spm_crit2("NO %s !!!\n", __func__);
+	return false;
+}
+
+#if defined(CONFIG_MACH_MT6771)
+bool is_big_buck_ctrl_by_spm(void)
+{
+	/*
+	 * parameter idx MP0: 0, MP1: 1
+	 * check mcdi status with big_buck
+	 * check hotplug status with big_buck
+	 * mcdi/cpuhp api
+	 * @Return:
+	 * true if buck is powered off by mcdi/cpuhp
+	 * false if buck is not powered off by mcdi/cpuhp
+	 *
+	 */
+
+	return !(mcdi_is_buck_off(1) || cpuhp_is_buck_off(1));
+}
+#endif
+
+void __sync_big_buck_ctrl_pcm_flag(u32 *flag)
+{
+#if defined(CONFIG_MACH_MT6771)
+	if (is_big_buck_ctrl_by_spm()) {
+		*flag |= (SPM_FLAG1_BIG_BUCK_OFF_ENABLE |
+				SPM_FLAG1_BIG_BUCK_ON_ENABLE);
+	} else {
+		*flag &= ~(SPM_FLAG1_BIG_BUCK_OFF_ENABLE |
+				SPM_FLAG1_BIG_BUCK_ON_ENABLE);
+	}
+#endif
+}
+
+void __sync_vcore_ctrl_pcm_flag(u32 oper_cond, u32 *flag)
+{
+#if defined(CONFIG_MACH_MT6771)
+	if (oper_cond & DEEPIDLE_OPT_VCORE_LOW_VOLT)
+		*flag &= ~SPM_FLAG1_VCORE_LP_0P7V;
+	else
+		*flag |= SPM_FLAG1_VCORE_LP_0P7V;
+#endif
 }
 
 MODULE_DESCRIPTION("SPM-Internal Driver v0.1");

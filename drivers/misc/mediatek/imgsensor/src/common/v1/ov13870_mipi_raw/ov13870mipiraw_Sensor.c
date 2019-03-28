@@ -33,7 +33,7 @@
 static struct imgsensor_info_struct imgsensor_info = {
 	.sensor_id = OV13870_SENSOR_ID,	/* record sensor id defined in kd_imgsensor.h */
 
-	.checksum_value = 0x7405d789,
+	.checksum_value = 0x962c56c1,
 
 	.pre = {
 		.pclk = 180036000,	/* record different mode's pclk */
@@ -1528,11 +1528,32 @@ static kal_uint32 set_test_pattern_mode(kal_bool enable)
 		/* 0x5081[0]: 1 enable,  0 disable */
 		/* 0x5081[5:4]: Color bar type */
 		write_cmos_sensor_byte(0x5081, 0x01);
+
+		/*
+		 * Need to force enable pd restore in test pattern when
+		 * pd compensation enabled (0x5000[5]).
+		 * In current PDAF_VC_TYPE and PDAF_NO_PDAF mode setting,
+		 * pd compensation set but not set pd restore, so force
+		 * set pd restore only in test pattern.
+		 */
+		if ((imgsensor.sensor_mode == IMGSENSOR_MODE_CAPTURE)
+		    && (pdaf_sensor_type == PDAF_VC_TYPE
+			|| pdaf_sensor_type == PDAF_NO_PDAF)) {
+			write_cmos_sensor_byte(0x5001, 0x04);
+		}
 	} else {
 		/* 0x5081[0]: 1 enable,  0 disable */
 		/* 0x5081[5:4]: Color bar type */
 		write_cmos_sensor(0x5081, 0x0000);
+
+		/* Recover pd restore setting */
+		if ((imgsensor.sensor_mode == IMGSENSOR_MODE_CAPTURE)
+		    && (pdaf_sensor_type == PDAF_VC_TYPE
+			|| pdaf_sensor_type == PDAF_NO_PDAF)) {
+			write_cmos_sensor_byte(0x5001, 0x00);
+		}
 	}
+
 	spin_lock(&imgsensor_drv_lock);
 	imgsensor.test_pattern = enable;
 	spin_unlock(&imgsensor_drv_lock);
@@ -1551,15 +1572,20 @@ static kal_uint32 streaming_control(kal_bool enable)
 
 static kal_uint32 get_sensor_temperature(void)
 {
-	UINT8 temperature;
+	UINT8 temperature, temp;
 	INT32 temperature_convert;
+	static DEFINE_MUTEX(get_temperature_mutex);
 
-	temperature = read_cmos_sensor(0x4d12);
+	mutex_lock(&get_temperature_mutex);
+	temp = read_cmos_sensor_byte(0x4d12);
+	write_cmos_sensor_byte(0x4d12, temp | 0x01);
+	temperature = read_cmos_sensor_byte(0x4d13);
+	mutex_unlock(&get_temperature_mutex);
 
-	if (temperature <= 0xc0)
+	if (temperature < 0xc0)
 		temperature_convert = temperature;
 	else
-		temperature_convert = (INT8)temperature;
+		temperature_convert = 192 - temperature;
 
 	LOG_INF("temp_c(%d), read_reg(%d)\n", temperature_convert, temperature);
 

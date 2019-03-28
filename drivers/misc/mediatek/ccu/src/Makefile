@@ -16,6 +16,16 @@
 
 #subdir-ccflags-y += -DMTK_VPU_EMULATOR
 subdir-ccflags-y += -DMTK_VPU_KERNEL
+subdir-ccflags-y += -DCCU_AF_ENABLE
 
-obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-y += 1.0/
+platform = $(subst ",,$(CONFIG_MTK_PLATFORM))
+
+obj-y += $(subst ",,$(platform))/
+
+ifneq (,$(filter $(platform),mt6757 mt6799))
+    obj-y += 1.0/
+else ifneq (,$(filter $(platform),mt6758 mt6763))
+    obj-y += 1.1/
+else
+    obj-y += 2.0/
+endif

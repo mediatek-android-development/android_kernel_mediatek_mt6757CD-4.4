@@ -259,7 +259,7 @@ int AudDrv_btcvsd_Allocate_Buffer(kal_uint8 isRX)
 											&BT_CVSD_Mem.pucRXPhysBufAddr,
 											GFP_KERNEL);
 			if ((BT_CVSD_Mem.pucRXPhysBufAddr == 0) || (BT_CVSD_Mem.pucRXVirtBufAddr == NULL)) {
-				pr_debug("AudDrv_btcvsd_Allocate_Buffer dma_alloc_coherent RX fail\n");
+				pr_warn("AudDrv_btcvsd_Allocate_Buffer dma_alloc_coherent RX fail\n");
 				return -1;
 			}
 
@@ -290,7 +290,7 @@ int AudDrv_btcvsd_Allocate_Buffer(kal_uint8 isRX)
 											&BT_CVSD_Mem.pucTXPhysBufAddr,
 											GFP_KERNEL);
 			if ((BT_CVSD_Mem.pucTXPhysBufAddr == 0) || (BT_CVSD_Mem.pucTXVirtBufAddr) == NULL) {
-				pr_debug("AudDrv_btcvsd_Allocate_Buffer dma_alloc_coherent TX fail\n");
+				pr_warn("AudDrv_btcvsd_Allocate_Buffer dma_alloc_coherent TX fail\n");
 				return -1;
 			}
 			memset((void *)BT_CVSD_Mem.pucTXVirtBufAddr, 0, BT_CVSD_Mem.u4TXBufferSize);
@@ -544,7 +544,7 @@ ssize_t AudDrv_btcvsd_read(char __user *data, size_t count)
 		return -1;
 	}
 
-	read_timeout_limit = ((kal_uint64)SCO_RX_PACKER_BUF_NUM * SCO_RX_PLC_SIZE * 16 * 1000000000) / 2 / 2 / 64000;
+	read_timeout_limit = 22500000;  /* one interrupt period = 22.5ms */
 
 	while (count) {
 		LOGBT("%s btsco.pRX->iPacket_w=%d, btsco.pRX->iPacket_r=%d,count=%zu\n",

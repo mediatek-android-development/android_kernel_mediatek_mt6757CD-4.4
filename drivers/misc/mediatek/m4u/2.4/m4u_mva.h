@@ -21,7 +21,7 @@
 #define MVA_MAX_BLOCK_NR        4095	/* 4GB */
 
 #define MVA_BLOCK_SIZE      (1<<MVA_BLOCK_SIZE_ORDER)	/* 0x100000 */
-#define MVA_BLOCK_ALIGN_MASK (MVA_BLOCK_SIZE-1)	/* 0x3ffff */
+#define MVA_BLOCK_ALIGN_MASK (MVA_BLOCK_SIZE-1)	/* 0xfffff */
 #define MVA_BLOCK_NR_MASK   (MVA_MAX_BLOCK_NR)	/* 0xfff */
 #define MVA_BUSY_MASK       (1<<15)	/* 0x8000 */
 #define MVA_RESERVED_MASK       (1<<14)	/* 0x4000 */
@@ -48,15 +48,29 @@
 #define MVA_GRAPH_NR_TO_SIZE(nr) (nr << MVA_BLOCK_SIZE_ORDER)
 
 /*reserved mva region for vpu exclusive use*/
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+#define VPU_RESET_VECTOR_FIX_MVA_START   0x7DA00000
+#define VPU_RESET_VECTOR_FIX_MVA_END     (0x82600000 - 1)
+#else
 #define VPU_RESET_VECTOR_FIX_MVA_START   0x50000000
 #define VPU_RESET_VECTOR_FIX_MVA_END     0x5007FFFF
+#endif
 #define VPU_RESET_VECTOR_FIX_SIZE        (VPU_RESET_VECTOR_FIX_MVA_END - VPU_RESET_VECTOR_FIX_MVA_START + 1)
 #define VPU_RESET_VECTOR_BLOCK_NR        MVA_GRAPH_BLOCK_NR_ALIGNED(VPU_RESET_VECTOR_FIX_SIZE)
 
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+#define VPU_FIX_MVA_START                0x7DA00000
+#define VPU_FIX_MVA_END                  (0x82600000 - 1)
+#else
 #define VPU_FIX_MVA_START                0x60000000
 #define VPU_FIX_MVA_END                  0x7CDFFFFF
+#endif
 #define VPU_FIX_MVA_SIZE                 (VPU_FIX_MVA_END - VPU_FIX_MVA_START + 1)
 #define VPU_FIX_BLOCK_NR                 MVA_GRAPH_BLOCK_NR_ALIGNED(VPU_FIX_MVA_SIZE)
+
+/*reserved ccu mva region*/
+#define CCU_FIX_MVA_START                0x2F800000
+#define CCU_FIX_MVA_END                  0x35800000
 
 #define MVA_COMMON_CONTIG_RETGION_START          0x80000000
 

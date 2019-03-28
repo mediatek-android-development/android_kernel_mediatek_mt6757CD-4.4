@@ -61,6 +61,9 @@
 #include "mtk-soc-afe-control.h"
 #include "mtk-soc-pcm-platform.h"
 
+#ifdef CONFIG_MTK_ACAO_SUPPORT
+#include "mtk_mcdi_governor_hint.h"
+#endif
 
 #ifdef DEBUG_DEEP_BUFFER_DL
 #define DEBUG_DEEP_BUFFER_DL(format, args...)  pr_debug(format, ##args)
@@ -107,7 +110,7 @@ static int deep_buffer_dl_hdoutput_get(struct snd_kcontrol *kcontrol,
 static int deep_buffer_dl_hdoutput_set(struct snd_kcontrol *kcontrol,
 				  struct snd_ctl_elem_value *ucontrol)
 {
-	pr_debug("%s()\n", __func__);
+	/* pr_debug("%s()\n", __func__); */
 	if (ucontrol->value.enumerated.item[0] >
 	    ARRAY_SIZE(deep_buffer_dl_HD_output)) {
 		pr_err("return -EINVAL\n");
@@ -221,6 +224,8 @@ static snd_pcm_uframes_t mtk_deep_buffer_dl_pointer(struct snd_pcm_substream
 			pr_warn("%s(), hw_ptr == 0\n", __func__);
 		else
 			ptr_bytes = hw_ptr - Afe_Get_Reg(base);
+
+		ptr_bytes = word_size_align(ptr_bytes);
 	}
 
 	return bytes_to_frames(substream->runtime, ptr_bytes);
@@ -321,6 +326,10 @@ static int mtk_deep_buffer_dl_close(struct snd_pcm_substream *substream)
 
 	vcore_dvfs(&vcore_dvfs_enable, true);
 
+#ifdef CONFIG_MTK_ACAO_SUPPORT
+	system_idle_hint_request(SYSTEM_IDLE_HINT_USER_AUDIO, 0);
+#endif
+
 	return 0;
 }
 
@@ -340,6 +349,10 @@ static int mtk_deep_buffer_dl_open(struct snd_pcm_substream *substream)
 	       sizeof(struct snd_pcm_hardware));
 
 	AudDrv_Clk_On();
+
+#ifdef CONFIG_MTK_ACAO_SUPPORT
+	system_idle_hint_request(SYSTEM_IDLE_HINT_USER_AUDIO, 1);
+#endif
 
 	pMemControl = Get_Mem_ControlT(deep_buffer_mem_blk);
 
@@ -472,6 +485,9 @@ static int mtk_deep_buffer_dl_ack(struct snd_pcm_substream *substream)
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	int copy_size = word_size_align(snd_pcm_playback_avail(runtime)*size_per_frame);
 
+	if (pMemControl == NULL || mPrepareDone == false)
+		return 0;
+
 	if (copy_size > CLEAR_BUFFER_SIZE)
 		copy_size = CLEAR_BUFFER_SIZE;
 
@@ -491,6 +507,12 @@ static int mtk_deep_buffer_dl_ack(struct snd_pcm_substream *substream)
 
 			size_1 = word_size_align((afe_block_t->u4BufferSize - u4WriteIdx));
 			size_2 = word_size_align((copy_size - size_1));
+
+			if (size_1 < 0 || size_2 < 0) {
+				pr_debug("%s, copy size error!!\n", __func__);
+				pr_debug("u4BufferSize %d, u4WriteIdx %d\n", afe_block_t->u4BufferSize, u4WriteIdx);
+				return 0;
+			}
 
 			memset_io(afe_block_t->pucVirtBufAddr + u4WriteIdx, 0, size_1);
 			memset_io(afe_block_t->pucVirtBufAddr, 0, size_2);

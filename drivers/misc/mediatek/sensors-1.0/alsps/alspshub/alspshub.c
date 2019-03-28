@@ -16,6 +16,7 @@
 #include <hwmsensor.h>
 #include <SCP_sensorHub.h>
 #include "SCP_power_monitor.h"
+#include <linux/pm_wakeup.h>
 
 
 #define ALSPSHUB_DEV_NAME     "alsps_hub_pl"
@@ -49,6 +50,7 @@ struct alspshub_ipi_data {
 	bool ps_factory_enable;
 	bool als_android_enable;
 	bool ps_android_enable;
+	struct wakeup_source ps_wake_lock;
 };
 
 static struct alspshub_ipi_data *obj_ipi_data;
@@ -104,13 +106,16 @@ long alspshub_read_ps(u8 *ps)
 long alspshub_read_als(u16 *als)
 {
 	long res = 0;
+	struct data_unit_t data_t;
 
-	res = sensor_set_cmd_to_hub(ID_LIGHT, CUST_ACTION_GET_RAW_DATA, als);
+	res = sensor_get_data_from_hub(ID_LIGHT, &data_t);
 	if (res < 0) {
 		*als = -1;
-		APS_PR_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n", ID_LIGHT, CUST_ACTION_GET_RAW_DATA);
+		pr_err_ratelimited("sensor_get_data_from_hub fail, (ID: %d)\n", ID_LIGHT);
 		return -1;
 	}
+	*als = data_t.light;
+
 	return 0;
 }
 
@@ -300,8 +305,10 @@ static int ps_recv_data(struct data_unit_t *event, void *reserved)
 
 	if (event->flush_action == FLUSH_ACTION)
 		ps_flush_report();
-	else if (event->flush_action == DATA_ACTION)
+	else if (event->flush_action == DATA_ACTION) {
+		__pm_wakeup_event(&obj->ps_wake_lock, msecs_to_jiffies(100));
 		ps_data_report(event->proximity_t.oneshot, SENSOR_STATUS_ACCURACY_HIGH);
+	}
 	return 0;
 }
 static int als_recv_data(struct data_unit_t *event, void *reserved)
@@ -315,6 +322,15 @@ static int als_recv_data(struct data_unit_t *event, void *reserved)
 		als_flush_report();
 	else if (event->flush_action == DATA_ACTION)
 		als_data_report(event->light, SENSOR_STATUS_ACCURACY_MEDIUM);
+	return 0;
+}
+
+static int rgbw_recv_data(struct data_unit_t *event, void *reserved)
+{
+	if (event->flush_action == FLUSH_ACTION)
+		rgbw_flush_report();
+	else if (event->flush_action == DATA_ACTION)
+		rgbw_data_report(event->data);
 	return 0;
 }
 
@@ -601,19 +617,39 @@ static int als_flush(void)
 	return sensor_flush_to_hub(ID_LIGHT);
 }
 
+static int rgbw_enable(int en)
+{
+	int res = 0;
+
+	res = sensor_enable_to_hub(ID_RGBW, en);
+	if (res < 0) {
+		APS_PR_ERR("rgbw_enable is failed!!\n");
+		return -1;
+	}
+	return 0;
+}
+
+static int rgbw_batch(int flag, int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
+{
+	return sensor_batch_to_hub(ID_RGBW, flag, samplingPeriodNs, maxBatchReportLatencyNs);
+}
+
+static int rgbw_flush(void)
+{
+	return sensor_flush_to_hub(ID_RGBW);
+}
+
 static int als_get_data(int *value, int *status)
 {
 	int err = 0;
 	struct data_unit_t data;
 	uint64_t time_stamp = 0;
-	uint64_t time_stamp_gpt = 0;
 
 	err = sensor_get_data_from_hub(ID_LIGHT, &data);
 	if (err) {
 		APS_PR_ERR("sensor_get_data_from_hub fail!\n");
 	} else {
 		time_stamp = data.time_stamp;
-		time_stamp_gpt = data.time_stamp_gpt;
 		*value = data.light;
 		*status = SENSOR_STATUS_ACCURACY_MEDIUM;
 	}
@@ -696,7 +732,6 @@ static int ps_get_data(int *value, int *status)
 	int err = 0;
 	struct data_unit_t data;
 	uint64_t time_stamp = 0;
-	uint64_t time_stamp_gpt = 0;
 
 	err = sensor_get_data_from_hub(ID_PROXIMITY, &data);
 	if (err < 0) {
@@ -705,7 +740,6 @@ static int ps_get_data(int *value, int *status)
 		err = -1;
 	} else {
 		time_stamp = data.time_stamp;
-		time_stamp_gpt = data.time_stamp_gpt;
 		*value = data.proximity_t.oneshot;
 		*status = SENSOR_STATUS_ACCURACY_MEDIUM;
 	}
@@ -788,6 +822,11 @@ static int alspshub_probe(struct platform_device *pdev)
 		APS_PR_ERR("scp_sensorHub_data_registration failed\n");
 		goto exit_kfree;
 	}
+	err = scp_sensorHub_data_registration(ID_RGBW, rgbw_recv_data);
+	if (err < 0) {
+		APS_PR_ERR("scp_sensorHub_data_registration failed\n");
+		goto exit_kfree;
+	}
 	err = alsps_factory_device_register(&alspshub_factory_device);
 	if (err) {
 		APS_PR_ERR("alsps_factory_device_register register failed\n");
@@ -806,6 +845,9 @@ static int alspshub_probe(struct platform_device *pdev)
 	als_ctl.set_delay = als_set_delay;
 	als_ctl.batch = als_batch;
 	als_ctl.flush = als_flush;
+	als_ctl.rgbw_enable = rgbw_enable;
+	als_ctl.rgbw_batch = rgbw_batch;
+	als_ctl.rgbw_flush = rgbw_flush;
 	als_ctl.is_report_input_direct = false;
 
 	als_ctl.is_support_batch = false;
@@ -846,6 +888,7 @@ static int alspshub_probe(struct platform_device *pdev)
 		APS_PR_ERR("tregister fail = %d\n", err);
 		goto exit_create_attr_failed;
 	}
+	wakeup_source_init(&obj->ps_wake_lock, "ps_wake_lock");
 
 	alspshub_init_flag = 0;
 	APS_LOG("%s: OK\n", __func__);

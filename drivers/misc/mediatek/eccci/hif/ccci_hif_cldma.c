@@ -565,9 +565,11 @@ again:
 #endif
 #endif
 		/* check wakeup source */
-		if (atomic_cmpxchg(&md_ctrl->wakeup_src, 1, 0) == 1)
-			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG, "CLDMA_MD wakeup source:(%d/%d/%x)\n",
-							queue->index, ccci_h.channel, ccci_h.reserved);
+		if (atomic_cmpxchg(&md_ctrl->wakeup_src, 1, 0) == 1) {
+			md_ctrl->wakeup_count++;
+			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG, "CLDMA_MD wakeup source:(%d/%d/%x)(%u)\n",
+				queue->index, ccci_h.channel, ccci_h.reserved, md_ctrl->wakeup_count);
+		}
 		CCCI_DEBUG_LOG(md_ctrl->md_id, TAG, "recv Rx msg (%x %x %x %x) rxq=%d len=%d\n",
 						ccci_h.data[0], ccci_h.data[1], *(((u32 *)&ccci_h) + 2),
 						ccci_h.reserved, queue->index,
@@ -853,9 +855,11 @@ static int cldma_gpd_bd_tx_collect(struct md_cd_queue *queue, int budget, int bl
 		ccci_h = (struct ccci_header *)skb_free->data;
 #endif
 		/* check wakeup source */
-		if (atomic_cmpxchg(&md_ctrl->wakeup_src, 1, 0) == 1)
-			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG, "CLDMA_AP wakeup source:(%d/%d)\n",
-							queue->index, ccci_h->channel);
+		if (atomic_cmpxchg(&md_ctrl->wakeup_src, 1, 0) == 1) {
+			md_ctrl->wakeup_count++;
+			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG, "CLDMA_AP wakeup source:(%d/%d)(%u)\n",
+							queue->index, ccci_h->channel, md_ctrl->wakeup_count);
+		}
 		CCCI_DEBUG_LOG(md_ctrl->md_id, TAG, "harvest Tx msg (%x %x %x %x) txq=%d len=%d\n",
 			     ccci_h->data[0], ccci_h->data[1], *(((u32 *) ccci_h) + 2), ccci_h->reserved, queue->index,
 			     tgpd->data_buff_len);
@@ -961,9 +965,11 @@ static int cldma_gpd_tx_collect(struct md_cd_queue *queue, int budget, int block
 		ccci_h = (struct ccci_header *)skb_free->data;
 #endif
 		/* check wakeup source */
-		if (atomic_cmpxchg(&md_ctrl->wakeup_src, 1, 0) == 1)
-			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG, "CLDMA_AP wakeup source:(%d/%d)\n",
-							queue->index, ccci_h->channel);
+		if (atomic_cmpxchg(&md_ctrl->wakeup_src, 1, 0) == 1) {
+			md_ctrl->wakeup_count++;
+			CCCI_NOTICE_LOG(md_ctrl->md_id, TAG, "CLDMA_AP wakeup source:(%d/%d)(%u)\n",
+							queue->index, ccci_h->channel, md_ctrl->wakeup_count);
+		}
 		CCCI_DEBUG_LOG(md_ctrl->md_id, TAG, "harvest Tx msg (%x %x %x %x) txq=%d len=%d\n",
 			     ccci_h->data[0], ccci_h->data[1], *(((u32 *) ccci_h) + 2), ccci_h->reserved, queue->index,
 			     skb_free->len);
@@ -2323,7 +2329,10 @@ static int md_cd_send_skb(unsigned char hif_id, int qno, struct sk_buff *skb,
 				CCCI_NORMAL_LOG(md_ctrl->md_id, TAG, "tx busy: dump CLDMA and GPD status\n");
 				CCCI_MEM_LOG_TAG(md_ctrl->md_id, TAG, "tx busy: dump CLDMA and GPD status\n");
 				md_ctrl->ops->dump_status(CLDMA_HIF_ID, DUMP_FLAG_CLDMA, -1);
-				aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT, "cldma", "TX busy debug");
+				/*
+				* aee_kernel_warning_api(__FILE__, __LINE__, DB_OPT_DEFAULT,
+				* "cldma", "TX busy debug");
+				*/
 			}
 			/* resume channel */
 			spin_lock_irqsave(&md_ctrl->cldma_timeout_lock, flags);

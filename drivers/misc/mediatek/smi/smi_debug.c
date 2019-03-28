@@ -45,7 +45,10 @@
 #include "smi_reg.h"
 #include "smi_debug.h"
 #include "smi_configuration.h"
+#include "smi_public.h"
+#ifdef CONFIG_MTK_M4U
 #include "m4u.h"
+#endif
 
 #define SMI_LOG_TAG "smi"
 
@@ -57,6 +60,11 @@
 #include <mach/mt_clkmgr.h>
 #endif
 
+#if IS_ENABLED(CONFIG_MACH_MT6771)
+unsigned long long smi_latest_mdelay_sec;
+unsigned long smi_latest_mdelay_nsec;
+unsigned int smi_latest_mdelay_larb;
+#endif
 
 /* Debug Function */
 static void smi_dump_format(unsigned long base, unsigned int from, unsigned int to);
@@ -111,7 +119,7 @@ void smi_dumpCommonDebugMsg(int output_gce_buffer)
 	unsigned int smiCommonClkEnabled = 1;
 
 	u4Base = get_common_base_addr();
-	smiCommonClkEnabled = get_larb_clock_count(0);
+	smiCommonClkEnabled = smi_clk_get_ref_count(SMI_COMMON_REG_INDX);
 	/* SMI COMMON dump */
 	if (u4Base == SMI_ERROR_ADDR) {
 		SMIMSG3(output_gce_buffer, "Doesn't support reg dump for SMI common\n");
@@ -134,7 +142,7 @@ void smi_dumpLarbDebugMsg(unsigned int u4Index, int output_gce_buffer)
 	unsigned int larbClkEnabled = 1;
 
 	u4Base = get_larb_base_addr(u4Index);
-	larbClkEnabled = get_larb_clock_count(u4Index);
+	larbClkEnabled = smi_clk_get_ref_count(u4Index);
 	if (u4Base == SMI_ERROR_ADDR) {
 		SMIMSG3(output_gce_buffer, "Doesn't support reg dump for Larb%d\n", u4Index);
 		return;
@@ -149,6 +157,30 @@ void smi_dumpLarbDebugMsg(unsigned int u4Index, int output_gce_buffer)
 	smi_dumpper(output_gce_buffer, smi_larb_debug_offset[u4Index], u4Base,
 		    smi_larb_debug_offset_num[u4Index], false);
 }
+
+#if IS_ENABLED(CONFIG_MACH_MT6771)
+void smi_dump_mmsys(int output_gce_buffer)
+{
+	unsigned long u4Base = (unsigned long)mmsys_config_reg;
+	unsigned int smiCommonClkEnabled = 1;
+
+	smiCommonClkEnabled = smi_clk_get_ref_count(SMI_COMMON_REG_INDX);
+	if (u4Base == SMI_ERROR_ADDR) {
+		SMIMSG3(output_gce_buffer, "Doesn't support reg dump for mmsys\n");
+		return;
+	} else if (smiCommonClkEnabled == 0) {
+		SMIMSG3(output_gce_buffer, "========== mmsys mtcmos is disable ==========\n");
+		return;
+	}
+
+	SMIMSG3(output_gce_buffer, "========== mmsys reg dump, CLK: %d ==========\n", smiCommonClkEnabled);
+	smi_dumpper(output_gce_buffer, smi_mmsys_debug_offset, u4Base,
+		    SMI_MMSYS_DEBUG_OFFSET_NUM, false);
+
+	SMIMSG3(output_gce_buffer, "latest mdelay kernel time:[%5llu.%06lu], smi larb:%d\n",
+		smi_latest_mdelay_sec, smi_latest_mdelay_nsec / 1000, smi_latest_mdelay_larb);
+}
+#endif
 
 void smi_dumpLarb(unsigned int index)
 {
@@ -268,50 +300,51 @@ int smi_debug_bus_hanging_detect_ext2(unsigned short larbs, int show_dump,
 
 	int i = 0;
 	int dump_time = 0;
-	int is_smi_issue = 0;
 	int status_code = 0;
 	int max_count = 5;
 	/* Keep the dump result */
-	unsigned char smi_common_busy_count = 0;
 	unsigned int u4Index = 0;
 	unsigned long u4Base = 0;
-
+	unsigned char smi_common_busy_count = 0;
 	unsigned char smi_larb_busy_count[SMI_LARB_NUM] = { 0 };
-	int smi_larb_clk_status[SMI_LARB_NUM] = { 0 };
 
 	/* dump resister and save resgister status */
-	smi_dumpRegDebugMsg(output_gce_buffer);
+	if (show_dump)
+		smi_dumpRegDebugMsg(output_gce_buffer);
+
 	for (dump_time = 0; dump_time < max_count; dump_time++) {
 		u4Base = get_common_base_addr();
-
 		/* check smi common busy register */
-		if (u4Base != SMI_ERROR_ADDR && get_larb_clock_count(0) != 0 &&
-			(M4U_ReadReg32(u4Base, 0x440) & (1 << 0)) == 0)
-			smi_common_busy_count++;
-		if (show_dump != 0)
-			smi_dumpCommonDebugMsg(output_gce_buffer);
+		if (u4Base != SMI_ERROR_ADDR && smi_clk_get_ref_count(SMI_COMMON_REG_INDX) != 0) {
+			if ((M4U_ReadReg32(u4Base, 0x440) & (1 << 0)) == 0)
+				smi_common_busy_count++;
+			if (show_dump != 0)
+				smi_dumpCommonDebugMsg(output_gce_buffer);
+		}
 
 		for (u4Index = 0; u4Index < SMI_LARB_NUM; u4Index++) {
-			smi_larb_clk_status[u4Index] = get_larb_clock_count(u4Index);
-
 			u4Base = get_larb_base_addr(u4Index);
 			/* check smi larb busy register */
-			if (u4Base != SMI_ERROR_ADDR && smi_larb_clk_status[u4Index] != 0 &&
-				M4U_ReadReg32(u4Base, 0x0) != 0)
-				smi_larb_busy_count[u4Index]++;
-
-			if (show_dump != 0 && get_larb_clock_count(u4Index) != 0) {
-				smi_dumpLarbDebugMsg(u4Index, output_gce_buffer);
-				smi_dump_larb_m4u_register(u4Index);
+			if (u4Base != SMI_ERROR_ADDR && smi_clk_get_ref_count(u4Index) != 0) {
+				if (M4U_ReadReg32(u4Base, 0x0) != 0)
+					smi_larb_busy_count[u4Index]++;
+				if (show_dump != 0) {
+					smi_dumpLarbDebugMsg(u4Index, output_gce_buffer);
+					smi_dump_larb_m4u_register(u4Index);
+				}
 			}
 		}
+#if IS_ENABLED(CONFIG_MACH_MT6771)
+		if (show_dump)
+			smi_dump_mmsys(output_gce_buffer);
+#endif
 	}
 	/* Show the checked result */
 	for (i = 0; i < SMI_LARB_NUM; i++) {	/* Check each larb */
 		if (SMI_DGB_LARB_SELECT(larbs, i)) {
 			/* larb i has been selected */
 			/* Get status code */
-			status_code = get_status_code(smi_larb_clk_status[i], smi_larb_busy_count[i],
+			status_code = get_status_code(smi_clk_get_ref_count(i), smi_larb_busy_count[i],
 					smi_common_busy_count, max_count);
 
 			/* Send the debug message according to the final result */
@@ -326,11 +359,13 @@ int smi_debug_bus_hanging_detect_ext2(unsigned short larbs, int show_dump,
 		}
 	}
 
+#ifdef CONFIG_MTK_M4U
 	if (enable_m4u_reg_dump) {
 		SMIMSG("call m4u API for m4u register dump\n");
 		m4u_dump_reg_for_smi_hang_issue();
 	}
-	return is_smi_issue;
+#endif
+	return 0;
 }
 void smi_dump_clk_status(void)
 {
@@ -347,7 +382,7 @@ void smi_dump_larb_m4u_register(int larb)
 	unsigned int larbClkEnabled = 0;
 
 	u4Base = get_larb_base_addr(larb);
-	larbClkEnabled = get_larb_clock_count(larb);
+	larbClkEnabled = smi_clk_get_ref_count(larb);
 
 	if (u4Base == SMI_ERROR_ADDR) {
 		SMIMSG("Doesn't support reg dump for Larb%d\n", larb);

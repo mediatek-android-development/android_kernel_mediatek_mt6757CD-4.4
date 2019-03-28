@@ -22,6 +22,8 @@
 #include "mtk_idle_mt6763.h"
 #elif defined(CONFIG_MACH_MT6739)
 #include "mtk_idle_mt6739.h"
+#elif defined(CONFIG_MACH_MT6771)
+#include "mtk_idle_mt6771.h"
 #endif
 
 /*
@@ -80,6 +82,9 @@ const char *mtk_get_pll_group_name(int id);
 bool mtk_idle_check_cg(unsigned int block_mask[NR_TYPES][NF_CG_STA_RECORD]);
 bool mtk_idle_check_secure_cg(unsigned int block_mask[NR_TYPES][NF_CG_STA_RECORD]);
 bool mtk_idle_check_pll(unsigned int *condition_mask, unsigned int *block_mask);
+bool mtk_idle_check_clkmux(int idle_type,
+		unsigned int block_mask[NR_TYPES][NF_CLK_CFG]);
+bool mtk_idle_check_vcore_cond(void);
 
 void __init iomap_init(void);
 
@@ -87,6 +92,8 @@ bool mtk_idle_disp_is_pwm_rosc(void);
 
 unsigned int soidle_pre_handler(void);
 void soidle_post_handler(void);
+
+u32 get_spm_idle_flags1(void);
 
 
 #endif /* __MTK_IDLE_INTERNAL_H__ */

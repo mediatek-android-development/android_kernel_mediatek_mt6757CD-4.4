@@ -404,24 +404,10 @@
 	};
 
 	pmu {
-		compatible = "arm,cortex-a53-pmu";
-		interrupts = <GIC_SPI 8 IRQ_TYPE_LEVEL_LOW>,
-				<GIC_SPI 9 IRQ_TYPE_LEVEL_LOW>,
-				<GIC_SPI 10 IRQ_TYPE_LEVEL_LOW>,
-				<GIC_SPI 11 IRQ_TYPE_LEVEL_LOW>,
-				<GIC_SPI 12 IRQ_TYPE_LEVEL_LOW>,
-				<GIC_SPI 13 IRQ_TYPE_LEVEL_LOW>,
-				<GIC_SPI 14 IRQ_TYPE_LEVEL_LOW>,
-				<GIC_SPI 15 IRQ_TYPE_LEVEL_LOW>;
-		interrupt-affinity = <&cpu0>,
-				     <&cpu1>,
-				     <&cpu2>,
-				     <&cpu3>,
-				     <&cpu4>,
-				     <&cpu5>,
-				     <&cpu6>,
-				     <&cpu7>;
+		compatible = "arm,armv8-pmuv3";
+		interrupts = <GIC_PPI 7 IRQ_TYPE_LEVEL_LOW>;
 	};
+
 
 	timer: timer {
 		compatible = "arm,armv8-timer";
@@ -2891,10 +2877,11 @@
 		interrupts = <GIC_SPI 200 IRQ_TYPE_LEVEL_LOW>;
 	};
 
-	disp_aal0@14018000 {
+	disp_aal0:disp_aal0@14018000 {
 		compatible = "mediatek,disp_aal0";
 		reg = <0 0x14018000 0 0x1000>;
 		interrupts = <GIC_SPI 201 IRQ_TYPE_LEVEL_LOW>;
+		aal_support = <1>;
 	};
 
 	disp_aal1@14019000 {
@@ -3774,6 +3761,7 @@
 		/* common */
 		battery_cv = <4350000>;
 		max_charger_voltage = <6500000>;
+		min_charger_voltage = <4600000>;
 
 		/* charging current */
 		usb_charger_current_suspend = <0>;
@@ -3851,7 +3839,11 @@
 					dev = "/dev/block/platform/mtk-msdc.0/11230000.msdc0/by-name/system";
 					type = "ext4";
 					mnt_flags = "ro";
+					#ifndef CONFIG_MTK_DM_VERITY_OFF
+					fsmgr_flags = "wait,verify";
+					#else
 					fsmgr_flags = "wait";
+					#endif
 				};
 #endif
 #ifndef CONFIG_MTK_LATE_MOUNT
@@ -3861,7 +3853,11 @@
 					type = "ext4";
 					mnt_flags = "ro";
 #ifndef CONFIG_MTK_AB_OTA_UPDATER
+					#ifndef CONFIG_MTK_DM_VERITY_OFF
+					fsmgr_flags = "wait,verify";
+					#else
 					fsmgr_flags = "wait";
+					#endif
 #else
 					#ifndef CONFIG_MTK_DM_VERITY_OFF
 					fsmgr_flags = "wait,slotselect,verify";

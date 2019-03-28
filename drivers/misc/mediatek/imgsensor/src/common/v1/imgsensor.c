@@ -76,6 +76,7 @@ static struct cdev *gpimgsensor_cdev;
 static struct class *gpimgsensor_class;
 
 static DEFINE_MUTEX(gimgsensor_mutex);
+DEFINE_MUTEX(pinctrl_mutex);
 
 struct IMGSENSOR  gimgsensor;
 struct IMGSENSOR *pgimgsensor = &gimgsensor;
@@ -438,46 +439,55 @@ int imgsensor_set_driver(struct IMGSENSOR_SENSOR *psensor)
 #define TOSTRING(value)           #value
 #define STRINGIZE(stringizedName) TOSTRING(stringizedName)
 
-	char *psensor_list_config = NULL;
-	char *sensor_configs = STRINGIZE(CONFIG_CUSTOM_KERNEL_IMGSENSOR);
+	char *psensor_list_with_end = NULL;
+	char *sensor_kconfig = STRINGIZE(CONFIG_CUSTOM_KERNEL_IMGSENSOR);
 
 	static int orderedSearchList[MAX_NUM_OF_SUPPORT_SENSOR] = {-1};
 	static bool get_search_list = true;
 	int i = 0;
 	int j = 0;
 	char *driver_name = NULL;
+	const char *pDTS_sensors = NULL;
+	struct device_node *of_node = of_find_compatible_node(NULL, NULL, "mediatek,camera_hw");
+
 
 	imgsensor_mutex_init(psensor_inst);
 	imgsensor_i2c_init(&psensor_inst->i2c_cfg, imgsensor_custom_config[psensor->inst.sensor_idx].i2c_dev);
 	imgsensor_i2c_filter_msg(&psensor_inst->i2c_cfg, true);
 
+
 	if (get_search_list) {
-		psensor_list_config = kmalloc(strlen(sensor_configs)-1, GFP_KERNEL);
-		if (psensor_list_config) {
-			for (j = 0; j < MAX_NUM_OF_SUPPORT_SENSOR; j++)
-				orderedSearchList[j] = -1;
-
-			memcpy(psensor_list_config, sensor_configs+1, strlen(sensor_configs)-2);
-			*(psensor_list_config+strlen(sensor_configs)-2) = '\0';
-
-			PK_DBG("psensor_list_config %s\n", psensor_list_config);
-			driver_name = strsep(&psensor_list_config, " \0");
-
-			while (driver_name != NULL) {
-				for (j = 0; j < MAX_NUM_OF_SUPPORT_SENSOR; j++) {
-					if (pSensorList[j].init == NULL)
-						break;
-					else if (!strcmp(driver_name, pSensorList[j].name)) {
-						orderedSearchList[i++] = j;
-						break;
-					}
-				}
-				driver_name = strsep(&psensor_list_config, " \0");
-			}
-			get_search_list = false;
-		}
-		kfree(psensor_list_config);
+		psensor_list_with_end = kmalloc(strlen(sensor_kconfig)-1, GFP_KERNEL);
 	}
+	if (psensor_list_with_end != NULL) {
+		for (j = 0; j < MAX_NUM_OF_SUPPORT_SENSOR; j++)
+			orderedSearchList[j] = -1;
+
+		memcpy(psensor_list_with_end, sensor_kconfig+1, strlen(sensor_kconfig)-2);
+		*(psensor_list_with_end+strlen(sensor_kconfig)-2) = '\0';
+		of_property_read_string(of_node, "enable-sensor", &pDTS_sensors);
+
+		PK_DBG("psensor_list_with_end %s ,pDTS_sensors %s\n",
+			psensor_list_with_end, pDTS_sensors == NULL ? "null" : pDTS_sensors);
+		driver_name = strsep(&psensor_list_with_end, " \0");
+
+		while (driver_name != NULL) {
+			for (j = 0; j < MAX_NUM_OF_SUPPORT_SENSOR; j++) {
+				if (pSensorList[j].init == NULL)
+					break;
+				else if (!strcmp(driver_name, pSensorList[j].name)) {
+					if (pDTS_sensors != NULL && !strstr(pDTS_sensors, driver_name))
+						continue;
+					orderedSearchList[i++] = j;
+					break;
+				}
+			}
+			driver_name = strsep(&psensor_list_with_end, " \0");
+		}
+		get_search_list = false;
+		kfree(psensor_list_with_end);
+	}
+
 
 
 	/*PK_DBG("get_search_list %d,\n %d %d %d %d\n %d %d %d %d\n %d %d %d %d\n %d %d %d %d\n",
@@ -962,6 +972,19 @@ static inline int adopt_CAMERA_HW_GetInfo2(void *pBuf)
 		mtk_ccm_name,
 		pSensorInfo->HDR_Support);
 
+#ifdef VANZO_DEVICE_NAME_SUPPORT
+        {
+          extern void v_set_dev_name(int id, char *name);
+            if(pSensorGetInfo->SensorId==0){
+              v_set_dev_name(3, psensor->inst.psensor_name);
+            }else if(pSensorGetInfo->SensorId==1){
+              v_set_dev_name(4, psensor->inst.psensor_name);
+            }
+        }
+#endif
+  
+
+
 	/* Resolution */
 	if (copy_to_user((void __user *) (pSensorGetInfo->pSensorResolution),
 						(void *)psensorResolution,
@@ -1150,6 +1173,7 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_SET_PDAF_REG_SETTING:
 	case SENSOR_FEATURE_SET_STREAMING_SUSPEND:
 	case SENSOR_FEATURE_SET_STREAMING_RESUME:
+	case SENSOR_FEATURE_SET_SENSOR_SYNC_MODE:
 		if (copy_from_user((void *)pFeaturePara,
 							(void *) pFeatureCtrl->pFeaturePara,
 							FeatureParaLen)) {
@@ -1198,6 +1222,8 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_SINGLE_FOCUS_MODE:
 	case SENSOR_FEATURE_CANCEL_AF:
 	case SENSOR_FEATURE_CONSTANT_AF:
+	case SENSOR_FEATURE_GET_SENSOR_SYNC_MODE_CAPACITY:
+	case SENSOR_FEATURE_GET_SENSOR_SYNC_MODE:
 	default:
 	    break;
 	}
@@ -1245,6 +1271,8 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_GET_SENSOR_N3D_STREAM_TO_VSYNC_TIME:
 	case SENSOR_FEATURE_GET_PERIOD:
 	case SENSOR_FEATURE_GET_PIXEL_CLOCK_FREQ:
+	case SENSOR_FEATURE_GET_SENSOR_SYNC_MODE_CAPACITY:
+	case SENSOR_FEATURE_GET_SENSOR_SYNC_MODE:
 	{
 		ret = imgsensor_sensor_feature_control(psensor,
 								pFeatureCtrl->FeatureId,
@@ -1415,6 +1443,13 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 		kal_uint32 u4RegLen = (*pFeaturePara_64);
 		void *usr_ptr_Reg = (void *)(uintptr_t) (*(pFeaturePara_64 + 1));
 		kal_uint32 *pReg = NULL;
+
+		/* buffer size exam */
+		if ((sizeof(kal_uint8) * u4RegLen) > FEATURE_CONTROL_MAX_DATA_SIZE) {
+			kfree(pFeaturePara);
+			PK_PR_ERR(" buffer size (%u) is too large\n", u4RegLen);
+			return -EINVAL;
+		}
 
 		pReg = kmalloc_array(u4RegLen, sizeof(kal_uint8), GFP_KERNEL);
 		if (pReg == NULL) {
@@ -1609,6 +1644,15 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 		char *pPdaf_data = NULL;
 		unsigned long long *pFeaturePara_64 = (unsigned long long *) pFeaturePara;
 		void *usr_ptr = (void *)(uintptr_t)(*(pFeaturePara_64 + 1));
+		kal_uint32 buf_sz = (kal_uint32) (*(pFeaturePara_64 + 2));
+
+		/* buffer size exam */
+		if (buf_sz > PDAF_DATA_SIZE) {
+			kfree(pFeaturePara);
+			PK_PR_ERR(" buffer size (%u) can't larger than %d bytes\n",
+				  buf_sz, PDAF_DATA_SIZE);
+			return -EINVAL;
+		}
 
 		pPdaf_data = kmalloc(sizeof(char) * PDAF_DATA_SIZE, GFP_KERNEL);
 		if (pPdaf_data == NULL) {
@@ -1629,7 +1673,7 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 
 		if (copy_to_user((void __user *)usr_ptr,
 							(void *)pPdaf_data,
-							(kal_uint32) (*(pFeaturePara_64 + 2)))) {
+							buf_sz)) {
 			PK_DBG("[CAMERA_HW]ERROR: copy_to_user fail\n");
 		}
 		kfree(pPdaf_data);
@@ -1673,6 +1717,7 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_SET_PDAF_REG_SETTING:
 	case SENSOR_FEATURE_SET_STREAMING_SUSPEND:
 	case SENSOR_FEATURE_SET_STREAMING_RESUME:
+	case SENSOR_FEATURE_SET_SENSOR_SYNC_MODE:
 	    break;
 	/* copy to user */
 	case SENSOR_FEATURE_SET_DRIVER:
@@ -1720,6 +1765,8 @@ static inline int adopt_CAMERA_HW_FeatureControl(void *pBuf)
 	case SENSOR_FEATURE_SET_PDAF:
 	case SENSOR_FEATURE_SET_SHUTTER_FRAME_TIME:
 	case SENSOR_FEATURE_SET_PDFOCUS_AREA:
+	case SENSOR_FEATURE_GET_SENSOR_SYNC_MODE_CAPACITY:
+	case SENSOR_FEATURE_GET_SENSOR_SYNC_MODE:
 		if (copy_to_user((void __user *) pFeatureCtrl->pFeaturePara,
 							(void *)pFeaturePara, FeatureParaLen)) {
 			kfree(pFeaturePara);
@@ -2275,6 +2322,28 @@ static struct platform_driver gimgsensor_platform_driver = {
 /*
  * imgsensor_init()
  */
+#if  defined(VANZO_FEATURE_FAKE_DUAL_CAMERA_BY_NAME)
+static ssize_t show_BV_value(struct device_driver *ddri, char *buf)
+{
+    MUINT32 sensorID = 0;
+
+    MUINT32 retLen = 0;
+    struct IMGSENSOR_SENSOR      *psensor = imgsensor_sensor_get_inst(IMGSENSOR_SENSOR_IDX_MAP(DUAL_CAMERA_MAIN_SENSOR));
+    imgsensor_sensor_feature_control(psensor, SENSOR_FEATURE_GET_YUV_SENSOR_BV, (MUINT8 *)&sensorID, &retLen);
+  return snprintf(buf, PAGE_SIZE, "%d\n", sensorID);
+}
+
+static ssize_t store_BV_value(struct device_driver *ddri, const char *buf, size_t count)
+{
+  return 0;
+}
+
+static DRIVER_ATTR(bv_val,   S_IWUSR | S_IRUGO, show_BV_value, store_BV_value);
+
+static struct driver_attribute *cam_bv_val[] = {
+  &driver_attr_bv_val,   
+};
+#endif
 static int __init imgsensor_init(void)
 {
 	PK_DBG("[camerahw_probe] start\n");
@@ -2283,7 +2352,11 @@ static int __init imgsensor_init(void)
 		PK_PR_ERR("failed to register CAMERA_HW driver\n");
 		return -ENODEV;
 	}
-
+#if  defined(VANZO_FEATURE_FAKE_DUAL_CAMERA_BY_NAME)
+    if(driver_create_file(&gimgsensor_platform_driver.driver, cam_bv_val[0])){
+		PK_PR_ERR("create bv_val failed!!\n");
+    }
+#endif
 #ifdef CONFIG_CAM_TEMPERATURE_WORKQUEUE
 	memset((void *)&cam_temperature_wq, 0, sizeof(cam_temperature_wq));
 	INIT_DELAYED_WORK(&cam_temperature_wq, cam_temperature_report_wq_routine);

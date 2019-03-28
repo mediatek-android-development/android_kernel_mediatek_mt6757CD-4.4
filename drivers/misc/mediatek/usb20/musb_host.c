@@ -108,15 +108,24 @@ int musb_host_alloc_ep_fifo(struct musb *musb, struct musb_qh *qh, u8 is_in)
 	u16 free_uint = 0;
 	u8 found = 0;
 
+	if (!is_in)
+		host_tx_refcnt_reset(epnum);
+
 	if (qh->hb_mult)
 		maxpacket = qh->maxpacket * qh->hb_mult;
 	else
 		maxpacket = qh->maxpacket;
 
 	if (maxpacket <= 512) {
-		request_fifo_sz = 512;
-		fifo_unit_nr = 1;
-		c_size = 6;
+		if (musb_host_db_enable && qh->type == USB_ENDPOINT_XFER_BULK) {
+			request_fifo_sz = 1024;
+			fifo_unit_nr = 2;
+			c_size = 6 | MUSB_FIFOSZ_DPB;
+		} else {
+			request_fifo_sz = 512;
+			fifo_unit_nr = 1;
+			c_size = 6;
+		}
 	} else if (maxpacket <= 1024) {
 		request_fifo_sz = 1024;
 		fifo_unit_nr = 2;
@@ -191,14 +200,22 @@ void musb_host_free_ep_fifo(struct musb *musb, struct musb_qh *qh, u8 is_in)
 	u8 index, i;
 	u16 c_off = 0;
 
+	if (!is_in)
+		host_tx_refcnt_reset(epnum);
+
 	if (qh->hb_mult)
 		maxpacket = qh->maxpacket * qh->hb_mult;
 	else
 		maxpacket = qh->maxpacket;
 
 	if (maxpacket <= 512) {
-		request_fifo_sz = 512;
-		fifo_unit_nr = 1;
+		if (musb_host_db_enable && qh->type == USB_ENDPOINT_XFER_BULK) {
+			request_fifo_sz = 1024;
+			fifo_unit_nr = 2;
+		} else {
+			request_fifo_sz = 512;
+			fifo_unit_nr = 1;
+		}
 	} else if (maxpacket <= 1024) {
 		request_fifo_sz = 1024;
 		fifo_unit_nr = 2;
@@ -298,15 +315,67 @@ static void musb_h_ep0_flush_fifo(struct musb_hw_ep *ep)
  * Start transmit. Caller is responsible for locking shared resources.
  * musb must be locked.
  */
+void wait_tx_done(u8 epnum, int timeout_ns)
+{
+	u16 txcsr;
+	u16 int_tx;
+	void __iomem *mbase = mtk_musb->mregs;
+	int offset = MUSB_EP_OFFSET(epnum,
+			MUSB_TXCSR);
+	struct timeval tv_before, tv_after;
+	u64 diff_ns = 0;
+
+	musb_ep_select(mbase, epnum);
+
+	txcsr = musb_readw(mbase, offset);
+	do_gettimeofday(&tv_before);
+	while ((txcsr & (MUSB_TXCSR_FIFONOTEMPTY | MUSB_TXCSR_TXPKTRDY))
+			&& (diff_ns < timeout_ns)) {
+		txcsr = musb_readw(mbase, offset);
+		do_gettimeofday(&tv_after);
+		diff_ns = timeval_to_ns(&tv_after) - timeval_to_ns(&tv_before);
+	}
+	if (diff_ns >= timeout_ns)
+		DBG(0, "ERROR !!!, packet still in FIFO, CSR %04x\n", txcsr);
+
+	int_tx = musb_readw(mbase, MUSB_INTRTX);
+	while (!(int_tx & 1<<epnum) && (diff_ns < timeout_ns))
+		int_tx = musb_readw(mbase, MUSB_INTRTX);
+
+	if (diff_ns >= timeout_ns)
+		DBG(0, "ERROR !!!, not TX INTR <%x>\n", int_tx);
+
+	musb_host_db_delay_ns += diff_ns;
+}
+static int host_tx_refcnt[8 + 1];
+int host_tx_refcnt_inc(int epnum)
+{
+	host_tx_refcnt[epnum]++;
+	return host_tx_refcnt[epnum];
+}
+int host_tx_refcnt_dec(int epnum)
+{
+	host_tx_refcnt[epnum]--;
+	return host_tx_refcnt[epnum];
+}
+void host_tx_refcnt_reset(int epnum)
+{
+	host_tx_refcnt[epnum] = 0;
+}
 static inline void musb_h_tx_start(struct musb_hw_ep *ep)
 {
 	u16 txcsr;
 
 	/* NOTE: no locks here; caller should lock and select EP */
 	if (ep->epnum) {
+		host_tx_refcnt_inc(ep->epnum);
+
 		txcsr = musb_readw(ep->regs, MUSB_TXCSR);
 		txcsr |= MUSB_TXCSR_TXPKTRDY | MUSB_TXCSR_H_WZC_BITS;
 		musb_writew(ep->regs, MUSB_TXCSR, txcsr);
+
+		if (musb_host_db_workaround)
+			wait_tx_done(ep->epnum, 1000000000);
 	} else {
 		txcsr = MUSB_CSR0_H_DIS_PING | MUSB_CSR0_H_SETUPPKT | MUSB_CSR0_TXPKTRDY;
 		musb_writew(ep->regs, MUSB_CSR0, txcsr);
@@ -1033,7 +1102,7 @@ static void musb_ep_program(struct musb *musb, u8 epnum,
 					    | ((hw_ep->max_packet_sz_tx / packet_sz) - 1) << 11);
 			else
 				musb_writew(epio, MUSB_TXMAXP,
-					    qh->maxpacket | ((qh->hb_mult - 1) << 11));
+					    qh->maxpacket | ((qh->hb_mult?(qh->hb_mult - 1):0) << 11));
 			musb_writeb(epio, MUSB_TXINTERVAL, qh->intv_reg);
 		} else {
 			musb_writeb(epio, MUSB_NAKLIMIT0, qh->intv_reg);
@@ -1534,7 +1603,6 @@ done:
 */
 
 
-
 /* Service a Tx-Available or dma completion irq for the endpoint */
 void musb_host_tx(struct musb *musb, u8 epnum)
 {
@@ -1688,9 +1756,29 @@ void musb_host_tx(struct musb *musb, u8 epnum)
 		 * "missed" TXPKTRDY interrupts and deal with double-buffered
 		 * FIFO mode too...
 		 */
-		if (tx_csr & (MUSB_TXCSR_FIFONOTEMPTY | MUSB_TXCSR_TXPKTRDY)) {
-			DBG(4, "DMA complete but packet still in FIFO, CSR %04x\n", tx_csr);
-			return;
+		{
+			struct timeval tv_before, tv_after;
+			int timeout = 0;
+			u64 diff_ns;
+
+			do_gettimeofday(&tv_before);
+			while (1) {
+				if (tx_csr & (MUSB_TXCSR_FIFONOTEMPTY | MUSB_TXCSR_TXPKTRDY))
+					tx_csr = musb_readw(epio, MUSB_TXCSR);
+				else
+					break;
+
+				do_gettimeofday(&tv_after);
+
+				diff_ns = timeval_to_ns(&tv_after) - timeval_to_ns(&tv_before);
+				/* 1 sec for timeout */
+				if (diff_ns >= 1000000000) {
+					timeout = 1;
+					break;
+				}
+			}
+			if (timeout)
+				DBG(0, "ERROR !!!, DMA complete but packet still in FIFO, CSR %04x\n", tx_csr);
 		}
 	}
 
@@ -2721,6 +2809,11 @@ static int musb_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 			qh->is_ready,
 			urb->urb_list.prev != &qh->hep->urb_list,
 			musb_ep_get_qh(qh->hw_ep, is_in) == qh);
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
+	/* abort HW transaction on this ep */
+	if (qh->is_use_qmu)
+		mtk_disable_q(musb, qh->hw_ep->epnum, is_in);
+#endif
 	/*
 	 * Any URB not actively programmed into endpoint hardware can be
 	 * immediately given back; that's any URB not at the head of an

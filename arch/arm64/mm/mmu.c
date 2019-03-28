@@ -42,6 +42,7 @@
 #include <asm/memblock.h>
 #include <asm/mmu_context.h>
 #include <mt-plat/mtk_memcfg.h>
+#include <mt-plat/mtk_meminfo.h>
 
 #include "mm.h"
 
@@ -77,7 +78,7 @@ static phys_addr_t __init early_pgtable_alloc(void)
 	phys_addr_t phys;
 	void *ptr;
 
-	phys = memblock_alloc(PAGE_SIZE, PAGE_SIZE);
+	phys = memblock_alloc_base(PAGE_SIZE, PAGE_SIZE, arm64_dma_phys_limit);
 	BUG_ON(!phys);
 
 	/*
@@ -249,7 +250,10 @@ static inline bool use_1G_block(unsigned long addr, unsigned long next,
 	 * and SVP to prevent illegal fetch of EMI MPU Violation.
 	 * Return false to make all memory become pmd mapping.
 	 */
-	return false;
+	if (memory_ssvp_inited()) {
+		pr_info("%s, memory-ssvp inited\n", __func__);
+		return false;
+	}
 #endif
 
 	return true;
@@ -507,6 +511,37 @@ static void __init map_kernel_chunk(pgd_t *pgd, void *va_start, void *va_end,
 
 	vm_area_add_early(vma);
 }
+
+#ifdef CONFIG_UNMAP_KERNEL_AT_EL0
+static int __init map_entry_trampoline(void)
+{
+	extern char __entry_tramp_text_start[];
+
+	pgprot_t prot = PAGE_KERNEL_EXEC;
+	phys_addr_t pa_start = __pa_symbol(__entry_tramp_text_start);
+
+	/* The trampoline is always mapped and can therefore be global */
+	pgprot_val(prot) &= ~PTE_NG;
+
+	/* Map only the text into the trampoline page table */
+	memset(tramp_pg_dir, 0, PGD_SIZE);
+	__create_pgd_mapping(tramp_pg_dir, pa_start, TRAMP_VALIAS, PAGE_SIZE,
+			     prot, late_pgtable_alloc);
+
+	/* Map both the text and data into the kernel page table */
+	__set_fixmap(FIX_ENTRY_TRAMP_TEXT, pa_start, prot);
+	if (IS_ENABLED(CONFIG_RANDOMIZE_BASE)) {
+		extern char __entry_tramp_data_start[];
+
+		__set_fixmap(FIX_ENTRY_TRAMP_DATA,
+			     __pa_symbol(__entry_tramp_data_start),
+			     PAGE_KERNEL_RO);
+	}
+
+	return 0;
+}
+core_initcall(map_entry_trampoline);
+#endif
 
 /*
  * Create fine-grained mappings for the kernel.

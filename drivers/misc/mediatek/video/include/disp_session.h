@@ -26,7 +26,7 @@
 #define DISP_SESSION_DEV(id) ((id)&0xff)
 #define MAKE_DISP_SESSION(type, dev) (unsigned int)((type)<<16 | (dev))
 
-#define RSZ_RES_LIST_NUM 4
+#define RSZ_RES_LIST_NUM 8
 
 /* /============================================================================= */
 /* structure declarations */
@@ -154,6 +154,8 @@ enum DISP_MODE {
 	DISP_SESSION_DUAL_DIRECT_LINK_MODE,
 	DISP_SESSION_DUAL_DECOUPLE_MODE,
 	DISP_SESSION_DUAL_RDMA_MODE,
+	/* three session at same time */
+	DISP_SESSION_TRIPLE_DIRECT_LINK_MODE,
 	DISP_SESSION_MODE_NUM,
 
 };
@@ -268,11 +270,18 @@ struct disp_output_config {
 	unsigned int frm_sequence;
 };
 
+struct disp_ccorr_config {
+	bool is_dirty;
+	int mode;
+	int color_matrix[16];
+};
+
 struct disp_session_input_config {
 	enum DISP_SESSION_USER setter;
 	unsigned int session_id;
 	unsigned int config_layer_num;
 	struct disp_input_config config[12];
+	struct disp_ccorr_config ccorr_config;
 };
 
 struct disp_session_output_config {
@@ -309,6 +318,12 @@ struct disp_frame_cfg_t {
 	void *prev_present_fence_struct;
 	enum EXTD_TRIGGER_MODE tigger_mode;
 	enum DISP_SESSION_USER user;
+
+	/* ccorr config */
+	struct disp_ccorr_config ccorr_config;
+
+	/* res_idx: SF/HWC selects which resolution to use */
+	int res_idx;
 };
 
 struct disp_session_info {
@@ -387,6 +402,8 @@ enum DISP_FEATURE {
 	DISP_FEATURE_FENCE_WAIT = 0x00000008,
 	DISP_FEATURE_RSZ = 0x00000010,
 	DISP_FEATURE_NO_PARGB = 0x00000020,
+	DISP_FEATURE_DISP_SELF_REFRESH = 0x00000040,
+	DISP_FEATURE_RPO = 0x00000080,
 };
 
 struct disp_caps_info {
@@ -400,12 +417,26 @@ struct disp_caps_info {
 	int is_support_frame_cfg_ioctl;
 	int is_output_rotated;
 	int lcm_degree;
+
 	/* resizer input resolution list
 	 * format:
-	 *   sequence from big resolution to small
-	 *   portrait width first then height
+	 *   sequence from big resolution(LCM resolution) to small
+	 *   portrait {width, height, rsz layer cnt to use}
+	 * ex:
+	 *   { 1440, 2560, 0},
+	 *   { 1080, 1920, 1},
+	 *   ...
 	 */
-	unsigned int rsz_in_res_list[RSZ_RES_LIST_NUM][2];
+	unsigned int rsz_in_res_list[RSZ_RES_LIST_NUM][3];
+	unsigned int rsz_list_length;
+	/* portrait { width, height } */
+	unsigned int rsz_in_max[2];
+
+	/* is_support_three_session:
+	 *  1: support three session at same time
+	 *  0: not support three session at same time
+	 */
+	int is_support_three_session;
 };
 
 struct disp_session_buf_info {
@@ -414,7 +445,10 @@ struct disp_session_buf_info {
 };
 
 enum LAYERING_CAPS {
-	LAYERING_OVL_ONLY = 0x00000001,
+	LAYERING_OVL_ONLY =	0x00000001,
+	MDP_RSZ_LAYER =		0x00000002,
+	DISP_RSZ_LAYER =	0x00000004,
+	MDP_ROT_LAYER =		0x00000008,
 };
 
 struct layer_config {
@@ -434,11 +468,15 @@ struct disp_layer_info {
 	int gles_head[2];
 	int gles_tail[2];
 	int hrt_num;
+	/* res_idx: SF/HWC selects which resolution to use */
+	int res_idx;
 };
 
 enum DISP_SCENARIO {
 	DISP_SCENARIO_NORMAL,
 	DISP_SCENARIO_SELF_REFRESH,
+	DISP_SCENARIO_FORCE_DC,
+	DISP_SCENARIO_NUM,
 };
 struct disp_scenario_config_t {
 	unsigned int session_id;
@@ -451,6 +489,15 @@ enum DISP_UT_ERROR {
 	DISP_UT_ERROR_RDMA = 0x00000004,
 	DISP_UT_ERROR_CMDQ_TIMEOUT = 0x00000008,
 };
+
+enum DISP_SELF_REFRESH_TYPE {
+	WAIT_FOR_REFRESH,
+	REFRESH_FOR_ANTI_LATENCY2,
+	REFRESH_FOR_SWITCH_DECOUPLE,
+	REFRESH_FOR_SWITCH_DECOUPLE_MIRROR,
+	REFRESH_TYPE_NUM,
+};
+
 /* IOCTL commands. */
 #define DISP_IOW(num, dtype)     _IOW('O', num, dtype)
 #define DISP_IOR(num, dtype)     _IOR('O', num, dtype)
@@ -486,7 +533,8 @@ enum DISP_UT_ERROR {
 #define	DISP_IOCTL_SET_SCENARIO					DISP_IOW(223, struct disp_scenario_config_t)
 #define	DISP_IOCTL_WAIT_ALL_JOBS_DONE				DISP_IOW(224, unsigned int)
 #define	DISP_IOCTL_SCREEN_FREEZE				DISP_IOW(225, unsigned int)
-#define DISP_IOCTL_GET_UT_RESULT			DISP_IOW(226, unsigned int)
+#define DISP_IOCTL_GET_UT_RESULT				DISP_IOW(226, unsigned int)
+#define DISP_IOCTL_WAIT_DISP_SELF_REFRESH			DISP_IOW(227, unsigned int)
 #ifdef __KERNEL__
 
 int disp_mgr_get_session_info(struct disp_session_info *info);

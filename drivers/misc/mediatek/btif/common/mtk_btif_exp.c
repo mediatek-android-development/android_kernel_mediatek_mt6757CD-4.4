@@ -466,7 +466,10 @@ int mtk_wcn_btif_dbg_ctrl(unsigned long u_id, ENUM_BTIF_DBG_ID flag)
 		}
 		break;
 	case BTIF_DUMP_BTIF_REG:
-		 /*TBD*/ btif_dump_reg(p_btif);
+		btif_dump_reg(p_btif, REG_ALL);
+		break;
+	case BTIF_DUMP_BTIF_IRQ:
+		btif_dump_reg(p_btif, REG_IRQ);
 		break;
 	case BTIF_ENABLE_RT_LOG:
 		BTIF_INFO_FUNC
@@ -505,6 +508,7 @@ bool mtk_wcn_btif_parser_wmt_evt(unsigned long u_id,
 
 	return b_ret;
 }
+EXPORT_SYMBOL(mtk_wcn_btif_parser_wmt_evt);
 
 /**********End of Debug Purpose API declearation**********/
 
@@ -628,7 +632,10 @@ int btif_dbg_ctrl_no_id(ENUM_BTIF_DBG_ID flag)
 		}
 		break;
 	case BTIF_DUMP_BTIF_REG:
-		 /*TBD*/ btif_dump_reg(p_btif);
+		btif_dump_reg(p_btif, REG_ALL);
+		break;
+	case BTIF_DUMP_BTIF_IRQ:
+		btif_dump_reg(p_btif, REG_IRQ);
 		break;
 	case BTIF_ENABLE_RT_LOG:
 		BTIF_INFO_FUNC

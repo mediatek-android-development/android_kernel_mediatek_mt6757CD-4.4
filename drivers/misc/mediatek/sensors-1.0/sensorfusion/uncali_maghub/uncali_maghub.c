@@ -83,7 +83,7 @@ static int uncali_mag_recv_data(struct data_unit_t *event, void *reserved)
 #endif
 	if (event->flush_action == DATA_ACTION)
 		err = uncali_mag_data_report(value, event->uncalibrated_mag_t.status,
-			(int64_t)(event->time_stamp + event->time_stamp_gpt));
+			(int64_t)event->time_stamp);
 	else if (event->flush_action == FLUSH_ACTION)
 		err = uncali_mag_flush_report();
 	return err;
@@ -104,7 +104,7 @@ static int uncali_maghub_local_init(void)
 	ctl.is_support_batch = false;
 #elif defined CONFIG_NANOHUB
 	ctl.is_report_input_direct = true;
-	ctl.is_support_batch = false;
+	ctl.is_support_batch = true;
 #else
 #endif
 	err = fusion_register_control_path(&ctl, ID_MAGNETIC_UNCALIBRATED);

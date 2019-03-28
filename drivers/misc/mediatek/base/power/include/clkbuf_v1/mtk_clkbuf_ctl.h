@@ -24,6 +24,8 @@
 
 #if defined(CONFIG_MACH_ELBRUS) || defined(CONFIG_MACH_MT6799)
 #include "mt6799/mtk_clkbuf_hw.h"
+#elif defined(CONFIG_MACH_MT6775)
+#include "mt6775/mtk_clkbuf_hw.h"
 #elif defined(CONFIG_MACH_MT6758)
 #include "mt6758/mtk_clkbuf_hw.h"
 #elif defined(CONFIG_MACH_MT6759)
@@ -32,6 +34,8 @@
 #include "mt6763/mtk_clkbuf_hw.h"
 #elif defined(CONFIG_MACH_MT6739)
 #include "mt6739/mtk_clkbuf_hw.h"
+#elif defined(CONFIG_MACH_MT6771)
+#include "mt6771/mtk_clkbuf_hw.h"
 #endif
 
 enum CLK_BUF_SWCTRL_STATUS_T {

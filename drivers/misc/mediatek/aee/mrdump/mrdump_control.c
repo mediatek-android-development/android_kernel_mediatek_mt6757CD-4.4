@@ -16,11 +16,13 @@
 #include <linux/delay.h>
 #include <linux/memblock.h>
 #include <linux/module.h>
+#include <linux/io.h>
 #include <asm/sections.h>
 #include <mt-plat/mrdump.h>
 #include "mrdump_private.h"
 
-struct mrdump_control_block mrdump_cblock __attribute__((section(".mrdump")));
+struct mrdump_control_block *mrdump_cblock;
+struct mrdump_rsvmem_block mrdump_sram_cb;
 
 int mrdump_rsv_conflict;
 struct mrdump_rsvmem_block __initdata rsvmem_block[4];
@@ -90,6 +92,26 @@ __init void mrdump_rsvmem(void)
 
 early_param("mrdump_rsvmem", early_mrdump_rsvmem);
 
+/* mrdump_cb info from lk */
+static int __init mrdump_get_cb(char *p)
+{
+	unsigned long cbaddr, cbsize;
+	int ret;
+
+	ret = sscanf(p, "0x%lx,0x%lx", &cbaddr, &cbsize);
+	if (ret != 2) {
+		pr_notice("%s: no mrdump_sram_cb. (ret=%d, p=%s)\n", __func__, ret, p);
+	} else {
+		mrdump_sram_cb.start_addr = cbaddr;
+		mrdump_sram_cb.size = cbsize;
+		pr_notice("%s: mrdump_cbaddr=%pa, mrdump_cbsize=%pa\n",
+			 __func__, &mrdump_sram_cb.start_addr, &mrdump_sram_cb.size);
+	}
+
+	return 0;
+}
+early_param("mrdump_cb", mrdump_get_cb);
+
 static void mrdump_cblock_kallsyms_init(struct mrdump_ksyms_param *kparam)
 {
 	unsigned long start_addr = (unsigned long) &kallsyms_addresses;
@@ -120,20 +142,38 @@ static void mrdump_cblock_kallsyms_init(struct mrdump_ksyms_param *kparam)
 	kparam->token_index_off = (unsigned long)&kallsyms_token_index - start_addr;
 }
 
-void mrdump_cblock_init(void)
+__init void mrdump_cblock_init(void)
 {
 	struct mrdump_machdesc *machdesc_p;
 
-	memset(&mrdump_cblock, 0, sizeof(mrdump_cblock));
-	memcpy(&mrdump_cblock.sig, MRDUMP_GO_DUMP, 8);
+	if ((mrdump_sram_cb.start_addr == 0) || (mrdump_sram_cb.size == 0)) {
+		pr_notice("%s: no mrdump_cb\n", __func__);
+		goto end;
+	}
 
-	machdesc_p = &mrdump_cblock.machdesc;
+	if (mrdump_sram_cb.size < sizeof(struct mrdump_control_block)) {
+		pr_notice("%s: not enough space for mrdump control block\n", __func__);
+		goto end;
+	}
+
+	mrdump_cblock = ioremap_wc(mrdump_sram_cb.start_addr, mrdump_sram_cb.size);
+	if (mrdump_cblock == NULL) {
+		pr_notice("%s: mrdump_cb not mapped\n", __func__);
+		goto end;
+	}
+	memset_io(mrdump_cblock, 0, sizeof(struct mrdump_control_block));
+	memcpy_toio(mrdump_cblock->sig, MRDUMP_GO_DUMP, sizeof(mrdump_cblock->sig));
+
+	machdesc_p = &mrdump_cblock->machdesc;
 	machdesc_p->nr_cpus = AEE_MTK_CPU_NUMS;
 	machdesc_p->page_offset = (uint64_t)PAGE_OFFSET;
 	machdesc_p->high_memory = (uintptr_t)high_memory;
 
 #if defined(KIMAGE_VADDR)
 	machdesc_p->kimage_vaddr = KIMAGE_VADDR;
+#endif
+#if defined(TEXT_OFFSET)
+	machdesc_p->kimage_vaddr += TEXT_OFFSET;
 #endif
 	machdesc_p->kimage_init_begin = (uintptr_t)__init_begin;
 	machdesc_p->kimage_init_end = (uintptr_t)__init_end;
@@ -157,7 +197,11 @@ void mrdump_cblock_init(void)
 	machdesc_p->memmap = (uintptr_t)vmemmap;
 #endif
 	mrdump_cblock_kallsyms_init(&machdesc_p->kallsyms);
-	mrdump_cblock.machdesc_crc = crc32(0, machdesc_p, sizeof(struct mrdump_machdesc));
+	mrdump_cblock->machdesc_crc = crc32(0, machdesc_p, sizeof(struct mrdump_machdesc));
+
+	pr_notice("%s: done.\n", __func__);
+
+end:
 	__inner_flush_dcache_all();
 }
 

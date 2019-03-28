@@ -181,11 +181,6 @@ int swtp_init(int md_id)
 	u32 ints1[2] = { 0, 0 };
 	struct device_node *node = NULL;
 
-#ifdef CONFIG_MTK_KERNEL_POWER_OFF_CHARGING
-	if ((get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT) || (get_boot_mode() == LOW_POWER_OFF_CHARGING_BOOT))
-		return ret;
-#endif
-
 	swtp_data[md_id].md_id = md_id;
 	swtp_data[md_id].curr_mode = SWTP_EINT_PIN_PLUG_OUT;
 	spin_lock_init(&swtp_data[md_id].spinlock);
@@ -193,8 +188,11 @@ int swtp_init(int md_id)
 
 	node = of_find_matching_node(NULL, swtp_of_match);
 	if (node) {
-		of_property_read_u32_array(node, "debounce", ints, ARRAY_SIZE(ints));
-		of_property_read_u32_array(node, "interrupts", ints1, ARRAY_SIZE(ints1));
+		ret = of_property_read_u32_array(node, "debounce", ints, ARRAY_SIZE(ints));
+		ret |= of_property_read_u32_array(node, "interrupts", ints1, ARRAY_SIZE(ints1));
+		if (ret)
+			CCCI_LEGACY_ERR_LOG(md_id, SYS, "%s get property fail\n", __func__);
+
 		swtp_data[md_id].gpiopin = ints[0];
 		swtp_data[md_id].setdebounce = ints[1];
 		swtp_data[md_id].eint_type = ints1[1];

@@ -47,7 +47,7 @@
 #endif
 
 #define CMDQ_TEST_MMSYS_DUMMY_PA     (0x14000000 + CMDQ_TEST_MMSYS_DUMMY_OFFSET)
-#define CMDQ_TEST_MMSYS_DUMMY_VA     (cmdq_dev_get_module_base_VA_MMSYS_CONFIG() + CMDQ_TEST_MMSYS_DUMMY_OFFSET)
+#define CMDQ_TEST_MMSYS_DUMMY_VA     (cmdq_mdp_get_module_base_VA_MMSYS_CONFIG() + CMDQ_TEST_MMSYS_DUMMY_OFFSET)
 
 #define CMDQ_TEST_GCE_DUMMY_PA       CMDQ_GPR_R32_PA(CMDQ_DATA_REG_2D_SHARPNESS_1)
 #define CMDQ_TEST_GCE_DUMMY_VA       CMDQ_GPR_R32(CMDQ_DATA_REG_2D_SHARPNESS_1)
@@ -64,6 +64,7 @@ enum CMDQ_TEST_TYPE_ENUM {
 	CMDQ_TEST_TYPE_DUMP_DTS = 5,
 	CMDQ_TEST_TYPE_FEATURE_CONFIG = 6,
 	CMDQ_TEST_TYPE_MMSYS_PERFORMANCE = 7,
+	CMDQ_TEST_TYPE_SET_BANDWIDTH = 8,
 
 	CMDQ_TEST_TYPE_MAX	/* ALWAYS keep at the end */
 };
@@ -240,6 +241,7 @@ static void testcase_scenario(void)
 }
 
 static struct timer_list timer;
+static bool timer_stop;
 
 static void _testcase_sync_token_timer_func(unsigned long data)
 {
@@ -257,6 +259,11 @@ static void _testcase_sync_token_timer_loop_func(unsigned long data)
 	/* trigger sync event */
 	CMDQ_MSG("trigger event=0x%08lx\n", (1L << 16) | data);
 	CMDQ_REG_SET32(CMDQ_SYNC_TOKEN_UPD, (1L << 16) | data);
+
+	if (timer_stop) {
+		del_timer(&timer);
+		return;
+	}
 
 	/* repeate timeout until user delete it */
 	mod_timer(&timer, jiffies + msecs_to_jiffies(10));
@@ -549,6 +556,7 @@ static void testcase_multiple_async_request(void)
 
 	CMDQ_LOG("%s\n", __func__);
 
+	timer_stop = false;
 	setup_timer(&timer, &_testcase_sync_token_timer_loop_func, CMDQ_SYNC_TOKEN_USER_0);
 	mod_timer(&timer, jiffies + msecs_to_jiffies(10));
 
@@ -598,6 +606,7 @@ static void testcase_multiple_async_request(void)
 	/* clear token */
 	CMDQ_REG_SET32(CMDQ_SYNC_TOKEN_UPD, CMDQ_SYNC_TOKEN_USER_0);
 
+	timer_stop = true;
 	del_timer(&timer);
 
 	CMDQ_LOG("%s END\n", __func__);
@@ -1681,7 +1690,12 @@ static void testcase_poll_run(u32 poll_value, u32 poll_mask, bool use_mmsys_dumm
 	CMDQ_LOG("%s\n", __func__);
 	CMDQ_LOG("poll value is 0x%08x\n", poll_value);
 	CMDQ_LOG("poll mask is 0x%08x\n", poll_mask);
-	CMDQ_LOG("use_mmsys_dummy is %u\n", use_mmsys_dummy);
+	CMDQ_LOG("use_mmsys_dummy is %u 0x%lx\n", use_mmsys_dummy, dummy_va);
+
+	if (!dummy_va) {
+		CMDQ_TEST_FAIL("dummy va not available\n");
+		return;
+	}
 
 	cmdq_task_create(CMDQ_SCENARIO_DEBUG, &handle);
 	cmdq_task_reset(handle);
@@ -3543,7 +3557,7 @@ static int testcase_cpu_config_mmsys(void *data)
 
 	CMDQ_LOG("%s\n", __func__);
 
-	cmdq_get_func()->enableCommonClockLocked(true);
+	cmdq_mdp_get_func()->mdpEnableCommonClock(true);
 
 	while (1) {
 		if (kthread_should_stop())
@@ -3556,6 +3570,8 @@ static int testcase_cpu_config_mmsys(void *data)
 	}
 
 	CMDQ_LOG("%s END\n", __func__);
+
+	cmdq_mdp_get_func()->mdpEnableCommonClock(false);
 
 	return 0;
 }
@@ -4190,19 +4206,27 @@ static void testcase_basic_delay(u32 delay_time_us)
 	const CMDQ_VARIABLE arg_tpr = (CMDQ_BIT_VAR<<CMDQ_DATA_BIT) | CMDQ_TPR_ID;
 	uint32_t begin_tpr, end_tpr;
 	int32_t duration_time;
+	u32 tpr_last_bit_mask = 0x8000000;
 
 	CMDQ_LOG("%s\n", __func__);
 
 	cmdq_delay_dump_thread(false);
 
-	cmdq_alloc_mem(&slot_handle, 2);
+	cmdq_alloc_mem(&slot_handle, 3);
 	cmdq_task_create(CMDQ_SCENARIO_DEBUG, &handle);
 
 	cmdq_task_reset(handle);
 
+	/* always enable tpr so that we can backup tpr value for duration */
+	cmdq_op_write_reg(handle, CMDQ_TPR_MASK_PA, tpr_last_bit_mask,
+		tpr_last_bit_mask);
+
 	cmdq_op_backup_CPR(handle, arg_tpr, slot_handle, 0);
 	cmdq_op_delay_us(handle, delay_time_us);
 	cmdq_op_backup_CPR(handle, arg_tpr, slot_handle, 1);
+
+	/* turn off tpr */
+	cmdq_op_write_reg(handle, CMDQ_TPR_MASK_PA, 0, tpr_last_bit_mask);
 
 	cmdq_op_finalize_command(handle, false);
 	_test_submit_async(handle, &pTask);
@@ -5433,6 +5457,22 @@ void testcase_verify_timer(void)
 	CMDQ_LOG("%s END\n", __func__);
 }
 
+void testcase_resource_dump(void)
+{
+	struct cmdqRecStruct *handle = NULL;
+
+	CMDQ_LOG("%s\n", __func__);
+
+	cmdq_task_create(CMDQ_SCENARIO_DEBUG, &handle);
+	cmdq_task_reset(handle);
+	cmdq_op_clear_event(handle, CMDQ_SYNC_RESOURCE_WROT0);
+	cmdq_op_wait(handle, CMDQ_SYNC_RESOURCE_WROT0);
+	cmdq_task_flush(handle);
+	cmdq_task_destroy(handle);
+
+	CMDQ_LOG("%s END\n", __func__);
+}
+
 enum ENGINE_POLICY_ENUM {
 	CMDQ_TESTCASE_ENGINE_NOT_SET,
 	CMDQ_TESTCASE_ENGINE_SAME,
@@ -6607,6 +6647,9 @@ static void testcase_general_handling(int32_t testID)
 	case 300:
 		testcase_stress_basic();
 		break;
+	case 157:
+		testcase_resource_dump();
+		break;
 	case 156:
 		testcase_verify_timer();
 		break;
@@ -6679,9 +6722,15 @@ static void testcase_general_handling(int32_t testID)
 		break;
 	case 126:
 		testcase_basic_delay(100);
-		testcase_basic_delay(1000);
-		testcase_basic_delay(10000);
-		testcase_basic_delay(100000);
+		testcase_basic_delay(200);
+		testcase_basic_delay(100);
+		testcase_basic_delay(200);
+		testcase_basic_delay(100);
+		testcase_basic_delay(200);
+		testcase_basic_delay(100);
+		testcase_basic_delay(200);
+		testcase_basic_delay(100);
+		testcase_basic_delay(200);
 		break;
 	case 125:
 		testcase_do_while_continue();
@@ -6993,7 +7042,6 @@ ssize_t cmdq_test_proc(struct file *fp, char __user *u, size_t s, loff_t *l)
 static ssize_t cmdq_write_test_proc_config(struct file *file,
 					   const char __user *userBuf, size_t count, loff_t *data)
 {
-	bool trick_test = false;
 	char desc[50];
 	long long int testConfig[CMDQ_TESTCASE_PARAMETER_MAX];
 	int32_t len = 0;
@@ -7024,8 +7072,6 @@ static ssize_t cmdq_write_test_proc_config(struct file *file,
 			CMDQ_MSG("TEST_CONFIG: testType:%lld, newTestSuit:%lld\n", testConfig[0], testConfig[1]);
 			break;
 		}
-		if ((testConfig[0] < 2) && (testConfig[1] < 0))
-			trick_test = true;
 
 		mutex_lock(&gCmdqTestProcLock);
 		/* set memory barrier for lock */
@@ -7039,22 +7085,6 @@ static ssize_t cmdq_write_test_proc_config(struct file *file,
 
 		mutex_unlock(&gCmdqTestProcLock);
 	} while (0);
-
-	if (trick_test) {
-		char node_name[25];
-		char clk_name[20];
-		int clk_enable = 0;
-		struct clk *clk_module;
-
-		/* trick to control clock by test node for testing */
-		if (sscanf(desc, "%d %24s %19s", &clk_enable, node_name, clk_name) <= 0) {
-			/* sscanf returns the number of items in argument list successfully filled. */
-			CMDQ_LOG("CLOCK_TEST_CONFIG: sscanf failed: %s\n", desc);
-		} else {
-			cmdq_dev_get_module_clock_by_name(node_name, clk_name, &clk_module);
-			cmdq_dev_enable_device_clock(clk_enable, clk_module, clk_name);
-		}
-	}
 
 	return count;
 }

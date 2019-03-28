@@ -37,7 +37,10 @@ MAIN_CFILES += main_lens.c
 MAIN_CFILES  += common/fm50af/FM50AF.c
 MAIN_CFILES  += common/bu6424af/BU6424AF.c
 MAIN_CFILES  += common/bu6429af/BU6429AF.c
+MAIN_CFILES  += common/bu6429af/bu64748af.c
+MAIN_CFILES  += common/bu6429af/bu64748_function.c
 MAIN_CFILES += common/dw9714af/DW9714AF.c
+MAIN_CFILES += common/dw9763af/DW9763AF.c
 MAIN_CFILES  += common/dw9814af/DW9814AF.c
 MAIN_CFILES  += common/dw9718af/DW9718AF.c
 MAIN_CFILES  += common/dw9718saf/DW9718SAF.c
@@ -56,6 +59,9 @@ MAIN_CFILES  += common/lc898122af/OisIni.c
 MAIN_CFILES  += common/ad5820af/AD5820AF.c
 MAIN_CFILES  += common/wv511aaf/WV511AAF.c
 MAIN_CFILES  += common/ak7371af/AK7371AF.c
+ifeq ($(CONFIG_MTK_LENS_DW9800WAF_SUPPORT), y)
+MAIN_CFILES  += common/dw9800waf/DW9800WAF.c
+endif
 ifeq ($(CONFIG_MTK_LENS_BU63165AF_SUPPORT), y)
 MAIN_CFILES  += common/bu63165af/BU63165AF.c
 MAIN_CFILES  += common/bu63165af/OIS_func.c
@@ -77,7 +83,9 @@ obj-y  += main_lens.o
 obj-y  += common/fm50af/
 obj-y  += common/bu6424af/
 obj-y  += common/bu6429af/
+obj-y  += common/bu64748af/
 obj-y  += common/dw9714af/
+obj-y  += common/dw9763af/
 obj-y  += common/dw9814af/
 obj-y  += common/dw9718af/
 obj-y  += common/dw9718saf/
@@ -91,6 +99,9 @@ obj-y  += common/lc898122af/
 obj-y  += common/ad5820af/
 obj-y  += common/wv511aaf/
 obj-y  += common/ak7371af/
+ifeq ($(CONFIG_MTK_LENS_DW9800WAF_SUPPORT), y)
+  obj-y  += common/dw9800waf/
+endif
 ifeq ($(CONFIG_MTK_LENS_BU63165AF_SUPPORT), y)
   obj-y  += common/bu63165af/
 else

@@ -35,12 +35,6 @@
 #define PMIC_VOL REGULATOR_CHANGE_VOLTAGE
 #define PMIC_EN_VOL 9
 
-#if defined(MTK_EVB_PLATFORM) || defined(CONFIG_FPGA_EARLY_PORTING)
-#define ENABLE_ALL_OC_IRQ 0
-#else
-#define ENABLE_ALL_OC_IRQ 1
-#endif
-
 /*
  * PMIC EXTERN VARIABLE
  */
@@ -53,6 +47,8 @@ extern int g_battery_oc_level;
 extern unsigned int g_pmic_pad_vbif28_vol;
 /* for chip version used */
 extern unsigned int g_pmic_chip_version;
+/* for recording MD power vosel */
+extern unsigned short g_vmodem_vosel;
 
 /*
  * PMIC EXTERN FUNCTIONS
@@ -89,13 +85,11 @@ extern void pmic_auxadc_unlock(void);
 extern unsigned int bat_get_ui_percentage(void);
 extern signed int fgauge_read_v_by_d(int d_val);
 extern signed int fgauge_read_r_bat_by_v(signed int voltage);
-/*extern PMU_ChargerStruct BMT_status;*//*have defined in battery_common.h */
 extern void kpd_pwrkey_pmic_handler(unsigned long pressed);
 extern void kpd_pmic_rstkey_handler(unsigned long pressed);
 extern int is_mt6311_sw_ready(void);
 extern int is_mt6311_exist(void);
 extern int get_mt6311_i2c_ch_num(void);
-/*extern bool crystal_exist_status(void);*//*have defined in mtk_rtc.h */
 #if !defined CONFIG_MTK_LEGACY
 extern void pmu_drv_tool_customization_init(void);
 #endif
@@ -114,6 +108,7 @@ extern void PMIC_PWROFF_SEQ_SETTING(void);
 extern int pmic_tracking_init(void);
 #endif
 extern unsigned int PMIC_CHIP_VER(void);
+extern void record_md_vosel(void);
 /*---------------------------------------------------*/
 
 struct regulator;
@@ -123,10 +118,13 @@ struct mtk_regulator_vosel {
 	unsigned int cur_sel; /*-- current vosel --*/
 	bool restore;
 };
+
 struct mtk_regulator {
 	struct regulator_desc desc;
+	/* init_data and config may be removed */
 	struct regulator_init_data init_data;
 	struct regulator_config config;
+	struct regulation_constraints constraints;
 	struct device_attribute en_att;
 	struct device_attribute voltage_att;
 	struct regulator_dev *rdev;
@@ -134,8 +132,9 @@ struct mtk_regulator {
 	PMU_FLAGS_LIST_ENUM vol_reg;
 	PMU_FLAGS_LIST_ENUM qi_en_reg;
 	PMU_FLAGS_LIST_ENUM qi_vol_reg;
-	const void *pvoltages;
-	const void *idxs;
+	PMU_FLAGS_LIST_ENUM modeset_reg;
+	const int *pvoltages;
+	const int *idxs;
 	bool isUsedable;
 	struct regulator *reg;
 	int vsleep_en_saved;

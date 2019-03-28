@@ -37,11 +37,6 @@ struct acthub_ipi_data {
 
 static struct acthub_ipi_data obj_ipi_data;
 
-static ssize_t show_activity_value(struct device_driver *ddri, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%s\n", buf);
-}
-
 static ssize_t store_trace_value(struct device_driver *ddri, const char *buf, size_t count)
 {
 	struct acthub_ipi_data *obj = &obj_ipi_data;
@@ -61,11 +56,9 @@ static ssize_t store_trace_value(struct device_driver *ddri, const char *buf, si
 	return count;
 }
 
-static DRIVER_ATTR(activity, S_IRUGO, show_activity_value, NULL);
 static DRIVER_ATTR(trace, S_IWUSR | S_IRUGO, NULL, store_trace_value);
 
 static struct driver_attribute *activityhub_attr_list[] = {
-	&driver_attr_activity,
 	&driver_attr_trace,
 };
 
@@ -123,7 +116,7 @@ static int act_get_data(struct hwm_sensor_data *sensor_data, int *status)
 	sensor_data->probability[IN_VEHICLE] = data.activity_data_t.probability[IN_VEHICLE];
 	sensor_data->probability[TILTING] = data.activity_data_t.probability[TILTING];
 	sensor_data->probability[UNKNOWN] = data.activity_data_t.probability[UNKNOWN];
-	sensor_data->time = (int64_t)(data.time_stamp + data.time_stamp_gpt);
+	sensor_data->time = (int64_t)data.time_stamp;
 	return 0;
 }
 
@@ -194,7 +187,7 @@ static int activity_recv_data(struct data_unit_t *data_t, void *reserved)
 		data_t->activity_data_t.probability[TILTING];
 	data.probability[UNKNOWN] =
 		data_t->activity_data_t.probability[UNKNOWN];
-	data.time = (int64_t)(data_t->time_stamp + data_t->time_stamp_gpt);
+	data.time = (int64_t)data_t->time_stamp;
 	if (data_t->flush_action == FLUSH_ACTION)
 		err = act_flush_report();
 	else if (data_t->flush_action == DATA_ACTION)

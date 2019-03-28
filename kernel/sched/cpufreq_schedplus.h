@@ -40,12 +40,14 @@ enum throttle_type {
  */
 #ifdef CONFIG_MTK_BASE_POWER
 extern int  mt_cpufreq_set_by_schedule_load_cluster(int cid, unsigned int freq);
+extern int  mt_cpufreq_set_by_wfi_load_cluster(int cid, unsigned int freq);
 extern unsigned int mt_cpufreq_find_close_freq(unsigned int cluster_id, unsigned int freq);
 extern unsigned int mt_cpufreq_get_freq_by_idx(enum mt_cpu_dvfs_id id, int idx);
 extern int mt_cpufreq_get_sched_enable(void);
 extern unsigned int mt_cpufreq_get_cur_freq(enum mt_cpu_dvfs_id id);
 #else
 static inline int  mt_cpufreq_set_by_schedule_load_cluster(int cid, unsigned int freq) { return 0; }
+static inline int  mt_cpufreq_set_by_wfi_load_cluster(int cid, unsigned int freq) { return 0; }
 static inline unsigned int mt_cpufreq_find_close_freq(unsigned int cluster_id, unsigned int freq) { return 0; }
 static inline unsigned int mt_cpufreq_get_freq_by_idx(enum mt_cpu_dvfs_id id, int idx) { return 0; }
 static inline int mt_cpufreq_get_sched_enable(void) { return 0; }
@@ -58,7 +60,12 @@ extern int walt_cpufreq_notifier_trans(unsigned int cpu, unsigned int new_freq);
 
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
 extern unsigned long int min_boost_freq[3];
+extern unsigned long int cap_min_freq[3];
 extern void update_cpu_freq_quick(int cpu, int freq);
 #else
 static inline void update_cpu_freq_quick(int cpu, int freq) { return; }
+#endif
+
+#ifdef CONFIG_CGROUP_SCHEDTUNE
+extern int schedtune_cpu_capacity_min(int cpu);
 #endif

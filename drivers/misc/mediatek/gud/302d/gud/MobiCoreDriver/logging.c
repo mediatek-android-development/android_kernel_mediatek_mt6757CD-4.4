@@ -72,19 +72,11 @@ static void log_eol(uint16_t source)
 	}
 	/* MobiCore Userspace */
 	if (prev_source)
-#ifdef TBASE_CORE_SWITCHER
-		dev_info(mcd, "%03x(%d)|%s\n", prev_source,
-			mc_active_core(), log_line);
-#else
 		dev_info(mcd, "%03x|%s\n", prev_source, log_line);
-#endif
 	/* MobiCore kernel */
 	else
-#ifdef TBASE_CORE_SWITCHER
-		dev_info(mcd, "mtk(%d)|%s\n", mc_active_core(), log_line);
-#else
 		dev_info(mcd, "%s\n", log_line);
-#endif
+
 	log_line_len = 0;
 	log_line[0] = 0;
 }
@@ -292,7 +284,6 @@ long mobicore_log_setup(void)
 {
 	phys_addr_t phys_log_buf;
 	union fc_generic fc_log;
-	struct sched_param param = { .sched_priority = 1 };
 	long ret;
 
 	log_pos = 0;
@@ -322,7 +313,7 @@ long mobicore_log_setup(void)
 		goto err_free_line;
 	}
 
-	sched_setscheduler(log_thread, SCHED_IDLE, &param);
+	set_user_nice(log_thread, -20);
 	/*
 	 * We are going to map this buffer into virtual address space in SWd.
 	 * To reduce complexity there, we use a contiguous buffer.

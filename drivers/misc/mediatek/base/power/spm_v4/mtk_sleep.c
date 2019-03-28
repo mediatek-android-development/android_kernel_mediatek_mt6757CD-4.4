@@ -39,6 +39,9 @@
 #include <mtk-soc-afe-control.h>
 #endif /* CONFIG_MTK_SND_SOC_NEW_ARCH */
 
+#ifdef CONFIG_MTK_ACAO_SUPPORT
+#include <mtk_mcdi_api.h>
+#endif
 /**************************************
  * only for internal debug
  **************************************/
@@ -70,6 +73,7 @@ static DEFINE_SPINLOCK(slp_lock);
 
 static unsigned int slp_wake_reason = WR_NONE;
 
+static bool slp_suspend_ops_valid_on;
 static bool slp_ck26m_on;
 bool slp_dump_gpio;
 bool slp_dump_golden_setting;
@@ -155,17 +159,52 @@ static u32 slp_spm_deepidle_flags = {
 };
 #endif
 #endif
-#endif /* CONFIG_MACH_MT6739 */
-u32 slp_spm_data;
+#elif defined(CONFIG_MACH_MT6771)
+/* FIXME: */
+static u32 slp_spm_flags = {
+	/* SPM_FLAG_DIS_CPU_PDN | */
+	/* SPM_FLAG_DIS_INFRA_PDN | */
+	/* SPM_FLAG_DIS_DDRPHY_PDN | */
+	SPM_FLAG_DIS_VCORE_DVS |
+	SPM_FLAG_DIS_VCORE_DFS |
+	/* SPM_FLAG_DIS_VPROC_VSRAM_DVS | */
+	SPM_FLAG_DIS_ATF_ABORT |
+	SPM_FLAG_SUSPEND_OPTION
+};
 
+static u32 slp_spm_deepidle_flags = {
+	/* SPM_FLAG_DIS_CPU_PDN | */
+	/* SPM_FLAG_DIS_INFRA_PDN | */
+	/* SPM_FLAG_DIS_DDRPHY_PDN | */
+	SPM_FLAG_DIS_VCORE_DVS |
+	SPM_FLAG_DIS_VCORE_DFS |
+	/* SPM_FLAG_DIS_VPROC_VSRAM_DVS | */
+	SPM_FLAG_DIS_ATF_ABORT |
+	SPM_FLAG_DEEPIDLE_OPTION
+};
+#endif /* CONFIG_MACH_MT6771 */
+
+#if defined(CONFIG_MACH_MT6771)
+
+static u32 slp_spm_flags1 = {
+	0
+};
+
+static u32 slp_spm_deepidle_flags1 = {
+	0
+};
+
+#else
+static u32 slp_spm_flags1;
+static u32 slp_spm_deepidle_flags1;
+#endif
 
 static int slp_suspend_ops_valid(suspend_state_t state)
 {
-#if defined(CONFIG_MACH_MT6739)
-	return state == PM_SUSPEND_MEM;
-#else
-	return state == PM_SUSPEND_MEM;
-#endif
+	if (slp_suspend_ops_valid_on)
+		return state == PM_SUSPEND_MEM;
+	else
+		return false;
 }
 
 static int slp_suspend_ops_begin(suspend_state_t state)
@@ -226,6 +265,30 @@ void __attribute__((weak)) pll_if_on(void)
 	pr_err("NO %s !!!\n", __func__);
 }
 
+void __attribute__((weak))
+spm_output_sleep_option(void)
+{
+
+}
+
+int __attribute__((weak))
+spm_set_sleep_wakesrc(u32 wakesrc, bool enable, bool replace)
+{
+	return 0;
+}
+
+unsigned int __attribute__((weak))
+spm_go_to_sleep(u32 spm_flags, u32 spm_data)
+{
+	return 0;
+}
+
+void __attribute__((weak))
+gpio_dump_regs(void)
+{
+
+}
+
 static int slp_suspend_ops_enter(suspend_state_t state)
 {
 	int ret = 0;
@@ -235,7 +298,6 @@ static int slp_suspend_ops_enter(suspend_state_t state)
 #endif
 #endif
 
-#if !defined(CONFIG_FPGA_EARLY_PORTING)
 #if SLP_SLEEP_DPIDLE_EN
 #ifdef CONFIG_MTK_SND_SOC_NEW_ARCH
 	int fm_radio_is_playing = 0;
@@ -246,7 +308,7 @@ static int slp_suspend_ops_enter(suspend_state_t state)
 		fm_radio_is_playing = 1;
 #endif /* CONFIG_MTK_SND_SOC_NEW_ARCH */
 #endif
-#endif /* CONFIG_FPGA_EARLY_PORTING */
+
 
 	/* legacy log */
 	/* slp_crit2("@@@@@@@@@@@@@@@@@@@@\tChip_pm_enter\t@@@@@@@@@@@@@@@@@@@@\n"); */
@@ -293,18 +355,24 @@ static int slp_suspend_ops_enter(suspend_state_t state)
 	}
 #endif /* CONFIG_FPGA_EARLY_PORTING */
 
-#if !defined(CONFIG_FPGA_EARLY_PORTING)
+#ifdef CONFIG_MTK_ACAO_SUPPORT
+	mcdi_task_pause(true);
+#endif
+
 #if SLP_SLEEP_DPIDLE_EN
 #ifdef CONFIG_MTK_SND_SOC_NEW_ARCH
 	if (slp_ck26m_on | fm_radio_is_playing)
 #else
 	if (slp_ck26m_on)
 #endif /* CONFIG_MTK_SND_SOC_NEW_ARCH */
-		slp_wake_reason = spm_go_to_sleep_dpidle(slp_spm_deepidle_flags, slp_spm_data);
+		slp_wake_reason = spm_go_to_sleep_dpidle(slp_spm_deepidle_flags, slp_spm_deepidle_flags1);
 	else
 #endif
-#endif /* CONFIG_FPGA_EARLY_PORTING */
-		slp_wake_reason = spm_go_to_sleep(slp_spm_flags, slp_spm_data);
+
+		slp_wake_reason = spm_go_to_sleep(slp_spm_flags, slp_spm_flags1);
+#ifdef CONFIG_MTK_ACAO_SUPPORT
+	mcdi_task_pause(false);
+#endif
 
 LEAVE_SLEEP:
 #if !defined(CONFIG_FPGA_EARLY_PORTING)
@@ -390,6 +458,7 @@ unsigned int slp_get_wake_reason(void)
 {
 	return slp_wake_reason;
 }
+EXPORT_SYMBOL(slp_get_wake_reason);
 
 void slp_set_infra_on(bool infra_on)
 {
@@ -409,6 +478,14 @@ void slp_set_infra_on(bool infra_on)
 
 void slp_module_init(void)
 {
+#if defined(CONFIG_MACH_MT6739) \
+	|| defined(CONFIG_MACH_MT6763) \
+	|| defined(CONFIG_MACH_MT6771)
+	slp_suspend_ops_valid_on = true;
+#else
+	slp_suspend_ops_valid_on = false;
+#endif
+
 	spm_output_sleep_option();
 	slp_notice("SLEEP_DPIDLE_EN:%d, REPLACE_DEF_WAKESRC:%d, SUSPEND_LOG_EN:%d\n",
 		   SLP_SLEEP_DPIDLE_EN, SLP_REPLACE_DEF_WAKESRC, SLP_SUSPEND_LOG_EN);
@@ -416,6 +493,95 @@ void slp_module_init(void)
 #if SLP_SUSPEND_LOG_EN
 	console_suspend_enabled = 0;
 #endif
+}
+
+
+/*
+ * debugfs
+ */
+#define NR_CMD_BUF	128
+static char dbg_buf[4096] = { 0 };
+static char cmd_buf[512] = { 0 };
+static struct dentry *spm_suspend_debugfs_file;
+
+#undef mt_suspend_log
+#define log2buf(p, s, fmt, args...) \
+	(p += scnprintf(p, sizeof(s) - strlen(s), fmt, ##args))
+#define mt_suspend_log(fmt, args...)	log2buf(p, dbg_buf, fmt, ##args)
+
+static int _suspend_state_open(struct seq_file *s, void *data)
+{
+	return 0;
+}
+
+static int suspend_state_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, _suspend_state_open, inode->i_private);
+}
+
+static ssize_t suspend_state_read(struct file *filp,
+				  char __user *userbuf,
+				  size_t count, loff_t *f_pos)
+{
+	int len = 0;
+	char *p = dbg_buf;
+
+	p[0] = '\0';
+	mt_suspend_log("*********** suspend state ************\n");
+	mt_suspend_log("suspend valid status = %d\n",
+		       slp_suspend_ops_valid_on);
+	mt_suspend_log("*********** suspend command ************\n");
+	mt_suspend_log("echo suspend 1/0 > /sys/kernel/debug/spm/suspend_state\n");
+
+	len = p - dbg_buf;
+
+	return simple_read_from_buffer(userbuf, count, f_pos, dbg_buf, len);
+}
+
+static ssize_t suspend_state_write(struct file *filp,
+				   const char __user *userbuf,
+				   size_t count, loff_t *f_pos)
+{
+	char cmd[NR_CMD_BUF];
+	int param;
+
+	count = min(count, sizeof(cmd_buf) - 1);
+
+	if (copy_from_user(cmd_buf, userbuf, count))
+		return -EFAULT;
+
+	cmd_buf[count] = '\0';
+
+	if (sscanf(cmd_buf, "%127s %d", cmd, &param) == 2) {
+		if (!strcmp(cmd, "suspend")) {
+			/* update suspend valid status */
+			slp_suspend_ops_valid_on = param;
+
+			/* suspend reinit ops */
+			suspend_set_ops(&slp_suspend_ops);
+		}
+		return count;
+	}
+
+	return -EINVAL;
+}
+
+static const struct file_operations suspend_state_fops = {
+	.open = suspend_state_open,
+	.read = suspend_state_read,
+	.write = suspend_state_write,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+void spm_suspend_debugfs_init(struct dentry *spm_dir)
+{
+	spm_suspend_debugfs_file =
+		debugfs_create_file("suspend_state",
+				    S_IRUGO,
+				    spm_dir,
+				    NULL,
+				    &suspend_state_fops);
 }
 
 module_param(slp_ck26m_on, bool, 0644);

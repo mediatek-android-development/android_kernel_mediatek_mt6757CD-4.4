@@ -1379,8 +1379,10 @@ static long aed_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			/* Try to prevent overrun */
 			dal_show->msg[sizeof(dal_show->msg) - 1] = 0;
 #ifdef CONFIG_MTK_LCM
-			LOGD("AEE CALL DAL_Printf now\n");
-			DAL_Printf("%s", dal_show->msg);
+			if (!strncmp(current->comm, "aee_aed", 7)) {
+				LOGD("AEE CALL DAL_Printf now\n");
+				DAL_Printf("%s", dal_show->msg);
+			}
 #endif
 
  OUT:
@@ -1398,10 +1400,12 @@ static long aed_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			dal_setcolor.background = 0xff0000;	/*red */
 
 #ifdef CONFIG_MTK_LCM
-			LOGD("AEE CALL DAL_SetColor now\n");
-			DAL_SetColor(dal_setcolor.foreground, dal_setcolor.background);
-			LOGD("AEE CALL DAL_Clean now\n");
-			DAL_Clean();
+			if (!strncmp(current->comm, "aee_aed", 7)) {
+				LOGD("AEE CALL DAL_SetColor now\n");
+				DAL_SetColor(dal_setcolor.foreground, dal_setcolor.background);
+				LOGD("AEE CALL DAL_Clean now\n");
+				DAL_Clean();
+			}
 #endif
 			break;
 		}
@@ -1834,7 +1838,9 @@ static void kernel_reportAPI(const enum AE_DEFECT_ATTR attr, const int db_opt, c
 	struct rtc_time tm;
 	struct timeval tv = { 0 };
 
-	if (aee_mode >= AEE_MODE_CUSTOMER_USER || (aee_mode == AEE_MODE_CUSTOMER_ENG && attr == AE_DEFECT_WARNING))
+	if ((aee_mode >= AEE_MODE_CUSTOMER_USER ||
+				(aee_mode == AEE_MODE_CUSTOMER_ENG && attr == AE_DEFECT_WARNING))
+				&& (attr != AE_DEFECT_FATAL))
 		return;
 	oops = aee_oops_create(attr, AE_KERNEL_PROBLEM_REPORT, module);
 	if (oops != NULL) {

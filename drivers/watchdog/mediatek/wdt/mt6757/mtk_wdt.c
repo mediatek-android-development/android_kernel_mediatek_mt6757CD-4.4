@@ -325,7 +325,7 @@ void wdt_arch_reset(char mode)
 #ifdef CONFIG_OF
 	struct device_node *np_rgu;
 #endif
-	pr_debug("wdt_arch_reset called@Kernel mode =%c\n", mode);
+	pr_debug("%s: mode=0x%x\n", __func__, mode);
 #ifdef CONFIG_OF
 	np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
 
@@ -340,20 +340,34 @@ void wdt_arch_reset(char mode)
 	/* Watchdog Rest */
 	mt_reg_sync_writel(MTK_WDT_RESTART_KEY, MTK_WDT_RESTART);
 	wdt_mode_val = __raw_readl(MTK_WDT_MODE);
-	pr_debug("wdt_arch_reset called MTK_WDT_MODE =%x\n", wdt_mode_val);
+	pr_debug("%s: wdt_mode=0x%x\n", __func__, wdt_mode_val);
 	/* clear autorestart bit: autoretart: 1, bypass power key, 0: not bypass power key */
 	wdt_mode_val &= (~MTK_WDT_MODE_AUTO_RESTART);
 	/* make sure WDT mode is hw reboot mode, can not config isr mode  */
 	wdt_mode_val &= (~(MTK_WDT_MODE_IRQ|MTK_WDT_MODE_ENABLE | MTK_WDT_MODE_DUAL_MODE));
-	if (mode)
-		/* mode != 0 means by pass power key reboot, We using auto_restart bit as by pass power key flag */
+
+	if (mode & WD_SW_RESET_BYPASS_PWR_KEY) {
+		/* Bypass power key reboot, We using auto_restart bit as by pass power key flag */
 		wdt_mode_val = wdt_mode_val | (MTK_WDT_MODE_KEY|MTK_WDT_MODE_EXTEN|MTK_WDT_MODE_AUTO_RESTART);
-	else
+	} else
 		wdt_mode_val = wdt_mode_val | (MTK_WDT_MODE_KEY|MTK_WDT_MODE_EXTEN);
 
 	/*set latch register to 0 for SW reset*/
 	/* mt_reg_sync_writel((MTK_WDT_LENGTH_CTL_KEY | 0x0), MTK_WDT_LATCH_CTL); */
 	mt_reg_sync_writel(wdt_mode_val, MTK_WDT_MODE);
+
+	/*
+	 * disable ddr reserve mode if we are doing normal reboot to avoid unexpected dram issue.
+	 * exception types:
+	 *   0: normal
+	 *   1: HWT
+	 *   2: KE
+	 *   3: nested panic
+	 *   4: mrdump key
+	 */
+	if (!(mode & WD_SW_RESET_KEEP_DDR_RESERVE))
+		mtk_rgu_dram_reserved(0);
+
 	pr_debug("wdt_arch_reset called end MTK_WDT_MODE =%x\n", wdt_mode_val);
 #ifndef CONFIG_FPGA_EARLY_PORTING
 #ifdef CONFIG_MTK_PMIC
@@ -476,6 +490,7 @@ int mtk_wdt_swsysret_config(int bit, int set_value)
 	pr_debug("after set wdt_sys_val =%x,wdt_sys_val=%x\n", __raw_readl(MTK_WDT_SWSYSRST), wdt_sys_val);
 	return 0;
 }
+EXPORT_SYMBOL(mtk_wdt_swsysret_config);
 
 int mtk_wdt_request_en_set(int mark_bit, enum wk_req_en en)
 {
@@ -720,6 +735,7 @@ void mtk_wd_suspend(void){}
 void mtk_wd_resume(void){}
 void wdt_dump_reg(void){}
 int mtk_wdt_swsysret_config(int bit, int set_value) { return 0; }
+EXPORT_SYMBOL(mtk_wdt_swsysret_config);
 int mtk_wdt_request_mode_set(int mark_bit, enum wk_req_mode mode) {return 0; }
 int mtk_wdt_request_en_set(int mark_bit, enum wk_req_en en) {return 0; }
 void mtk_wdt_set_c2k_sysrst(unsigned int flag) {}

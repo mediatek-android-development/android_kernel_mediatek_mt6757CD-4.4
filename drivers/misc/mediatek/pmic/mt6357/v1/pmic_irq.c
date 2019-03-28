@@ -58,13 +58,6 @@ unsigned int g_cust_eint_mt_pmic_type = 4;
 unsigned int g_cust_eint_mt_pmic_debounce_en = 1;
 
 /* PMIC extern variable */
-#if defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
-static bool long_pwrkey_press;
-static unsigned long timer_pre;
-static unsigned long timer_pos;
-#define LONG_PWRKEY_PRESS_TIME_UNIT     500     /*500ms */
-#define LONG_PWRKEY_PRESS_TIME_US       1000000 /*500ms */
-#endif
 
 #define IRQ_HANDLER_READY 1
 
@@ -292,10 +285,6 @@ void pwrkey_int_handler(void)
 {
 	IRQLOG("[pwrkey_int_handler] Press pwrkey %d\n",
 		pmic_get_register_value(PMIC_PWRKEY_DEB));
-#if defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
-	if (get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT)
-		timer_pre = sched_clock();
-#endif
 
 #if !defined(CONFIG_FPGA_EARLY_PORTING) && defined(CONFIG_KPD_PWRKEY_USE_PMIC)
 	kpd_pwrkey_pmic_handler(0x1);
@@ -306,21 +295,6 @@ void pwrkey_int_handler_r(void)
 {
 	IRQLOG("[pwrkey_int_handler_r] Release pwrkey %d\n",
 		pmic_get_register_value(PMIC_PWRKEY_DEB));
-#if defined(CONFIG_MTK_KERNEL_POWER_OFF_CHARGING)
-	if (get_boot_mode() == KERNEL_POWER_OFF_CHARGING_BOOT && timer_pre != 0) {
-		timer_pos = sched_clock();
-		if (timer_pos - timer_pre >= LONG_PWRKEY_PRESS_TIME_UNIT * LONG_PWRKEY_PRESS_TIME_US)
-			long_pwrkey_press = true;
-		IRQLOG("timer_pos = %ld, timer_pre = %ld, timer_pos-timer_pre = %ld, long_pwrkey_press = %d\r\n",
-			timer_pos, timer_pre, timer_pos - timer_pre, long_pwrkey_press);
-		if (long_pwrkey_press) {	/*500ms */
-			IRQLOG("Power Key Pressed during kernel power off charging, reboot OS\r\n");
-#ifdef CONFIG_MTK_WATCHDOG
-			arch_reset(0, NULL);
-#endif
-		}
-	}
-#endif
 
 #if !defined(CONFIG_FPGA_EARLY_PORTING) && defined(CONFIG_KPD_PWRKEY_USE_PMIC)
 	kpd_pwrkey_pmic_handler(0x0);
@@ -421,12 +395,15 @@ static void md_oc_int_handler(enum PMIC_IRQ_ENUM intNo, const char *int_name)
 	default:
 		break;
 	}
+	snprintf(oc_str, 30, "PMIC OC:%s", int_name);
 #ifdef CONFIG_MTK_CCCI_DEVICES
 	aee_kernel_warning(oc_str, "\nCRDISPATCH_KEY:MD OC\nOC Interrupt: %s", int_name);
 	ret = exec_ccci_kern_func_by_md_id(MD_SYS1, ID_PMIC_INTR, (char *)&data_int32, 4);
 #endif
 	if (ret)
 		pr_notice("[%s] - exec_ccci_kern_func_by_md_id - msg fail\n", __func__);
+	pmic_enable_interrupt(intNo, 0, "PMIC");
+	pr_info(PMICTAG "[PMIC_INT] disable OC interrupt: %s\n", int_name);
 	pr_info("[%s]Send msg pass\n", __func__);
 }
 #endif
@@ -504,12 +481,11 @@ void pmic_enable_interrupt(enum PMIC_IRQ_ENUM intNo, unsigned int en, char *str)
 	unsigned int enable_reg;
 
 	if (pmic_check_intNo(intNo, &spNo, &sp_conNo, &sp_irqNo)) {
-		if (intNo == INT_ENUM_MAX) {
+		if (intNo > INT_ENUM_MAX)
+			pr_notice(PMICTAG "[%s] fail intNo=%d\n", __func__, intNo);
+		else
 			pr_info(PMICTAG "[%s] disable intNo=%d\n", __func__,
 				intNo);
-			return;
-		}
-		pr_err(PMICTAG "[%s] fail intNo=%d\n", __func__, intNo);
 		return;
 	}
 	enable_reg = sp_interrupts[spNo].enable + 0x6 * sp_conNo;
@@ -606,10 +582,6 @@ void register_all_oc_interrupts(void)
 
 	/* BUCK OC */
 	for (oc_interrupt = INT_VPROC_OC; oc_interrupt <= INT_VPA_OC; oc_interrupt++) {
-		if (oc_interrupt == INT_VPA_OC) {
-			IRQLOG("[PMIC_INT] non-enabled OC: %d\n", oc_interrupt);
-			continue;
-		}
 		pmic_register_oc_interrupt_callback(oc_interrupt);
 		pmic_enable_interrupt(oc_interrupt, 1, "PMIC");
 	}
@@ -648,23 +620,21 @@ static void pmic_sp_irq_handler(unsigned int spNo, unsigned int sp_conNo, unsign
 	if (sp_int_status == 0)
 		return; /* this subpack control has no interrupt triggered */
 
-	pr_notice(PMICTAG "[PMIC_INT] Reg[0x%x]=0x%x\n",
-		(sp_interrupts[spNo].status + 0x6 * sp_conNo), sp_int_status);
+	pr_notice(PMICTAG "[PMIC_INT] Reg[0x%x]=0x%x\n", (sp_interrupts[spNo].status + 0x2 * sp_conNo), sp_int_status);
 
-	if (g_pmic_chip_version == 2) {
-		/* clear interrupt status in this subpack control */
-		upmu_set_reg_value((sp_interrupts[spNo].status + 0x6 * sp_conNo), sp_int_status);
-	} else if (g_pmic_chip_version == 1) {
+	if (g_pmic_chip_version == 1) {
 		/* prevent from MT6357 glitch problem */
-		/* Clear interrupt status by CLR enable register */
-		upmu_set_reg_value((sp_interrupts[spNo].enable + 0x6 * sp_conNo)
-				   + 0x4, sp_int_status);
+		/* clear interrupt status by CLR enable register */
+		upmu_set_reg_value((sp_interrupts[spNo].enable + 0x6 * sp_conNo) + 0x4, sp_int_status);
 		/* delay 3T~4T 32K clock (96us~128us) */
 		udelay(150);
 		/* restore enable register */
-		upmu_set_reg_value((sp_interrupts[spNo].enable + 0x6 * sp_conNo)
-				   + 0x2, sp_int_status);
+		upmu_set_reg_value((sp_interrupts[spNo].enable + 0x6 * sp_conNo) + 0x2, sp_int_status);
+	} else {
+		/* clear interrupt status in this subpack control */
+		upmu_set_reg_value((sp_interrupts[spNo].status + 0x2 * sp_conNo), sp_int_status);
 	}
+
 	for (i = 0; i < PMIC_INT_WIDTH; i++) {
 		if (sp_int_status & (1 << i)) {
 			sp_irq = &(sp_interrupts[spNo].sp_irqs[sp_conNo][i]);
@@ -694,7 +664,7 @@ static void pmic_int_handler(void)
 		if (!(top_int_status & (1 << sp_interrupts[spNo].top_int_bit)))
 			continue; /* this subpack has no interrupt triggered */
 		for (sp_conNo = 0; sp_conNo < sp_interrupts[spNo].con_len; sp_conNo++) {
-			status_reg = sp_interrupts[spNo].status + 0x6 * sp_conNo;
+			status_reg = sp_interrupts[spNo].status + 0x2 * sp_conNo;
 			sp_int_status = upmu_get_reg_value(status_reg);
 			pmic_sp_irq_handler(spNo, sp_conNo, sp_int_status);
 		}
@@ -742,7 +712,7 @@ int pmic_thread_kthread(void *x)
 #endif
 		for (spNo = 0; spNo < sp_interrupt_size; spNo++) {
 			for (sp_conNo = 0; sp_conNo < sp_interrupts[spNo].con_len; sp_conNo++) {
-				status_reg = sp_interrupts[spNo].status + 0x6 * sp_conNo;
+				status_reg = sp_interrupts[spNo].status + 0x2 * sp_conNo;
 				sp_int_status = upmu_get_reg_value(status_reg);
 				IRQLOG("[PMIC_INT] after, Reg[0x%x]=0x%x\n",
 					status_reg, sp_int_status);
@@ -963,7 +933,10 @@ static ssize_t pmic_irq_dbg_write(struct file *file,
 	unsigned int intNo = 999, state = 2; /* initialize as invalid value */
 	int ret = 0;
 
-	simple_write_to_buffer(buf, sizeof(buf), position, user_buffer, count);
+	ret = simple_write_to_buffer(buf, sizeof(buf) - 1, position,
+		user_buffer, count);
+	if (ret < 0)
+		return ret;
 	buf_ptr = (char *)buf;
 	s_intNo = strsep(&buf_ptr, " ");
 	s_state = strsep(&buf_ptr, " ");

@@ -1,9 +1,8 @@
 /*
- * Copyright (C) 2016 Richtek Technology Corp.
+ * Copyright (C) 2016 MediaTek Inc.
  *
  * Power Delivery Policy Engine for DBGACC
  *
- * Author: TH <tsunghan_tsai@richtek.com>
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -21,15 +20,15 @@
 
 #ifdef CONFIG_USB_PD_CUSTOM_DBGACC
 
-void pe_dbg_ready_entry(struct pd_port *pd_port, struct pd_event *pd_event)
+void pe_dbg_ready_entry(struct pd_port *pd_port)
 {
 	uint8_t state;
 
-	if (pd_port->pe_ready)
+	if (pd_port->pe_data.pe_ready)
 		return;
 
-	pd_port->pe_ready = true;
-	pd_port->state_machine = PE_STATE_MACHINE_DBGACC;
+	pd_port->pe_data.pe_ready = true;
+	pd_reset_protocol_layer(pd_port, false);
 
 	if (pd_port->data_role == PD_ROLE_UFP) {
 		PE_INFO("Custom_DBGACC : UFP\r\n");
@@ -41,7 +40,6 @@ void pe_dbg_ready_entry(struct pd_port *pd_port, struct pd_event *pd_event)
 		pd_set_rx_enable(pd_port, PD_RX_CAP_PE_READY_DFP);
 	}
 
-	pd_reset_protocol_layer(pd_port, false);
 	pd_update_connect_state(pd_port, state);
 }
 

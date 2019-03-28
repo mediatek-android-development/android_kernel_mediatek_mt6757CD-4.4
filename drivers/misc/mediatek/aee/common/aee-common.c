@@ -24,6 +24,7 @@
 #include <linux/smp.h>
 #include <linux/io.h>
 #include <linux/delay.h>
+#include <linux/reboot.h>
 #ifdef CONFIG_MTK_WATCHDOG
 #include <mach/wd_api.h>
 #endif
@@ -31,6 +32,7 @@
 #include <linux/uaccess.h>
 #include <linux/fs.h>
 #include <linux/vmalloc.h>
+#include <mt-plat/mrdump.h>
 #include <mrdump_private.h>
 
 static struct aee_kernel_api *g_aee_api;
@@ -199,10 +201,14 @@ void aee_kernel_warning_api(const char *file, const int line, const int db_opt, 
 	va_start(args, msg);
 	offset += snprintf(msgbuf, KERNEL_REPORT_LENGTH, "<%s:%d> ", file, line);
 	offset += vsnprintf(msgbuf + offset, KERNEL_REPORT_LENGTH - offset, msg, args);
-	if (g_aee_api && g_aee_api->kernel_reportAPI)
-		g_aee_api->kernel_reportAPI(AE_DEFECT_WARNING, db_opt, module, msgbuf);
-	else
+	if (g_aee_api && g_aee_api->kernel_reportAPI) {
+		if (module && strstr(module, "maybe have other hang_detect KE DB"))
+			g_aee_api->kernel_reportAPI(AE_DEFECT_FATAL, db_opt, module, msgbuf);
+		else
+			g_aee_api->kernel_reportAPI(AE_DEFECT_WARNING, db_opt, module, msgbuf);
+	} else {
 		pr_notice("AEE kernel warning: %s", msgbuf);
+	}
 	va_end(args);
 }
 EXPORT_SYMBOL(aee_kernel_warning_api);
@@ -331,6 +337,31 @@ void aee_sram_printk(const char *fmt, ...)
 #endif
 }
 EXPORT_SYMBOL(aee_sram_printk);
+
+/* no export symbol to aee_exception_reboot, only used in exception flow */
+void aee_exception_reboot(void)
+{
+#ifdef CONFIG_MTK_WATCHDOG
+	int res;
+	struct wd_api *wd_api = NULL;
+
+	/* config reset mode */
+	int mode = WD_SW_RESET_BYPASS_PWR_KEY;
+
+	res = get_wd_api(&wd_api);
+	if (res < 0) {
+		pr_info("arch_reset, get wd api error %d\n", res);
+		while (1)
+			cpu_relax();
+	} else {
+		pr_info("exception reboot\n");
+		mode += WD_SW_RESET_KEEP_DDR_RESERVE;
+		wd_api->wd_sw_reset(mode);
+	}
+#else
+	emergency_restart();
+#endif
+}
 
 static int __init aee_common_init(void)
 {

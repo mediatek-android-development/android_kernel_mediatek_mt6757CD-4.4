@@ -11,6 +11,27 @@
  * GNU General Public License for more details.
  */
 #include "fbc.h"
+#include <mtk_vcorefs_governor.h>
+#include <mtk_vcorefs_manager.h>
+
+#ifdef CONFIG_MTK_FPSGO_V2
+#include <linux/slab.h>
+#include <mt-plat/fpsgo_v2_common.h>
+#include "fstb.h"
+#endif
+
+#ifndef TOUCH_VCORE_OPP
+#define TOUCH_VCORE_OPP (-1)
+#endif
+
+#define SEQ_printf(m, x...)\
+	do {\
+		if (m)\
+			seq_printf(m, x);\
+		else\
+			pr_debug(x);\
+	} while (0)
+#define TAG "[SOC FBC]"
 
 static void notify_twanted_timeout_eas(void);
 static void notify_touch_up_timeout(void);
@@ -23,20 +44,33 @@ static struct mutex notify_lock;
 static struct hrtimer hrt, hrt1, hrt2;
 static unsigned long __read_mostly mark_addr;
 
-static struct ppm_limit_data core_limit[NR_PPM_CLUSTERS];
+#ifdef CONFIG_MTK_FPSGO_FSTB
+static void notify_game_render_aware_timeout(void);
+static DECLARE_WORK(mt_game_render_aware_timeout_work, (void *) notify_game_render_aware_timeout);
+static struct hrtimer hrt3;
+#endif
+
 static int fbc_debug, fbc_ux_state, fbc_ux_state_pre, fbc_render_aware, fbc_render_aware_pre;
 static int fbc_game, fbc_trace, has_frame;
 static long frame_budget, twanted, twanted_ms, avg_frame_time, queue_time;
-static int ema, boost_method, super_boost, boost_flag;
+static int ema, super_boost, boost_flag;
 static int boost_value, touch_boost_value, current_max_bv, avg_boost, chase_boost1, chase_boost2;
 static int first_frame, swap_buffers_begin, first_vsync, frame_done, chase, act_switched;
 static long frame_info[MAX_THREAD][2]; /*0:current id, 1: frametime, if no render -1*/
 static int his_bv[2];
 static int vip_group[10];
+#ifdef CONFIG_MTK_FPSGO_V2
+static int touch_boost_opp; /* boost freq of touch boost */
+static struct ppm_limit_data *target_freq, *reset_freq;
+static int nr_ppm_clusters;
+static int touch_boost_duration;
+static int prev_boost_pid;
+static long long active_time;
+#endif
 
 struct fbc_operation_locked {
 	void (*ux_enable)(int);
-	void (*frame_cmplt)(long);
+	int (*frame_cmplt)(long);
 	void (*intended_vsync)(void);
 	void (*no_render)(void);
 	void (*game)(int);
@@ -44,14 +78,6 @@ struct fbc_operation_locked {
 };
 
 static struct fbc_operation_locked *fbc_op;
-
-static inline bool is_ux_fbc_active(void)
-{
-	/* lock is mandatory*/
-	WARN_ON(!mutex_is_locked(&notify_lock));
-
-	return !(fbc_debug || !fbc_ux_state);
-}
 
 inline void fbc_tracer(int pid, char *name, int count)
 {
@@ -64,42 +90,6 @@ inline void fbc_tracer(int pid, char *name, int count)
 	preempt_enable();
 }
 
-void release_core(void)
-{
-	/* lock is mandatory*/
-	WARN_ON(!mutex_is_locked(&notify_lock));
-
-	core_limit[0].min = -1;
-	core_limit[0].max = -1;
-	core_limit[1].min = -1;
-	core_limit[1].max = -1;
-#if NR_PPM_CLUSTERS == 3
-	core_limit[2].min = -1;
-	core_limit[2].max = -1;
-#endif
-	update_userlimit_cpu_core(PPM_KIR_FBC, NR_PPM_CLUSTERS, core_limit);
-
-	fbc_tracer(-4, "b_enable", 0);
-}
-
-void boost_touch_core_eas(void)
-{
-	/* lock is mandatory*/
-	WARN_ON(!mutex_is_locked(&notify_lock));
-
-	core_limit[0].min = 3;
-	core_limit[0].max = -1;
-	core_limit[1].min = -1;
-	core_limit[1].max = -1;
-#if NR_PPM_CLUSTERS == 3
-	core_limit[2].min = -1;
-	core_limit[2].max = -1;
-#endif
-	update_userlimit_cpu_core(PPM_KIR_FBC, NR_PPM_CLUSTERS, core_limit);
-	update_eas_boost_value(EAS_KIR_FBC, CGROUP_TA, 2100);
-	fbc_tracer(-3, "boost_value", 100);
-}
-
 void release_eas(void)
 {
 	/* lock is mandatory*/
@@ -108,7 +98,92 @@ void release_eas(void)
 	update_eas_boost_value(EAS_KIR_FBC, CGROUP_TA, 0);
 	fbc_tracer(-3, "boost_value", 0);
 }
+
+void switch_fbc(int enable)
+{
+		mutex_lock(&notify_lock);
+		fbc_debug = !enable;
+		release_eas();
+		mutex_unlock(&notify_lock);
+}
+
+void switch_init_boost(int boost_value)
+{
+		touch_boost_value = boost_value;
+}
+
+#ifdef CONFIG_MTK_FPSGO_V2
+void switch_init_opp(int boost_opp)
+{
+		int i;
+
+		touch_boost_opp = boost_opp;
+		for (i = 0; i < nr_ppm_clusters; i++)
+			target_freq[i].min = mt_cpufreq_get_freq_by_idx(i, touch_boost_opp);
+}
+
+void switch_init_duration(int duration)
+{
+		touch_boost_duration = duration;
+}
+void switch_active_time(int duration)
+{
+		active_time = duration;
+}
+#endif
+
+void switch_twanted(int time)
+{
+		if (time < 60) {
+			twanted_ms = time;
+			twanted = twanted_ms * NSEC_PER_MSEC;
+		}
+}
+
+void switch_ema(int arg)
+{
+		ema = arg;
+}
+
+void switch_super_boost(int arg)
+{
+		super_boost = arg;
+}
+
+static inline bool is_ux_fbc_active(void)
+{
+	/* lock is mandatory*/
+	WARN_ON(!mutex_is_locked(&notify_lock));
+
+	return !(fbc_debug || !fbc_ux_state);
+}
+
+void boost_touch_eas(void)
+{
+	/* lock is mandatory*/
+	WARN_ON(!mutex_is_locked(&notify_lock));
+
+	update_eas_boost_value(EAS_KIR_FBC, CGROUP_TA, 2100);
+	fbc_tracer(-3, "boost_value", 100);
+}
+
 /*--------------------TIMER------------------------*/
+#ifdef CONFIG_MTK_FPSGO_V2
+static void enable_touch_boost_timer(void)
+{
+	ktime_t ktime;
+
+	ktime = ktime_set(0, touch_boost_duration);
+	hrtimer_start(&hrt1, ktime, HRTIMER_MODE_REL);
+}
+
+static void disable_touch_boost_timer(void)
+{
+	hrtimer_cancel(&hrt1);
+}
+
+#else /* CONFIG_MTK_FPSGO_V2 */
+
 static void enable_touch_up_timer(void)
 {
 	ktime_t ktime;
@@ -121,6 +196,7 @@ static void disable_touch_up_timer(void)
 {
 	hrtimer_cancel(&hrt1);
 }
+#endif /* CONFIG_MTK_FPSGO_V2 */
 
 static enum hrtimer_restart mt_touch_timeout(struct hrtimer *timer)
 {
@@ -129,6 +205,24 @@ static enum hrtimer_restart mt_touch_timeout(struct hrtimer *timer)
 
 	return HRTIMER_NORESTART;
 }
+
+#ifdef CONFIG_MTK_FPSGO_FSTB
+static void enable_game_render_aware_timer(void)
+{
+	ktime_t ktime;
+
+	ktime = ktime_set(0, NSEC_PER_MSEC * RENDER_AWARE_TIMEOUT_MSEC);
+	hrtimer_start(&hrt3, ktime, HRTIMER_MODE_REL);
+}
+
+static enum hrtimer_restart mt_game_render_aware_timeout(struct hrtimer *timer)
+{
+	if (wq)
+		queue_work(wq, &mt_game_render_aware_timeout_work);
+
+	return HRTIMER_NORESTART;
+}
+#endif
 
 static void enable_render_aware_timer(void)
 {
@@ -167,23 +261,35 @@ static enum hrtimer_restart mt_twanted_timeout(struct hrtimer *timer)
 	if (!wq)
 		return HRTIMER_NORESTART;
 
-	switch (boost_method) {
-	case EAS:
-		queue_work(wq, &mt_tt_eas_work);
-		break;
-	default:
-		queue_work(wq, &mt_tt_eas_work);
-		break;
-	}
+	queue_work(wq, &mt_tt_eas_work);
 
 	return HRTIMER_NORESTART;
 }
 
 /*--------------------FRAME HINT OP------------------------*/
-static void notify_touch(int action)
+static int notify_touch(int action)
 {
+	int ret = 0;
 	/* lock is mandatory*/
 	WARN_ON(!mutex_is_locked(&notify_lock));
+
+#ifdef CONFIG_MTK_FPSGO_V2
+	if (is_fstb_active(active_time) || fbc_debug)
+		return ret;
+
+	/*action 1: touch down 2: touch up*/
+	if (action == 1) {
+		disable_touch_boost_timer();
+		enable_touch_boost_timer();
+
+		/* boost */
+		update_eas_boost_value(EAS_KIR_TOUCH, CGROUP_TA, touch_boost_value);
+		update_userlimit_cpu_freq(PPM_KIR_TOUCH, nr_ppm_clusters, target_freq);
+		prev_boost_pid = current->pid;
+		fpsgo_systrace_c_fbt(prev_boost_pid, 1, "touch");
+	}
+
+#else
 
 	fbc_ux_state_pre = fbc_ux_state;
 
@@ -191,6 +297,7 @@ static void notify_touch(int action)
 	if (action == 1) {
 		fbc_ux_state = 1;
 		disable_touch_up_timer();
+		ret = vcorefs_request_dvfs_opp(KIR_FBT, TOUCH_VCORE_OPP);
 	} else if (action == 0) {
 		fbc_ux_state = 2;
 		enable_touch_up_timer();
@@ -198,21 +305,28 @@ static void notify_touch(int action)
 
 	if (fbc_ux_state == 1)
 		fbc_op->ux_enable(1);
+#endif /* CONFIG_MTK_FPSGO_V2 */
 
 	fbc_tracer(-3, "ux_state", fbc_ux_state);
+
+	return ret;
 }
 
 static void notify_touch_up_timeout(void)
 {
 	mutex_lock(&notify_lock);
 
+#ifdef CONFIG_MTK_FPSGO_V2
+	update_eas_boost_value(EAS_KIR_TOUCH, CGROUP_TA, 0);
+	update_userlimit_cpu_freq(PPM_KIR_TOUCH, nr_ppm_clusters, reset_freq);
+	fpsgo_systrace_c_fbt(prev_boost_pid, 0, "touch");
+#else
 	fbc_ux_state_pre = fbc_ux_state;
 	fbc_ux_state = 0;
 	fbc_op->ux_enable(0);
-
+#endif
 	fbc_tracer(-3, "ux_state", fbc_ux_state);
 	mutex_unlock(&notify_lock);
-
 }
 
 static void notify_render_aware_timeout(void)
@@ -225,12 +339,20 @@ static void notify_render_aware_timeout(void)
 
 	fbc_render_aware_pre = fbc_render_aware;
 	fbc_render_aware = 0;
-	release_core();
 	release_eas();
 	fbc_tracer(-3, "render_aware", fbc_render_aware);
 
 	mutex_unlock(&notify_lock);
 }
+
+#ifdef CONFIG_MTK_FPSGO_FSTB
+static void notify_game_render_aware_timeout(void)
+{
+	mutex_lock(&notify_lock);
+	fpsgo_switch_fstb(1);
+	mutex_unlock(&notify_lock);
+}
+#endif
 
 static void notify_act_switch(int begin)
 {
@@ -241,12 +363,18 @@ static void notify_act_switch(int begin)
 		act_switched = 1;
 }
 
-static void notify_game(int game)
+void fbc_notify_game(int game)
 {
+#ifdef CONFIG_MTK_FPSGO
+	mutex_lock(&notify_lock);
+	fbc_game = game;
+	mutex_unlock(&notify_lock);
+#else
 	/* lock is mandatory*/
 	WARN_ON(!mutex_is_locked(&notify_lock));
 
 	fbc_game = game;
+#endif
 }
 
 static void notify_twanted_timeout_eas(void)
@@ -303,12 +431,10 @@ void notify_fbc_enable_eas(int enable)
 		}
 
 		current_max_bv = 0;
-		boost_touch_core_eas();
+		boost_touch_eas();
 
 		boost_flag = 0;
 	} else {
-
-		release_core();
 
 #ifdef CONFIG_MTK_SCHED_VIP_TASKS
 		for (i = 0; i < 10 && vip_group[i] != -1; i++)
@@ -388,11 +514,12 @@ static void notify_no_render_eas(void)
 	}
 }
 
-void notify_frame_complete_eas(long frame_time)
+int notify_frame_complete_eas(long frame_time)
 {
 
 	long boost_linear = 0;
 	int boost_real = 0, i;
+	int ret = 0;
 
 	/* lock is mandatory*/
 	WARN_ON(!mutex_is_locked(&notify_lock));
@@ -448,7 +575,7 @@ void notify_frame_complete_eas(long frame_time)
 		;
 	/* if someone not done */
 	if (i < MAX_THREAD && frame_info[i][1] == -1)
-		return;
+		return ret;
 
 	/* evaluate overall frame_time */
 	frame_time = 0;
@@ -505,8 +632,11 @@ void notify_frame_complete_eas(long frame_time)
 		boost_value = 0;
 
 	if (first_frame) {
-		if (first_vsync)
+		if (first_vsync) {
 			first_frame = 0;
+			/* release DRAM touch boost */
+			ret = vcorefs_request_dvfs_opp(KIR_FBT, -1);
+		}
 		fbc_tracer(-4, "first_frame", first_frame);
 	}
 
@@ -543,6 +673,8 @@ void notify_frame_complete_eas(long frame_time)
 	fbc_tracer(-4, "current_max_bv", current_max_bv);
 	fbc_tracer(-4, "his_bv[0]", his_bv[0]);
 	fbc_tracer(-4, "his_bv[1]", his_bv[1]);
+
+	return ret;
 }
 
 void notify_intended_vsync_eas(void)
@@ -638,7 +770,7 @@ struct fbc_operation_locked fbc_eas = {
 	.frame_cmplt	= notify_frame_complete_eas,
 	.intended_vsync	= notify_intended_vsync_eas,
 	.no_render	= notify_no_render_eas,
-	.game	= notify_game,
+	.game	= fbc_notify_game,
 	.act_switch	= notify_act_switch
 };
 
@@ -662,39 +794,29 @@ static ssize_t device_write(struct file *filp, const char *ubuf,
 	if (sscanf(buf, "%31s %d", cmd, &arg) != 2)
 		return -EFAULT;
 
-	if (strncmp(cmd, "debug", 5) == 0) {
-		mutex_lock(&notify_lock);
-		fbc_debug = arg;
-		release_core();
-		release_eas();
-		mutex_unlock(&notify_lock);
-	} else if (strncmp(cmd, "init", 4) == 0) {
-		touch_boost_value = arg;
-	} else if (strncmp(cmd, "twanted", 7) == 0) {
-		if (arg < 60) {
-			twanted_ms = arg;
-			twanted = twanted_ms * NSEC_PER_MSEC;
-		}
-	} else if (strncmp(cmd, "ema", 3) == 0) {
-		ema = arg;
-	} else if (strncmp(cmd, "method", 6) == 0) {
-		mutex_lock(&notify_lock);
-		boost_method = arg;
-		switch (boost_method) {
-		case EAS:
-			fbc_op = &fbc_eas;
-			break;
-		default:
-			fbc_op = &fbc_eas;
-			break;
-		}
-		mutex_unlock(&notify_lock);
-	} else if (strncmp(cmd, "super_boost", 11) == 0) {
-		super_boost = arg;
-	} else if (strncmp(cmd, "trace", 5) == 0) {
+	if (strncmp(cmd, "enable", 5) == 0)
+		switch_fbc(arg);
+	else if (strncmp(cmd, "init", 4) == 0)
+		switch_init_boost(arg);
+	else if (strncmp(cmd, "twanted", 7) == 0)
+		switch_twanted(arg);
+	else if (strncmp(cmd, "ema", 3) == 0)
+		switch_ema(arg);
+	else if (strncmp(cmd, "super_boost", 11) == 0)
+		switch_super_boost(arg);
+	else if (strncmp(cmd, "trace", 5) == 0)
 		fbc_trace = arg;
+#ifdef CONFIG_MTK_FPSGO_V2
+	else if (strncmp(cmd, "touch_opp", 9) == 0) {
+		if (arg >= 0 && arg <= 15)
+			switch_init_opp(arg);
+	} else if (strncmp(cmd, "duration", 8) == 0) {
+		switch_init_duration(arg);
+	} else if (strncmp(cmd, "active_time", 11) == 0) {
+		if (arg > 0)
+			switch_active_time(arg);
 	}
-
+#endif
 	return cnt;
 }
 
@@ -702,8 +824,7 @@ static int device_show(struct seq_file *m, void *v)
 {
 	SEQ_printf(m, "-----------------------------------------------------\n");
 	SEQ_printf(m, "trace:\t%d\n", fbc_trace);
-	SEQ_printf(m, "debug:\t%d\n", fbc_debug);
-	SEQ_printf(m, "method:\t%d\n", boost_method);
+	SEQ_printf(m, "enable:\t%d\n", !fbc_debug);
 	SEQ_printf(m, "ux state:\t%d\n", fbc_ux_state);
 	SEQ_printf(m, "ema:\t%d\n", ema);
 	SEQ_printf(m, "init:\t%d\n", touch_boost_value);
@@ -711,6 +832,11 @@ static int device_show(struct seq_file *m, void *v)
 	SEQ_printf(m, "first frame:\t%d\n", first_frame);
 	SEQ_printf(m, "super_boost:\t%d\n", super_boost);
 	SEQ_printf(m, "game mode:\t%d\n", fbc_game);
+#ifdef CONFIG_MTK_FPSGO_V2
+	SEQ_printf(m, "touch_opp:\t%d\n", touch_boost_opp);
+	SEQ_printf(m, "duration:\t%d\n", touch_boost_duration);
+	SEQ_printf(m, "active_time:\t%d\n", (int)active_time);
+#endif
 	SEQ_printf(m, "-----------------------------------------------------\n");
 	return 0;
 }
@@ -720,17 +846,49 @@ static int device_open(struct inode *inode, struct file *file)
 	return single_open(file, device_show, inode->i_private);
 }
 
+#ifdef CONFIG_MTK_FPSGO_FSTB
+static unsigned long long fbc_get_time(void)
+{
+	unsigned long long temp;
 
+	preempt_disable();
+	temp = cpu_clock(smp_processor_id());
+	preempt_enable();
+	return temp;
+}
+
+#define FC_TOLERANCE_NUM 3
+#define FC_TOLERANCE_DURATION_NS 100000000ULL
+static unsigned long long fstb_hwui_fc_ts[FC_TOLERANCE_NUM];
+static int fstb_hwui_fc_idx;
+#endif
 static ssize_t ioctl_gaming(unsigned int cmd, unsigned long arg)
 {
 
 	/* TODO: need to check touch? */
 
 	switch (cmd) {
+#ifndef CONFIG_MTK_FPSGO
 	/*receive game info*/
-	case IOCTL_WRITE_GM:
+	case FPSGO_GAME:
 		fbc_op->game(arg);
 		break;
+#endif
+
+#ifdef CONFIG_MTK_FPSGO_FSTB
+	/*receive frame_time info*/
+	case FPSGO_FRAME_COMPLETE:
+		fstb_hwui_fc_ts[fstb_hwui_fc_idx] = fbc_get_time();
+		if (fstb_hwui_fc_ts[fstb_hwui_fc_idx] -
+				fstb_hwui_fc_ts[(fstb_hwui_fc_idx + 1) % FC_TOLERANCE_NUM] <
+				FC_TOLERANCE_DURATION_NS) {
+			enable_game_render_aware_timer();
+			if (fpsgo_is_fstb_enable())
+				fpsgo_switch_fstb(0);
+		}
+		fstb_hwui_fc_idx = (fstb_hwui_fc_idx + 1) % FC_TOLERANCE_NUM;
+		break;
+#endif
 
 	default:
 		return 0;
@@ -739,14 +897,13 @@ static ssize_t ioctl_gaming(unsigned int cmd, unsigned long arg)
 	return 0;
 }
 
-long device_ioctl(struct file *filp,
-		unsigned int cmd, unsigned long arg)
+long fbc_ioctl(unsigned int cmd, unsigned long arg)
 {
 	ssize_t ret = 0;
 
 	mutex_lock(&notify_lock);
 	if (fbc_debug) {
-		if (cmd == IOCTL_WRITE_FC)
+		if (cmd == FPSGO_FRAME_COMPLETE)
 			fbc_tracer(-3, "frame_time", arg);
 		goto ret_ioctl;
 	}
@@ -759,47 +916,50 @@ long device_ioctl(struct file *filp,
 
 	/* start of ux fbc */
 	switch (cmd) {
+#ifndef CONFIG_MTK_FPSGO
 	/*receive game info*/
-	case IOCTL_WRITE_GM:
+	case FPSGO_GAME:
 		fbc_op->game(arg);
 		break;
+#endif
 
 	/*receive act switch info*/
-	case IOCTL_WRITE_AS:
+	case FPSGO_ACT_SWITCH:
 		fbc_op->act_switch(arg);
 		break;
 
 	/*receive touch info*/
-	case IOCTL_WRITE_TH:
-		notify_touch(arg);
+	case FPSGO_TOUCH:
+		ret = notify_touch(arg);
 		break;
 
 	/*receive frame_time info*/
-	case IOCTL_WRITE_FC:
+	case FPSGO_FRAME_COMPLETE:
 		if (!is_ux_fbc_active())
 			goto ret_ioctl;
-		fbc_op->frame_cmplt((long)arg);
+		ret = fbc_op->frame_cmplt((long)arg);
 		break;
 
 	/*receive Intended-Vsync signal*/
-	case IOCTL_WRITE_IV:
+	case FPSGO_INTENDED_VSYNC:
 		if (!is_ux_fbc_active())
 			goto ret_ioctl;
 		fbc_op->intended_vsync();
 		break;
 
 	/*receive no-render signal*/
-	case IOCTL_WRITE_NR:
+	case FPSGO_NO_RENDER:
 		if (!is_ux_fbc_active())
 			goto ret_ioctl;
 	    fbc_op->no_render();
 		break;
 
 	/*receive queue_time signal*/
-	case IOCTL_WRITE_SB:
+	case FPSGO_SWAP_BUFFER:
 		if (!is_ux_fbc_active())
 			goto ret_ioctl;
 		swap_buffers_begin = 1;
+		fbc_tracer(-3, "swap_buffers_begin", swap_buffers_begin);
 		break;
 
 	default:
@@ -810,12 +970,10 @@ long device_ioctl(struct file *filp,
 
 ret_ioctl:
 	mutex_unlock(&notify_lock);
-	return ret;
+	return ret >= 0 ? ret : 0;
 }
 
 static const struct file_operations Fops = {
-	.unlocked_ioctl = device_ioctl,
-	.compat_ioctl = device_ioctl,
 	.open = device_open,
 	.write = device_write,
 	.read = seq_read,
@@ -824,7 +982,7 @@ static const struct file_operations Fops = {
 };
 
 /*--------------------INIT------------------------*/
-static int __init init_fbc(void)
+int init_fbc(void)
 {
 	struct proc_dir_entry *pe;
 	int i;
@@ -841,10 +999,23 @@ static int __init init_fbc(void)
 	frame_budget = 16 * NSEC_PER_MSEC;
 	twanted = 12 * NSEC_PER_MSEC;
 	twanted_ms = twanted / NSEC_PER_MSEC;
-	boost_method = EAS;
 	ema = 5;
 	super_boost = SUPER_BOOST;
 	touch_boost_value = TOUCH_BOOST_EAS;
+#ifdef CONFIG_MTK_FPSGO_V2
+	touch_boost_opp = TOUCH_BOOST_OPP;
+	touch_boost_duration = TOUCH_TIMEOUT_NSEC;
+	active_time = TOUCH_FSTB_ACTIVE_US;
+	nr_ppm_clusters = arch_get_nr_clusters();
+
+	target_freq = kcalloc(nr_ppm_clusters, sizeof(struct ppm_limit_data), GFP_KERNEL);
+	reset_freq = kcalloc(nr_ppm_clusters, sizeof(struct ppm_limit_data), GFP_KERNEL);
+
+	for (i = 0; i < nr_ppm_clusters; i++) {
+		target_freq[i].min = mt_cpufreq_get_freq_by_idx(i, touch_boost_opp);
+		target_freq[i].max = reset_freq[i].min = reset_freq[i].max = -1;
+	}
+#endif
 
 	mutex_init(&notify_lock);
 	fbc_op = &fbc_eas;
@@ -861,14 +1032,10 @@ static int __init init_fbc(void)
 	hrt1.function = &mt_touch_timeout;
 	hrtimer_init(&hrt2, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrt2.function = &mt_render_aware_timeout;
-
-	ret_val = register_chrdev(DEV_MAJOR, DEV_NAME, &Fops);
-	if (ret_val < 0) {
-		pr_crit(TAG"%s failed with %d\n",
-				"Registering the character device ",
-				ret_val);
-		goto out_wq;
-	}
+#ifdef CONFIG_MTK_FPSGO_FSTB
+	hrtimer_init(&hrt3, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	hrt3.function = &mt_game_render_aware_timeout;
+#endif
 
 	pe = proc_create("perfmgr/fbc", 0664, NULL, &Fops);
 	if (!pe) {
@@ -881,10 +1048,7 @@ static int __init init_fbc(void)
 	return 0;
 
 out_chrdev:
-	unregister_chrdev(DEV_MAJOR, DEV_NAME);
-out_wq:
 	destroy_workqueue(wq);
 	return ret_val;
 }
-late_initcall(init_fbc);
 

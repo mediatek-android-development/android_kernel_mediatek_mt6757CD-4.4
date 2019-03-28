@@ -131,7 +131,7 @@ static inline struct cldma_request *cldma_ring_step_backward(struct cldma_ring *
 	struct cldma_request *prev_req;
 
 	if (req->entry.prev == &ring->gpd_ring)
-		prev_req = list_first_entry(&ring->gpd_ring, struct cldma_request, entry);
+		prev_req = list_last_entry(&ring->gpd_ring, struct cldma_request, entry);
 	else
 		prev_req = list_entry(req->entry.prev, struct cldma_request, entry);
 	return prev_req;
@@ -215,6 +215,7 @@ struct md_cd_ctrl {
 	unsigned char hif_id;
 	struct ccci_hif_traffic traffic_info;
 	atomic_t wakeup_src;
+	unsigned int wakeup_count;
 
 #if TRAFFIC_MONITOR_INTERVAL
 	unsigned tx_traffic_monitor[CLDMA_TXQ_NUM];

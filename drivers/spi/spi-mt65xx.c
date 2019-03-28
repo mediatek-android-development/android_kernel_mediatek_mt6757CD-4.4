@@ -27,6 +27,15 @@
 #include <linux/pm_runtime.h>
 #include <linux/spi/spi.h>
 
+
+#ifdef CONFIG_TRUSTKERNEL_TEE_SUPPORT
+#define SPI_TRUSTKERNEL_TEE_SUPPORT
+#endif
+
+#ifdef SPI_TRUSTKERNEL_TEE_SUPPORT
+#include <linux/tee_clkmgr.h>
+#endif
+
 #define SPI_CFG0_REG                      0x0000
 #define SPI_CFG1_REG                      0x0004
 #define SPI_TX_SRC_REG                    0x0008
@@ -123,6 +132,16 @@ static const struct mtk_spi_compatible mt6758_compat = {
 	.adjust_reg = true,
 	.dma_8gb_v1 = true,
 };
+static const struct mtk_spi_compatible mt6775_compat = {
+	.need_pad_sel = true,
+	.adjust_reg = true,
+	.dma_8gb_v1 = true,
+};
+static const struct mtk_spi_compatible mt6771_compat = {
+	.need_pad_sel = true,
+	.adjust_reg = true,
+	.dma_8gb_v2 = true,
+};
 static const struct mtk_spi_compatible mt6739_compat = {
 	.need_pad_sel = true,
 	.adjust_reg = true,
@@ -153,6 +172,12 @@ static const struct of_device_id mtk_spi_of_match[] = {
 	},
 	{ .compatible = "mediatek,mt6739-spi",
 		.data = (void *)&mt6739_compat,
+	},
+	{ .compatible = "mediatek,mt6775-spi",
+		.data = (void *)&mt6775_compat,
+	},
+	{ .compatible = "mediatek,mt6771-spi",
+		.data = (void *)&mt6771_compat,
 	},
 	{ .compatible = "mediatek,mt8135-spi",
 		.data = (void *)&mtk_common_compat,
@@ -736,6 +761,10 @@ static int mtk_spi_probe(struct platform_device *pdev)
 		goto err_disable_runtime_pm;
 	}
 
+#ifdef SPI_TRUSTKERNEL_TEE_SUPPORT
+	tee_clkmgr_register1("spi", (1 << 15) - 3 - master->bus_num,
+        clk_prepare_enable, clk_disable_unprepare, mdata->spi_clk);
+#endif
 	if (mdata->dev_comp->need_pad_sel) {
 		if (mdata->pad_num != master->num_chipselect) {
 			dev_err(&pdev->dev,

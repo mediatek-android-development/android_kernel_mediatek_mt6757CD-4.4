@@ -18,6 +18,7 @@
 #include <mt-plat/mtk_meminfo.h>
 
 #include "mtk_vcorefs_manager.h"
+#include "mtk_vcorefs_governor.h"
 #include "mtk_spm_vcore_dvfs.h"
 #include "mmdvfs_mgr.h"
 
@@ -307,8 +308,13 @@ int vcorefs_request_dvfs_opp(enum dvfs_kicker kicker, enum dvfs_opp opp)
 			vcorefs_autok_lock_dvfs(autok_lock);
 			vcorefs_autok_set_vcore(kicker, opp);
 		} else {
+#if defined(CONFIG_MACH_MT6771)
+			vcorefs_autok_set_vcore(kicker, opp);
+			vcorefs_autok_lock_dvfs(autok_lock);
+#else
 			vcorefs_autok_set_vcore(KIR_SYSFS, _get_dvfs_opp(pwrctrl, kicker, opp));
 			vcorefs_autok_lock_dvfs(autok_lock);
+#endif
 		}
 		return 0;
 	}
@@ -361,6 +367,11 @@ void vcorefs_drv_init(int plat_init_opp)
 	pwrctrl->plat_init_opp = plat_init_opp;
 	pwrctrl->init_done = true;
 	feature_en = true;
+
+#if defined(CONFIG_MTK_QOS_SUPPORT)
+		pwrctrl->kr_req_mask = (1 << NUM_KICKER) - 1;
+#endif
+
 	mutex_unlock(&vcorefs_mutex);
 
 	vcorefs_crit("[%s] done\n", __func__);
@@ -460,6 +471,12 @@ static ssize_t vcore_debug_store(struct kobject *kobj, struct kobj_attribute *at
 		mutex_lock(&vcorefs_mutex);
 		pwrctrl->kr_log_mask = val;
 		mutex_unlock(&vcorefs_mutex);
+#if defined(CONFIG_MACH_MT6775)
+	} else if (!strcmp(cmd, "force")) {
+		mutex_lock(&vcorefs_mutex);
+		dvfsrc_force_opp(val);
+		mutex_unlock(&vcorefs_mutex);
+#endif
 	}  else {
 		/* set kicker opp and do DVFS */
 		kicker = vcorefs_output_kicker_id(cmd);

@@ -41,7 +41,7 @@
 #include <mtk_sleep_reg_md_reg_mt6763.h>
 #endif
 #include <mtk_eem.h>
-#include <ext_wd_drv.h>
+/* #include <ext_wd_drv.h> */
 #include "mtk_devinfo.h"
 
 #ifdef CONFIG_MTK_SMI_EXT
@@ -50,6 +50,8 @@
 
 #define is_dvfs_in_progress()    (spm_read(DVFSRC_LEVEL) & 0xFFFF)
 #define get_dvfs_level()         (spm_read(DVFSRC_LEVEL) >> 16)
+
+#define MIN(a, b)                ((a) >= (b) ? (b) : (a))
 
 /*
  * only for internal debug
@@ -65,8 +67,6 @@ void __iomem *dvfsrc_base;
 u32 plat_channel_num;
 u32 plat_chip_ver;
 u32 dram_issue;
-
-#define VMODEM_VCORE_COBUCK 1
 
 #ifdef CONFIG_MTK_SMI_EXT
 enum mmdvfs_lcd_size_enum plat_lcd_resolution;
@@ -556,7 +556,7 @@ static void dvfsrc_init(void)
 
 	spm_write(DVFSRC_EMI_HRT, 0x00000010);
 	spm_write(DVFSRC_VCORE_HRT, 0x00000010);
-	spm_write(DVFSRC_EMI_MD2SPM0, 0x00000001);
+	spm_write(DVFSRC_EMI_MD2SPM0, 0x00000000);
 	spm_write(DVFSRC_EMI_MD2SPM1, 0x00000000);
 	spm_write(DVFSRC_MD_VMD_REMAP, 0x00000000);
 	spm_write(DVFSRC_DEBOUNCE_FOUR, 0x0);
@@ -613,7 +613,7 @@ static void dvfsrc_init(void)
 #endif
 
 
-#if 1
+#if 0
 	mtk_rgu_cfg_dvfsrc(1);
 #endif
 	spin_unlock_irqrestore(&__spm_lock, flags);
@@ -701,17 +701,32 @@ void spm_go_to_vcorefs(int spm_flags)
 }
 
 #if defined(CONFIG_MACH_MT6763)
+unsigned int dram_request_opp = OPP_3;
+unsigned int cmmgr_request_opp = OPP_3;
 void spm_request_dvfs_opp(int id, enum dvfs_opp opp)
 {
 	u32 emi_req[NUM_OPP] = {0x2, 0x2, 0x1, 0x0};
+	u32 emi_req_lp3[NUM_OPP] = {0x2, 0x1, 0x1, 0x0};
 
 	switch (id) {
 	case 0: /* ZQTX */
 		if (__spm_get_dram_type() != SPMFW_LP4X_2CH)
 			return;
 
+		dram_request_opp = (unsigned int)opp;
+		opp = MIN(dram_request_opp, cmmgr_request_opp);
+
 		mt_secure_call(MTK_SIP_KERNEL_SPM_VCOREFS_ARGS, VCOREFS_SMC_CMD_2, id, emi_req[opp]);
-		spm_vcorefs_warn("DRAM ZQTX tracking request: %d\n", opp);
+		/* spm_vcorefs_warn("DRAM ZQTX tracking request: %d\n", opp); */
+		break;
+	case 1: /* CMMGR */
+		cmmgr_request_opp = (unsigned int)opp;
+		opp = MIN(dram_request_opp, cmmgr_request_opp);
+
+		if (__spm_get_dram_type() == SPMFW_LP3_1CH)
+			mt_secure_call(MTK_SIP_KERNEL_SPM_VCOREFS_ARGS, VCOREFS_SMC_CMD_2, 0, emi_req_lp3[opp]);
+		else
+			mt_secure_call(MTK_SIP_KERNEL_SPM_VCOREFS_ARGS, VCOREFS_SMC_CMD_2, 0, emi_req[opp]);
 		break;
 	default:
 		break;

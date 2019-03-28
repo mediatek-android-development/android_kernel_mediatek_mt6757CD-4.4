@@ -129,10 +129,7 @@ static struct mag_context *mag_context_alloc_object(void)
 	atomic_set(&obj->wake, 0);
 	INIT_WORK(&obj->report, mag_work_func);
 	obj->mag_workqueue = NULL;
-	/* obj->mag_workqueue = create_workqueue("mag_polling");*/	/* bound */
-	obj->mag_workqueue = alloc_workqueue("mag_polling",		/* unbound */
-	WQ_MEM_RECLAIM | WQ_UNBOUND,
-	num_online_cpus());
+	obj->mag_workqueue = create_workqueue("mag_polling");
 	if (!obj->mag_workqueue) {
 		kfree(obj);
 		return NULL;
@@ -669,6 +666,7 @@ int mag_data_report(struct mag_data *data)
 	/* MAG_LOG("update!valus: %d, %d, %d, %d\n" , x, y, z, status); */
 	struct sensor_event event;
 	int err = 0;
+
 	memset(&event, 0, sizeof(struct sensor_event));
 
 	check_repeat_data(data->x, data->y, data->z);
@@ -697,6 +695,7 @@ int mag_bias_report(struct mag_data *data)
 	/* MAG_LOG("update!valus: %d, %d, %d, %d\n" , x, y, z, status); */
 	struct sensor_event event;
 	int err = 0;
+
 	memset(&event, 0, sizeof(struct sensor_event));
 
 	event.flush_action = BIAS_ACTION;
@@ -714,6 +713,7 @@ int mag_flush_report(void)
 {
 	struct sensor_event event;
 	int err = 0;
+
 	memset(&event, 0, sizeof(struct sensor_event));
 
 	MAG_LOG("flush\n");

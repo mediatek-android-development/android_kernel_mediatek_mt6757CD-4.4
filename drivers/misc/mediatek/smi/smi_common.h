@@ -37,13 +37,13 @@
 		SMIMSG(string, ##args);\
 	} while (0)
 #else
-#define SMIMSG3(string, args...) SMIMSG(string, ##args)
+#define SMIMSG3(onoff, string, args...) SMIMSG(string, ##args)
 #endif
 #define SMITMP(string, args...) pr_debug("[pid=%d]"string, current->tgid, ##args)
 
 #define SMIERR(string, args...)\
 	do {\
-		pr_debug("error: " string, ##args); \
+		pr_notice("error: " string, ##args); \
 		aee_kernel_warning(SMI_LOG_TAG, "error: "string, ##args);  \
 	} while (0)
 #define smi_aee_print(string, args...)\
@@ -82,5 +82,4 @@ extern struct SMI_SETTING smi_mmu_setting_config;
 extern int smi_bus_regs_setting(int larb_id, int profile, struct SMI_SETTING *settings);
 extern int smi_common_setting(struct SMI_SETTING *settings);
 extern int smi_larb_setting(int larb_id, struct SMI_SETTING *settings);
-extern unsigned int get_larb_clock_count(const int larb_id);
 #endif

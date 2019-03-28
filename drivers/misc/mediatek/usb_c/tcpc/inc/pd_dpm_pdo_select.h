@@ -1,7 +1,6 @@
 /*
- * Copyright (C) 2016 Richtek Technology Corp.
+ * Copyright (C) 2016 MediaTek Inc.
  *
- * Author: TH <tsunghan_tsai@richtek.com>
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
  * published by the Free Software Foundation.
@@ -20,6 +19,7 @@
 struct dpm_pdo_info_t {
 	uint8_t type;
 	uint8_t apdo_type;
+	uint8_t pwr_limit;
 	int vmin;
 	int vmax;
 	int uw;
@@ -50,7 +50,7 @@ struct dpm_rdo_info_t {
 #define DPM_PDO_TYPE_BAT	TCPM_POWER_CAP_VAL_TYPE_BATTERY
 #define DPM_PDO_TYPE_APDO	TCPM_POWER_CAP_VAL_TYPE_AUGMENT
 
-#define DPM_APDO_TYPE_PPS	(TCPM_POWER_CAP_APDO_TYPE_PPS)
+#define DPM_APDO_TYPE_PPS		(TCPM_POWER_CAP_APDO_TYPE_PPS)
 #define DPM_APDO_TYPE_PPS_CF	(TCPM_POWER_CAP_APDO_TYPE_PPS_CF)
 
 extern void dpm_extract_pdo_info(

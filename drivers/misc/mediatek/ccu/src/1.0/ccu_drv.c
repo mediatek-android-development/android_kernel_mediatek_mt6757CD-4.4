@@ -281,7 +281,6 @@ int ccu_push_command_to_queue(ccu_user_t *user, ccu_cmd_st *cmd)
 		LOG_ERR("empty user");
 		return -1;
 	}
-
 	mutex_unlock(&g_ccu_device->user_mutex);
 
 	mutex_lock(&user->data_mutex);
@@ -333,7 +332,6 @@ int ccu_pop_command_from_queue(ccu_user_t *user, ccu_cmd_st **rcmd)
 {
 	int ret;
 	ccu_cmd_st *cmd;
-
 	LOG_DBG("+:%s\n", __func__);
 
 	/*Accuire user_mutex to ensure drv. release func. concurrency*/
@@ -846,6 +844,8 @@ static int ccu_release(struct inode *inode, struct file *flip)
 	LOG_INF_MUST("ccu_release +");
 
 	ccu_delete_user(user);
+
+	LOG_INF_MUST("+:%s, delete_user done.\n", __func__);
 
 	ccu_force_powerdown();
 

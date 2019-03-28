@@ -40,9 +40,7 @@
 #include <mach/mtk_pmic_wrap.h>
 #endif
 
-#ifdef CONFIG_MTK_ENG_BUILD
-#define MTK_EMMC_CQ_DEBUG
-#endif
+#define MTK_EMMC_CMD_DEBUG
 
 #ifdef MTK_IO_PERFORMANCE_DEBUG
 unsigned int g_mtk_mmc_perf_dbg;
@@ -206,151 +204,217 @@ static void msdc_init_dma_latest_address(void)
 }
 #endif
 
-#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
-#if 0 /* def MTK_EMMC_CQ_DEBUG */
+#ifdef MTK_EMMC_CMD_DEBUG
 #define dbg_max_cnt (500)
+/* max dump size is 30KB whitch can be adjusted */
+#define MSDC_AEE_BUFFER_SIZE (30 * 1024)
 struct dbg_run_host_log {
 	unsigned long long time_sec;
 	unsigned long long time_usec;
 	int type;
 	int cmd;
 	int arg;
+	int skip;
 };
 static struct dbg_run_host_log dbg_run_host_log_dat[dbg_max_cnt];
+char msdc_aee_buffer[MSDC_AEE_BUFFER_SIZE];
 static int dbg_host_cnt;
-static int is_lock_init;
-static spinlock_t cmd_dump_lock;
-
 static unsigned int printk_cpu_test = UINT_MAX;
-struct timeval cur_tv;
 
+/* type 0: cmd, type 1 rsp */
 void dbg_add_host_log(struct mmc_host *mmc, int type, int cmd, int arg)
 {
 	unsigned long long t;
 	unsigned long long nanosec_rem;
 	unsigned long flags;
+	static int last_cmd, last_arg, skip;
+	int l_skip = 0;
+	struct msdc_host *host = mmc_priv(mmc);
 
-	if (!is_lock_init) {
-		spin_lock_init(&cmd_dump_lock);
-		is_lock_init = 1;
+	/* only log msdc0 */
+	if (!host || host->id != 0)
+		return;
+
+	spin_lock_irqsave(&host->cmd_dump_lock, flags);
+	if (type == 1) {
+		 /*skip log if last cmd rsp are the same*/
+		if (last_cmd == cmd &&
+			last_arg == arg && cmd == 13) {
+			skip++;
+			if (dbg_host_cnt == 0)
+				dbg_host_cnt = dbg_max_cnt;
+			/*remove type = 0, command*/
+			dbg_host_cnt--;
+			goto end;
+		}
+		last_cmd = cmd;
+		last_arg = arg;
+		l_skip = skip;
+		skip = 0;
 	}
-
-	spin_lock_irqsave(&cmd_dump_lock, flags);
 	t = cpu_clock(printk_cpu_test);
 	nanosec_rem = do_div(t, 1000000000)/1000;
-	do_gettimeofday(&cur_tv);
 	dbg_run_host_log_dat[dbg_host_cnt].time_sec = t;
 	dbg_run_host_log_dat[dbg_host_cnt].time_usec = nanosec_rem;
 	dbg_run_host_log_dat[dbg_host_cnt].type = type;
 	dbg_run_host_log_dat[dbg_host_cnt].cmd = cmd;
 	dbg_run_host_log_dat[dbg_host_cnt].arg = arg;
+	dbg_run_host_log_dat[dbg_host_cnt].skip = l_skip;
 	dbg_host_cnt++;
 	if (dbg_host_cnt >= dbg_max_cnt)
 		dbg_host_cnt = 0;
-	spin_unlock_irqrestore(&cmd_dump_lock, flags);
+end:
+	spin_unlock_irqrestore(&host->cmd_dump_lock, flags);
 }
 
-void mmc_cmd_dump(struct mmc_host *mmc)
+void mmc_cmd_dump(char **buff, unsigned long *size, struct seq_file *m,
+	struct mmc_host *mmc, u32 latest_cnt)
 {
-	int i;
+	int i, j;
 	int tag = -1;
+	int is_read, is_rel, is_fprg;
 	unsigned long flags;
+	unsigned long long time_sec, time_usec;
+	int type, cmd, arg, skip, cnt;
 	struct msdc_host *host;
+	u32 dump_cnt;
 
 	if (!mmc || !mmc->card)
 		return;
-
+	/* only dump msdc0 */
 	host = mmc_priv(mmc);
+	if (!host || host->id != 0)
+		return;
 
-	if (!is_lock_init) {
-		spin_lock_init(&cmd_dump_lock);
-		is_lock_init = 1;
-	}
+	spin_lock_irqsave(&host->cmd_dump_lock, flags);
+	dump_cnt = min_t(u32, latest_cnt, dbg_max_cnt);
 
-	pr_info("-------------------------------------------------------------------------------\n");
-	spin_lock_irqsave(&cmd_dump_lock, flags);
-	for (i = dbg_host_cnt; i < dbg_max_cnt; i++) {
-		if (dbg_run_host_log_dat[i].cmd == 44
-			&& (dbg_run_host_log_dat[i].type == 0)) {
-			tag = (dbg_run_host_log_dat[i].arg >> 16) & 0xf;
-			pr_info("%d [%5llu.%06llu]%2d %2d 0x%08x tag=%d type=%s %s %s\n",
-				i, dbg_run_host_log_dat[i].time_sec,
-				dbg_run_host_log_dat[i].time_usec,
-				dbg_run_host_log_dat[i].type,
-				dbg_run_host_log_dat[i].cmd,
-				dbg_run_host_log_dat[i].arg, tag,
-				((dbg_run_host_log_dat[i].arg >> 30) & 0x1) ? "read" : "write",
-				!((dbg_run_host_log_dat[i].arg >> 30) & 0x1) &&
-				((dbg_run_host_log_dat[i].arg >> 31) & 0x1) ? "rel" : NULL,
-				!((dbg_run_host_log_dat[i].arg >> 30) & 0x1) &&
-				((dbg_run_host_log_dat[i].arg >> 24) & 0x1) ? "fprg" : NULL
-				);
-		} else if ((dbg_run_host_log_dat[i].cmd == 46
-			|| dbg_run_host_log_dat[i].cmd == 47)
-			&& !dbg_run_host_log_dat[i].type) {
-			tag = (dbg_run_host_log_dat[i].arg >> 16) & 0xf;
-			pr_info("%d [%5llu.%06llu]%2d %2d 0x%08x tag=%d\n",
-				i, dbg_run_host_log_dat[i].time_sec,
-				dbg_run_host_log_dat[i].time_usec,
-				dbg_run_host_log_dat[i].type,
-				dbg_run_host_log_dat[i].cmd,
-				dbg_run_host_log_dat[i].arg, tag);
+	i = dbg_host_cnt - 1;
+	if (i < 0)
+		i = dbg_max_cnt - 1;
+
+	for (j = 0; j < dump_cnt; j++) {
+		time_sec = dbg_run_host_log_dat[i].time_sec;
+		time_usec = dbg_run_host_log_dat[i].time_usec;
+		type = dbg_run_host_log_dat[i].type;
+		cmd = dbg_run_host_log_dat[i].cmd;
+		arg = dbg_run_host_log_dat[i].arg;
+		skip = dbg_run_host_log_dat[i].skip;
+		if (cmd == 44 && !type) {
+			cnt = arg & 0xffff;
+			tag = (arg >> 16) & 0x1f;
+			is_read = (arg >> 30) & 0x1;
+			is_rel = (arg >> 31) & 0x1;
+			is_fprg = (arg >> 24) & 0x1;
+			SPREAD_PRINTF(buff, size, m,
+		"%03d [%5llu.%06llu]%2d %2d %08x id=%02d %s cnt=%d %d %d\n",
+				j, time_sec, time_usec,
+				type, cmd, arg, tag,
+				is_read ? "R" : "W",
+				cnt, is_rel, is_fprg);
+		} else if ((cmd == 46 || cmd == 47) && !type) {
+			tag = (arg >> 16) & 0xf;
+			SPREAD_PRINTF(buff, size, m,
+				"%03d [%5llu.%06llu]%2d %2d %08x id=%02d\n",
+				j, time_sec, time_usec,
+				type, cmd, arg, tag);
 		} else
-			pr_info("%d [%5llu.%06llu]%2d %2d 0x%08x\n",
-				i, dbg_run_host_log_dat[i].time_sec,
-				dbg_run_host_log_dat[i].time_usec,
-				dbg_run_host_log_dat[i].type,
-				dbg_run_host_log_dat[i].cmd,
-				dbg_run_host_log_dat[i].arg);
+			SPREAD_PRINTF(buff, size, m,
+			"%03d [%5llu.%06llu]%2d %2d %08x (%d)\n",
+				j, time_sec, time_usec,
+				type, cmd, arg, skip);
+		i--;
+		if (i < 0)
+			i = dbg_max_cnt - 1;
 	}
-
-	for (i = 0; i < dbg_host_cnt; i++) {
-		if (dbg_run_host_log_dat[i].cmd == 44
-			&& !dbg_run_host_log_dat[i].type) {
-			tag = (dbg_run_host_log_dat[i].arg >> 16) & 0xf;
-			pr_info("%d [%5llu.%06llu]%2d %2d 0x%08x tag=%d type=%s %s %s\n",
-				i, dbg_run_host_log_dat[i].time_sec,
-				dbg_run_host_log_dat[i].time_usec,
-				dbg_run_host_log_dat[i].type,
-				dbg_run_host_log_dat[i].cmd,
-				dbg_run_host_log_dat[i].arg, tag,
-				((dbg_run_host_log_dat[i].arg >> 30) & 0x1) ? "read" : "write",
-				!((dbg_run_host_log_dat[i].arg >> 30) & 0x1) &&
-				((dbg_run_host_log_dat[i].arg >> 31) & 0x1) ? "rel" : NULL,
-				!((dbg_run_host_log_dat[i].arg >> 30) & 0x1) &&
-				((dbg_run_host_log_dat[i].arg >> 24) & 0x1) ? "fprg" : NULL
-				);
-		} else if ((dbg_run_host_log_dat[i].cmd == 46
-			|| dbg_run_host_log_dat[i].cmd == 47)
-			&& !dbg_run_host_log_dat[i].type) {
-			tag = (dbg_run_host_log_dat[i].arg >> 16) & 0xf;
-			pr_info("%d [%5llu.%06llu]%2d %2d 0x%08x tag=%d\n",
-				i, dbg_run_host_log_dat[i].time_sec,
-				dbg_run_host_log_dat[i].time_usec,
-				dbg_run_host_log_dat[i].type,
-				dbg_run_host_log_dat[i].cmd,
-				dbg_run_host_log_dat[i].arg, tag);
-		} else
-			pr_info("%d [%5llu.%06llu]%2d %2d 0x%08x\n",
-				i, dbg_run_host_log_dat[i].time_sec,
-				dbg_run_host_log_dat[i].time_usec,
-				dbg_run_host_log_dat[i].type,
-				dbg_run_host_log_dat[i].cmd,
-				dbg_run_host_log_dat[i].arg);
-	}
-	spin_unlock_irqrestore(&cmd_dump_lock, flags);
-	msdc_cmdq_status_print(host);
+	spin_unlock_irqrestore(&host->cmd_dump_lock, flags);
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
+	SPREAD_PRINTF(buff, size, m,
+		"areq_cnt:%d, task_id_index %08lx, cq_wait_rdy:%d, cq_rdy_cnt:%d\n",
+		atomic_read(&mmc->areq_cnt),
+		mmc->task_id_index, atomic_read(&mmc->cq_wait_rdy), atomic_read(&mmc->cq_rdy_cnt));
+#endif
 }
 #else
 void dbg_add_host_log(struct mmc_host *mmc, int type, int cmd, int arg)
 {
 }
 
-void mmc_cmd_dump(struct mmc_host *mmc)
+void mmc_cmd_dump(char **buff, unsigned long *size, struct seq_file *m,
+	struct mmc_host *mmc, u32 latest_cnt)
 {
 }
 #endif
 
+void msdc_dump_host_state(char **buff, unsigned long *size,
+	struct seq_file *m, struct msdc_host *host)
+{
+	void __iomem *base = host->base;
+
+	SPREAD_PRINTF(buff, size, m, "Accumulated dma cnt: %u\n",
+		host->dma_cnt);
+	if (host->start_dma_time < host->stop_dma_time)
+		SPREAD_PRINTF(buff, size, m,
+		"No pending dma: last start %llu, last stop %llu\n",
+			host->start_dma_time, host->stop_dma_time);
+
+	if (host->tuning_in_progress)
+		SPREAD_PRINTF(buff, size, m, "tuning_in_progress %d\n",
+			host->tuning_in_progress);
+
+	if ((host->core_clkon == 0) && host->stop_dma_time
+	&& (host->start_dma_time > host->stop_dma_time)) {
+		SPREAD_PRINTF(buff, size, m,
+		"DMA pending with clock gated: start %llu, stop %llu\n",
+			host->start_dma_time, host->stop_dma_time);
+		dbg_msdc_dump_clock_sts(m, host);
+		return;
+	}
+
+	if ((host->core_clkon == 1) && (host->start_dma_time > host->stop_dma_time)) {
+		SPREAD_PRINTF(buff, size, m,
+		"DMA pending DMA_CFG_SATUS(%d): start %llu, stop %llu\n",
+			MSDC_READ32(MSDC_DMA_CFG) & MSDC_DMA_CFG_STS,
+			host->start_dma_time, host->stop_dma_time);
+	}
+}
+
+void msdc_proc_dump(struct seq_file *m, u32 id)
+{
+	struct msdc_host *host = mtk_msdc_host[id];
+
+	if (host == NULL) {
+		pr_info("====== Null msdc%d, dump skipped ======\n", id);
+		return;
+	}
+
+	msdc_dump_host_state(NULL, NULL, m, host);
+	mmc_cmd_dump(NULL, NULL, m, host->mmc, 500);
+}
+EXPORT_SYMBOL(msdc_proc_dump);
+
+void get_msdc_aee_buffer(unsigned long *vaddr, unsigned long *size)
+{
+	struct msdc_host *host = mtk_msdc_host[0];
+	unsigned long free_size = MSDC_AEE_BUFFER_SIZE;
+	char *buff;
+
+	if (host == NULL) {
+		pr_info("====== Null msdc, dump skipped ======\n");
+		return;
+	}
+
+	buff = msdc_aee_buffer;
+	msdc_dump_host_state(&buff, &free_size, NULL, host);
+	mmc_cmd_dump(&buff, &free_size, NULL, host->mmc, 500);
+
+	/* retrun start location */
+	*vaddr = (unsigned long)msdc_aee_buffer;
+	*size = MSDC_AEE_BUFFER_SIZE - free_size;
+}
+EXPORT_SYMBOL(get_msdc_aee_buffer);
+
+#ifdef CONFIG_MTK_EMMC_CQ_SUPPORT
 #ifdef CONFIG_MTK_EMMC_CQ_MET_USR_DEF
 void emmc_cq_state(void)
 {
@@ -425,6 +489,9 @@ void msdc_cmdq_status_print(struct msdc_host *host, struct seq_file *m)
 #if defined(CONFIG_MTK_HW_FDE) && !defined(CONFIG_MTK_HW_FDE_AES)
 	seq_puts(m, "hardware fde support\n");
 #endif
+#if defined(CONFIG_HIE)
+	seq_puts(m, "hardware hie support\n");
+#endif
 }
 
 void msdc_cmdq_func(struct msdc_host *host, const int num, struct seq_file *m)
@@ -450,10 +517,10 @@ void msdc_cmdq_func(struct msdc_host *host, const int num, struct seq_file *m)
 		host->mmc->card->ext_csd.cmdq_support = 1;
 		host->mmc->cmdq_support_changed = 1;
 		break;
-	case 2:
-		mmc_cmd_dump(host->mmc);
-		break;
 #endif
+	case 2:
+		mmc_cmd_dump(NULL, NULL, m, host->mmc, 500);
+		break;
 	default:
 		seq_printf(m, "unknown function id %d\n", num);
 		break;
@@ -1841,11 +1908,9 @@ static int msdc_debug_proc_show(struct seq_file *m, void *v)
 	sscanf_num = sscanf(cmd_buf, "%x %x %x %x %x %x %x %x %x", &cmd,
 		&p1, &p2, &p3, &p4, &p5, &p6, &p7, &p8);
 
-	if (cmd == -1) {
-		seq_puts(m, "Please run: echo cmd [p1] [p2] [p3] [p4] [p5] [p6] [p7] [p8]> /proc/msdc_debug\n");
-		seq_puts(m, "For help run: cat /proc/msdc_help\n");
-		return 0;
-	}
+	/* clear buffer */
+	g_count = 0;
+	cmd_buf[g_count] = '\0';
 
 	if (cmd == SD_TOOL_ZONE) {
 		id = p1;
@@ -2258,7 +2323,6 @@ static int msdc_debug_proc_show(struct seq_file *m, void *v)
 		msdc_error_tune_debug_print(m, p1, p2, p3, p4, p5);
 #endif
 	} else if (cmd == MMC_CRC_STRESS) {
-#ifdef CONFIG_MTK_EMMC_SUPPORT
 		/* FIX ME, move to user space */
 		seq_puts(m, "==== CRC Stress Test ====\n");
 		id = 0;
@@ -2270,10 +2334,6 @@ static int msdc_debug_proc_show(struct seq_file *m, void *v)
 		if (p1 == 0) {
 			/* do nothing */
 		} else if (p1 == 1)  {
-			MSDC_SET_FIELD(EMMC50_PAD_DS_TUNE,
-				MSDC_EMMC50_PAD_DS_TUNE_DLY1, 0x1c);
-			MSDC_SET_FIELD(EMMC50_PAD_DS_TUNE,
-				MSDC_EMMC50_PAD_DS_TUNE_DLY3, 0xe);
 			if (host->base_top) {
 				void __iomem *base_top = host->base_top;
 
@@ -2281,14 +2341,18 @@ static int msdc_debug_proc_show(struct seq_file *m, void *v)
 					PAD_DS_DLY1, 0x1c);
 				MSDC_SET_FIELD(TOP_EMMC50_PAD_DS_TUNE,
 					PAD_DS_DLY3, 0xe);
+			} else {
+				MSDC_SET_FIELD(EMMC50_PAD_DS_TUNE,
+					MSDC_EMMC50_PAD_DS_TUNE_DLY1, 0x1c);
+				MSDC_SET_FIELD(EMMC50_PAD_DS_TUNE,
+					MSDC_EMMC50_PAD_DS_TUNE_DLY3, 0xe);
 			}
 		} else if (p1 == 2)  {
 			MSDC_SET_FIELD(MSDC_IOCON, MSDC_IOCON_RSPL, 1);
-			MSDC_SET_FIELD(MSDC_PAD_TUNE0, MSDC_PAD_TUNE0_CMDRDLY,
-				p2);
+			MSDC_SET_FIELD(MSDC_PAD_TUNE0,
+				MSDC_PAD_TUNE0_CMDRDLY, p2);
 			pr_notice("[****MMC_CRC_STRESS****] CMDRDLY<%d>\n", p2);
 		}
-#endif
 	} else if (cmd == SDIO_AUTOK_RESULT) {
 		id = p1;
 		vcore = p2;
@@ -2319,6 +2383,10 @@ static int msdc_debug_proc_show(struct seq_file *m, void *v)
 			goto invalid_host_id;
 		host = mtk_msdc_host[id];
 		msdc_cmdq_func(host, p2, m);
+	} else {
+		/* default dump info for aee */
+		seq_puts(m, "==== msdc debug info for aee ====\n");
+		msdc_proc_dump(m, 0);
 	}
 
 out:

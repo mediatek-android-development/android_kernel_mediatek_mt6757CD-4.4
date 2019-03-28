@@ -21,10 +21,7 @@
 #include <linux/of_address.h>
 #include <ddp_reg.h>
 
-static int pwm_log_en;
-#define PWM_MSG(fmt, arg...) \
-	do { if (pwm_log_en) pr_debug("[PWM][MSG] " fmt "\n", ##arg); } while (0)
-
+#define PWM_MSG(fmt, arg...) pr_debug("[PWM] " fmt "\n", ##arg)
 #define PWM_ERR(fmt, arg...) pr_err("[PWM] " fmt "\n", ##arg)
 
 /*****************************************************************************

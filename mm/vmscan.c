@@ -46,6 +46,7 @@
 #include <linux/oom.h>
 #include <linux/prefetch.h>
 #include <linux/printk.h>
+#include <linux/debugfs.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -220,6 +221,41 @@ static unsigned long get_lru_size(struct lruvec *lruvec, enum lru_list lru)
 	return zone_page_state(lruvec_zone(lruvec), NR_LRU_BASE + lru);
 }
 
+struct dentry *debug_file;
+
+static int debug_shrinker_show(struct seq_file *s, void *unused)
+{
+	struct shrinker *shrinker;
+	struct shrink_control sc;
+
+	sc.gfp_mask = -1;
+	sc.nr_to_scan = 0;
+	sc.nid = 0;
+	sc.memcg = 0;
+
+	down_read(&shrinker_rwsem);
+	list_for_each_entry(shrinker, &shrinker_list, list) {
+		int num_objs;
+
+		num_objs = shrinker->count_objects(shrinker, &sc);
+		seq_printf(s, "%pf %d\n", shrinker->scan_objects, num_objs);
+	}
+	up_read(&shrinker_rwsem);
+	return 0;
+}
+
+static int debug_shrinker_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, debug_shrinker_show, inode->i_private);
+}
+
+static const struct file_operations debug_shrinker_fops = {
+	.open = debug_shrinker_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
 /*
  * Add a shrinker callback to be called from the vm.
  */
@@ -248,6 +284,15 @@ int register_shrinker(struct shrinker *shrinker)
 	return 0;
 }
 EXPORT_SYMBOL(register_shrinker);
+
+static int __init add_shrinker_debug(void)
+{
+	debugfs_create_file("shrinker", 0644, NULL, NULL,
+			    &debug_shrinker_fops);
+	return 0;
+}
+
+late_initcall(add_shrinker_debug);
 
 /*
  * Remove one
@@ -1966,6 +2011,60 @@ static unsigned long shrink_list(enum lru_list lru, unsigned long nr_to_scan,
 	return shrink_inactive_list(nr_to_scan, lruvec, sc, lru);
 }
 
+#ifdef CONFIG_MTK_GMO_RAM_OPTIMIZE
+/* threshold of swapin and out */
+static int swpinout_threshold = 3000;
+module_param_named(threshold, swpinout_threshold, int, S_IRUGO | S_IWUSR);
+static int vmscan_swap_file_ratio = 1;
+module_param_named(swap_file_ratio, vmscan_swap_file_ratio, int, S_IRUGO | S_IWUSR);
+static bool is_swap_thrashing(void)
+{
+	static unsigned long prev_time;
+	static unsigned long prev_swpinout;
+	int cpu;
+	bool thrashing = false;
+	unsigned long swpinout = 0;
+
+	if (prev_time == 0)
+		prev_time = jiffies;
+
+	if (time_after(jiffies, prev_time + (HZ >> 2))) {
+		for_each_online_cpu(cpu) {
+			struct vm_event_state *this = &per_cpu(vm_event_states, cpu);
+
+			swpinout += this->event[PSWPIN] + this->event[PSWPOUT];
+		}
+
+		if (((swpinout - prev_swpinout) / (jiffies - prev_time + 1) * HZ) >
+		    swpinout_threshold)
+			thrashing = true;
+		else
+			thrashing = false;
+
+		prev_swpinout = swpinout;
+		prev_time = jiffies;
+	}
+
+	return thrashing;
+}
+
+static unsigned long get_adaptive_anon_prio(int swappiness, unsigned long anon,
+					    unsigned long file, unsigned long *file_prio)
+{
+	unsigned long anon_prio;
+
+	if (likely(vmscan_swap_file_ratio) && !is_swap_thrashing()) {
+		anon_prio = (swappiness * anon) / (anon + file + 1);
+		*file_prio = (unsigned long)(200 - swappiness) * file / (anon + file + 1);
+	} else {
+		anon_prio = swappiness;
+		*file_prio = (unsigned long)(200 - swappiness);
+	}
+
+	return anon_prio;
+}
+#endif
+
 enum scan_balance {
 	SCAN_EQUAL,
 	SCAN_FRACT,
@@ -2103,6 +2202,11 @@ static void get_scan_count(struct lruvec *lruvec, int swappiness,
 		get_lru_size(lruvec, LRU_INACTIVE_ANON);
 	file  = get_lru_size(lruvec, LRU_ACTIVE_FILE) +
 		get_lru_size(lruvec, LRU_INACTIVE_FILE);
+
+#ifdef CONFIG_MTK_GMO_RAM_OPTIMIZE
+	/* Compute anon_prio adaptively */
+	anon_prio = get_adaptive_anon_prio(swappiness, anon, file, &file_prio);
+#endif
 
 	spin_lock_irq(&zone->lru_lock);
 	if (unlikely(reclaim_stat->recent_scanned[0] > anon / 4)) {
@@ -2324,9 +2428,11 @@ static void shrink_lruvec(struct lruvec *lruvec, int swappiness,
 	/* Record the original scan target for proportional adjustments later */
 	memcpy(targets, nr, sizeof(nr));
 
+#ifndef CONFIG_MTK_GMO_RAM_OPTIMIZE
 	/* Give a chance to migrate anon pages */
 	if (IS_ENABLED(CONFIG_ZONE_MOVABLE_CMA) && nr[LRU_INACTIVE_ANON] == 0)
-		nr[LRU_INACTIVE_ANON] = SWAP_CLUSTER_MAX;
+		nr[LRU_INACTIVE_ANON] = 1UL;
+#endif
 
 	/*
 	 * Global reclaiming within direct reclaim at DEF_PRIORITY is a normal

@@ -72,6 +72,14 @@ static char met_dvfs_info2[5][32] = {
 	"NULL",
 	"NULL"
 };
+
+static char met_dvfs_info3[5][32] = {
+	"sched_dvfs_capmin_cid0",
+	"sched_dvfs_capmin_cid1",
+	"sched_dvfs_capmin_cid2",
+	"NULL",
+	"NULL"
+};
 #endif
 
 static int
@@ -164,6 +172,9 @@ struct schedtune {
 	 * towards idle CPUs
 	 */
 	int prefer_idle;
+
+	/* Add capacity_min for task floor setting */
+	int capacity_min;
 };
 
 static inline struct schedtune *css_st(struct cgroup_subsys_state *css)
@@ -196,6 +207,7 @@ root_schedtune = {
 	.perf_boost_idx = 0,
 	.perf_constrain_idx = 0,
 	.prefer_idle = 0,
+	.capacity_min = 0,
 };
 
 int
@@ -240,7 +252,11 @@ schedtune_accept_deltas(int nrg_delta, int cap_delta,
  *    implementation especially for the computation of the per-CPU boost
  *    value
  */
+#ifdef CONFIG_MTK_IO_BOOST
+#define BOOSTGROUPS_COUNT 6
+#else
 #define BOOSTGROUPS_COUNT 5
+#endif
 
 /* Array of configured boostgroups */
 static struct schedtune *allocated_group[BOOSTGROUPS_COUNT] = {
@@ -260,11 +276,18 @@ struct boost_groups {
 	/* Maximum boost value for all RUNNABLE tasks on a CPU */
 	bool idle;
 	int boost_max;
+	/*
+	 * Maximum capacity_min for all RUNNABLE tasks on a CPU,
+	 * to fix floor capacity of CPU.
+	 */
+	int max_capacity_min;
 	struct {
 		/* The boost for tasks on that boost group */
 		int boost;
 		/* Count of RUNNABLE tasks on that boost group */
 		unsigned tasks;
+		/* The capacity_min for tasks on that boost group */
+		int capacity_min;
 	} group[BOOSTGROUPS_COUNT];
 	/* CPU's boost group locking */
 	raw_spinlock_t lock;
@@ -279,11 +302,13 @@ schedtune_cpu_update(int cpu)
 	struct boost_groups *bg;
 	int boost_max;
 	int idx;
+	int max_capacity_min;
 
 	bg = &per_cpu(cpu_boost_groups, cpu);
 
 	/* The root boost group is always active */
 	boost_max = bg->group[0].boost;
+	max_capacity_min = bg->group[0].capacity_min;
 	for (idx = 1; idx < BOOSTGROUPS_COUNT; ++idx) {
 		/*
 		 * A boost group affects a CPU only if it has
@@ -292,6 +317,7 @@ schedtune_cpu_update(int cpu)
 		if (bg->group[idx].tasks == 0)
 			continue;
 		boost_max = max(boost_max, bg->group[idx].boost);
+		max_capacity_min = max(max_capacity_min, bg->group[idx].capacity_min);
 	}
 	/* Ensures boost_max is non-negative when all cgroup boost values
 	 * are neagtive. Avoids under-accounting of cpu capacity which may cause
@@ -303,10 +329,13 @@ schedtune_cpu_update(int cpu)
 	 * when all group are neagtive, boost_max should lower than 0
 	 * and it can decrease frequency.
 	 */
-	if (!global_negative_flag)
+	if (!global_negative_flag) {
 		boost_max = max(boost_max, 0);
+		max_capacity_min = max(max_capacity_min, 0);
+	}
 
 	bg->boost_max = boost_max;
+	bg->max_capacity_min = max_capacity_min;
 }
 
 static int
@@ -352,6 +381,41 @@ schedtune_boostgroup_update(int idx, int boost)
 	return 0;
 }
 
+static int
+schedtune_boostgroup_update_capacity_min(int idx, int capacity_min)
+{
+	struct boost_groups *bg;
+	int cur_max_capacity_min;
+	int old_capacity_min;
+	int cpu;
+
+	/* Update per CPU boost groups */
+	for_each_possible_cpu(cpu) {
+		bg = &per_cpu(cpu_boost_groups, cpu);
+
+		/*
+		 * Keep track of current boost values to compute the per CPU
+		 * maximum only when it has been affected by the new value of
+		 * the updated boost group
+		 */
+		cur_max_capacity_min = bg->max_capacity_min;
+		old_capacity_min = bg->group[idx].capacity_min;
+		/* Update the boost value of this boost group */
+		bg->group[idx].capacity_min = capacity_min;
+		/* Check if this update increase current max */
+		if (capacity_min > cur_max_capacity_min && bg->group[idx].tasks) {
+			bg->max_capacity_min = capacity_min;
+			continue;
+		}
+		/* Check if this update has decreased current max */
+		if (cur_max_capacity_min == old_capacity_min && old_capacity_min > capacity_min) {
+			schedtune_cpu_update(cpu);
+			continue;
+		}
+	}
+	return 0;
+}
+
 #define ENQUEUE_TASK  1
 #define DEQUEUE_TASK -1
 
@@ -365,7 +429,8 @@ schedtune_tasks_update(struct task_struct *p, int cpu, int idx, int task_count)
 	bg->group[idx].tasks = max(0, tasks);
 
 	trace_sched_tune_tasks_update(p, cpu, tasks, idx,
-			bg->group[idx].boost, bg->boost_max);
+			bg->group[idx].boost, bg->boost_max,
+			bg->group[idx].capacity_min, bg->max_capacity_min);
 
 	/* Boost group activation or deactivation on that RQ */
 	if (tasks == 1 || tasks == 0)
@@ -581,8 +646,33 @@ int schedtune_task_boost(struct task_struct *p)
 	return task_boost;
 }
 
+int schedtune_cpu_capacity_min(int cpu)
+{
+	struct boost_groups *bg;
+
+	bg = &per_cpu(cpu_boost_groups, cpu);
+	return bg->max_capacity_min;
+}
+
+int schedtune_task_capacity_min(struct task_struct *p)
+{
+	struct schedtune *st;
+	int task_capacity_min;
+
+	if (!unlikely(schedtune_initialized))
+		return 0;
+
+	/* Get task boost value */
+	rcu_read_lock();
+	st = task_schedtune(p);
+	task_capacity_min = st->capacity_min;
+	rcu_read_unlock();
+
+	return task_capacity_min;
+}
+
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
-static void update_freq_fastpath(void)
+void update_freq_fastpath(void)
 {
 	int cid;
 
@@ -612,7 +702,7 @@ static void update_freq_fastpath(void)
 		for_each_cpu(cpu, &cls_cpus) {
 			struct sched_capacity_reqs *scr;
 
-			if (!cpu_online(cpu))
+			if (!cpu_online(cpu) || cpu_isolated(cpu))
 				continue;
 
 			if (first_cpu < 0)
@@ -652,9 +742,7 @@ static void update_freq_fastpath(void)
 	met_tag_oneshot(0, "sched_dvfsfast_path", 0);
 #endif
 }
-#endif
 
-#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
 void set_min_boost_freq(int boost_value, int cpu_clus)
 {
 	int max_clus_nr = arch_get_nr_clusters();
@@ -670,7 +758,69 @@ void set_min_boost_freq(int boost_value, int cpu_clus)
 	floor_freq = (floor_cap * max_freq / max_cap);
 	min_boost_freq[cpu_clus] = mt_cpufreq_find_close_freq(cpu_clus, floor_freq);
 }
+
+void set_cap_min_freq(int cap_min)
+{
+	int max_clus_nr = arch_get_nr_clusters();
+	int max_freq, max_cap, min_freq;
+	int i;
+
+	for (i = 0; i < max_clus_nr; i++) {
+		max_freq = schedtune_target_cap[i].freq;
+		max_cap = schedtune_target_cap[i].cap;
+
+		min_freq = (cap_min * max_freq / max_cap);
+		cap_min_freq[i] = mt_cpufreq_find_close_freq(i, min_freq);
+	}
+}
 #endif
+
+int stune_task_threshold_for_perf_idx(bool filter)
+{
+	if (!default_stune_threshold)
+		return -EINVAL;
+
+	if (filter)
+		stune_task_threshold = default_stune_threshold;
+	else
+		stune_task_threshold = 0;
+
+	met_tag_oneshot(0, "sched_stune_filter", stune_task_threshold);
+
+	return 0;
+}
+
+int capacity_min_write_for_perf_idx(int idx, int capacity_min)
+{
+	struct schedtune *ct = allocated_group[idx];
+
+	if (!ct)
+		return -EINVAL;
+
+	if (capacity_min < 0 || capacity_min > 1024) {
+		printk_deferred("warning: capacity_min should be 0~1024\n");
+		if (capacity_min > 1024)
+			capacity_min = 1024;
+		else if (capacity_min < 0)
+			capacity_min = 0;
+	}
+
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+	set_cap_min_freq(capacity_min);
+#endif
+	rcu_read_lock();
+	ct->capacity_min = capacity_min;
+
+	/* Update CPU capacity_min */
+	schedtune_boostgroup_update_capacity_min(ct->idx, ct->capacity_min);
+	rcu_read_unlock();
+
+	/* top-app */
+	if (ct->idx == 3)
+		met_tag_oneshot(0, "sched_boost_top_capacity_min", ct->capacity_min);
+
+	return 0;
+}
 
 int boost_write_for_perf_idx(int group_idx, int boost_value)
 {
@@ -680,6 +830,7 @@ int boost_write_for_perf_idx(int group_idx, int boost_value)
 	bool dvfs_on_demand = false;
 	int idx = 0;
 	int cluster;
+	int cap_min = 0;
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
 	int floor = 0;
 	int i;
@@ -688,9 +839,44 @@ int boost_write_for_perf_idx(int group_idx, int boost_value)
 	int ctl_no = div64_s64(boost_value, 1000);
 
 	switch (ctl_no) {
+	case 4:
+		/* min cpu capacity request */
+		boost_value -= ctl_no * 1000;
+
+		if (boost_value < 0 || boost_value > 100) {
+			/* printk_deferred("warning: boost for capacity_min should be 0~100\n"); */
+			if (boost_value > 100)
+				boost_value = 100;
+			else if (boost_value < 0)
+				boost_value = 0;
+		}
+
+		ct = allocated_group[group_idx];
+		if (ct) {
+			cap_min = div64_s64(boost_value * 1024, 100);
+
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+			set_cap_min_freq(cap_min);
+#endif
+			rcu_read_lock();
+			ct->capacity_min = cap_min;
+			/* Update CPU capacity_min */
+			schedtune_boostgroup_update_capacity_min(ct->idx, ct->capacity_min);
+			rcu_read_unlock();
+
+			/* top-app */
+			if (ct->idx == 3)
+				met_tag_oneshot(0, "sched_boost_top_capacity_min", ct->capacity_min);
+		}
+
+		/* boost4xxx: no boost only capacity_min */
+		boost_value = 0;
+
+		stune_task_threshold = default_stune_threshold;
+		break;
 	case 3:
-		/* dvfs floor */
-		boost_value -= 3000;
+		/* a floor of cpu frequency */
+		boost_value -= ctl_no * 1000;
 		cluster = (int)boost_value / 100;
 		boost_value = (int)boost_value % 100;
 
@@ -745,20 +931,37 @@ int boost_write_for_perf_idx(int group_idx, int boost_value)
 		boost_value = -100;
 
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
-	if (!floor) {
-		for (i = 0; i < cpu_cluster_nr; i++)
+	for (i = 0; i < cpu_cluster_nr; i++) {
+		if (!floor)
 			min_boost_freq[i] = 0;
+		if (!cap_min)
+			cap_min_freq[i] = 0;
+
+		met_tag_oneshot(0, met_dvfs_info2[i], min_boost_freq[i]);
+		met_tag_oneshot(0, met_dvfs_info3[i], cap_min_freq[i]);
 	}
 
-	for (i = 0; i < cpu_cluster_nr; i++)
-		met_tag_oneshot(0, met_dvfs_info2[i], min_boost_freq[i]);
+	if (!cap_min) {
+		ct = allocated_group[group_idx];
+		if (ct) {
+			rcu_read_lock();
+			ct->capacity_min = 0;
+			/* Update CPU capacity_min */
+			schedtune_boostgroup_update_capacity_min(ct->idx, ct->capacity_min);
+			rcu_read_unlock();
+
+			/* top-app */
+			if (ct->idx == 3)
+				met_tag_oneshot(0, "sched_boost_top_capacity_min",
+						ct->capacity_min);
+		}
+	}
 #endif
 
 	if (boost_value < 0)
 		global_negative_flag = true; /* set all group negative */
 	else
 		global_negative_flag = false;
-
 
 	sys_boosted = boost_value;
 
@@ -843,17 +1046,29 @@ int linear_real_boost(int linear_boost)
 {
 	int target_cpu, usage;
 	int boost;
+	int ta_org_cap;
 
 	sched_max_util_task(&target_cpu, NULL, &usage, NULL);
 
-	/* margin = (usage*linear_boost)/100; */
-	/* (original_cap - usage)*boost/100 = margin; */
-	boost = (usage*linear_boost)/(capacity_orig_of(target_cpu) - usage);
+	ta_org_cap = capacity_orig_of(target_cpu);
 
-#if 0
-	printk_deferred("Michael: (%d->%d) target_cpu=%d orig_cap=%ld usage=%ld\n",
-			linear_boost, boost, target_cpu, capacity_orig_of(target_cpu), usage);
-#endif
+	if (usage >= SCHED_CAPACITY_SCALE)
+		usage = SCHED_CAPACITY_SCALE;
+
+	/*
+	 * Conversion Formula of Linear Boost:
+	 *
+	 *   margin = (usage * linear_boost)/100;
+	 *   margin = (original_cap - usage) * boost/100;
+	 *   so
+	 *   boost = (usage * linear_boost) / (original_cap - usage)
+	 */
+	if (ta_org_cap <= usage) {
+		/* If target cpu is saturated, consider bigger one */
+		boost = (SCHED_CAPACITY_SCALE - usage) ?
+			(usage * linear_boost)/(SCHED_CAPACITY_SCALE - usage) : 0;
+	} else
+		boost = (usage * linear_boost)/(ta_org_cap - usage);
 
 	return boost;
 }
@@ -895,7 +1110,12 @@ int schedtune_prefer_idle(struct task_struct *p)
 	/* Get prefer_idle value */
 	rcu_read_lock();
 	st = task_schedtune(p);
-	prefer_idle = st->prefer_idle;
+
+	/* idle prefer mode: for ta & fg */
+	if (st->idx == 3 || st->idx == 1)
+		prefer_idle = (idle_prefer_mode > 0) ? (idle_prefer_need()) : st->prefer_idle;
+	else
+		prefer_idle = st->prefer_idle;
 	rcu_read_unlock();
 
 	return prefer_idle;
@@ -909,13 +1129,68 @@ prefer_idle_read(struct cgroup_subsys_state *css, struct cftype *cft)
 	return st->prefer_idle;
 }
 
+int prefer_idle_for_perf_idx(int idx, int prefer_idle)
+{
+	struct schedtune *ct = allocated_group[idx];
+
+	if (!ct)
+		return -EINVAL;
+
+	rcu_read_lock();
+
+	/* idle prefer mode: for ta & fg */
+	if (idle_prefer_mode && (idx == 3 || idx == 1))
+		prefer_idle = 1;
+
+	ct->prefer_idle = prefer_idle;
+	rcu_read_unlock();
+
+	return 0;
+}
+
 static int
 prefer_idle_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	    u64 prefer_idle)
 {
 	struct schedtune *st = css_st(css);
 
+	/* idle prefer mode: for ta & fg */
+	if (idle_prefer_mode && (st->idx == 3 || st->idx == 1))
+		prefer_idle = 1;
+
 	st->prefer_idle = prefer_idle;
+
+	return 0;
+}
+
+static u64
+capacity_min_read(struct cgroup_subsys_state *css, struct cftype *cft)
+{
+	struct schedtune *st = css_st(css);
+
+	return st->capacity_min;
+}
+
+static int
+capacity_min_write(struct cgroup_subsys_state *css, struct cftype *cft,
+		u64 capacity_min)
+{
+	struct schedtune *st = css_st(css);
+
+	if (capacity_min < 0 || capacity_min > 1024) {
+		printk_deferred("warning: capacity_min should be 0~1024\n");
+		return -EINVAL;
+	}
+
+	rcu_read_lock();
+	st->capacity_min = capacity_min;
+	/* Update CPU capacity_min */
+	schedtune_boostgroup_update_capacity_min(st->idx, st->capacity_min);
+	rcu_read_unlock();
+
+	/* top-app */
+	if (st->idx == 3)
+		met_tag_oneshot(0, "sched_boost_user_top_capacity_min", st->capacity_min);
 
 	return 0;
 }
@@ -943,11 +1218,44 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	int c0, c1;
 #endif
 	int ctl_no = div64_s64(boost, 1000);
+	int cap_min = 0;
 
 	switch (ctl_no) {
+	case 4:
+		/* min cpu capacity request */
+		boost -= ctl_no * 1000;
+
+		/* update capacity_min */
+		if (boost < 0 || boost > 100) {
+			printk_deferred("warning: boost for capacity_min should be 0~100\n");
+			if (boost > 100)
+				boost = 100;
+			else if (boost < 0)
+				boost = 0;
+		}
+		cap_min = div64_s64(boost * 1024, 100);
+
+#ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
+		set_cap_min_freq(cap_min);
+#endif
+		rcu_read_lock();
+		st->capacity_min = cap_min;
+		/* Update CPU capacity_min */
+		schedtune_boostgroup_update_capacity_min(st->idx, st->capacity_min);
+		rcu_read_unlock();
+
+		/* top-app */
+		if (st->idx == 3)
+			met_tag_oneshot(0, "sched_boost_user_top_capacity_min", st->capacity_min);
+
+		/* boost4xxx: no boost only capacity_min */
+		boost = 0;
+
+		stune_task_threshold = default_stune_threshold;
+		break;
 	case 3:
-		/* dvfs floor */
-		boost -= 3000;
+		/* a floor of cpu frequency */
+		boost -= ctl_no * 1000;
 		cluster = (int)boost / 100;
 		boost = (int)boost % 100;
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
@@ -999,13 +1307,29 @@ boost_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	}
 
 #ifdef CONFIG_CPU_FREQ_GOV_SCHEDPLUS
-	if (!floor) {
-		for (i = 0; i < cpu_cluster_nr; i++)
+	for (i = 0; i < cpu_cluster_nr; i++) {
+		if (!floor)
 			min_boost_freq[i] = 0;
+		if (!cap_min)
+			cap_min_freq[i] = 0;
+
+		met_tag_oneshot(0, met_dvfs_info2[i], min_boost_freq[i]);
+		met_tag_oneshot(0, met_dvfs_info3[i], cap_min_freq[i]);
 	}
 
-	for (i = 0; i < cpu_cluster_nr; i++)
-		met_tag_oneshot(0, met_dvfs_info2[i], min_boost_freq[i]);
+	if (!cap_min) {
+		rcu_read_lock();
+		st->capacity_min = 0;
+
+		/* Update CPU capacity_min */
+		schedtune_boostgroup_update_capacity_min(st->idx, st->capacity_min);
+		rcu_read_unlock();
+
+		/* top-app */
+		if (st->idx == 3)
+			met_tag_oneshot(0, "sched_boost_user_top_capacity_min",
+					st->capacity_min);
+	}
 #endif
 
 	global_negative_flag = false;
@@ -1065,6 +1389,11 @@ static struct cftype files[] = {
 		.read_u64 = prefer_idle_read,
 		.write_u64 = prefer_idle_write,
 	},
+	{
+		.name = "capacity_min",
+		.read_u64 = capacity_min_read,
+		.write_u64 = capacity_min_write,
+	},
 	{ }	/* terminate */
 };
 
@@ -1082,7 +1411,6 @@ schedtune_boostgroup_init(struct schedtune *st)
 		bg = &per_cpu(cpu_boost_groups, cpu);
 		bg->group[st->idx].boost = 0;
 		bg->group[st->idx].tasks = 0;
-		raw_spin_lock_init(&bg->lock);
 	}
 
 	return 0;
@@ -1135,6 +1463,7 @@ schedtune_boostgroup_release(struct schedtune *st)
 {
 	/* Reset this boost group */
 	schedtune_boostgroup_update(st->idx, 0);
+	schedtune_boostgroup_update_capacity_min(st->idx, 0);
 
 	/* Keep track of allocated boost groups */
 	allocated_group[st->idx] = NULL;

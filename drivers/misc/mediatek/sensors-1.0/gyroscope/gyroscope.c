@@ -80,6 +80,7 @@ static void gyro_work_func(struct work_struct *work)
 
 	struct gyro_context *cxt = NULL;
 	int x = 0, y = 0, z = 0, status = 0;
+	int temperature = -32768;	/* =0xFFFF_8000 */
 	int64_t pre_ns, cur_ns;
 	int64_t delay_ms;
 	int err = 0;
@@ -88,6 +89,15 @@ static void gyro_work_func(struct work_struct *work)
 	delay_ms = atomic_read(&cxt->delay);
 
 	cur_ns = getCurNS();
+
+	/* gyro driver has register temperature path */
+	if (cxt->gyro_data.get_temperature) {
+		err = cxt->gyro_data.get_temperature(&temperature);
+		if (err)
+			GYRO_INFO("get gyro temperature fails!!\n");
+		else
+			cxt->drv_data.temperature = temperature;
+	}
 
     /* add wake lock to make sure data can be read before system suspend */
 	if (cxt->gyro_data.get_data != NULL)
@@ -205,6 +215,7 @@ static int gyro_enable_and_batch(void)
 			cxt->drv_data.x = GYRO_INVALID_VALUE;
 			cxt->drv_data.y = GYRO_INVALID_VALUE;
 			cxt->drv_data.z = GYRO_INVALID_VALUE;
+			cxt->drv_data.temperature = 0;
 			cxt->is_polling_run = false;
 			GYRO_LOG("gyro stop polling done\n");
 		}
@@ -483,7 +494,7 @@ static ssize_t gyro_store_cali(struct device *dev, struct device_attribute *attr
 	if (cxt->gyro_ctl.set_cali != NULL)
 		err = cxt->gyro_ctl.set_cali(cali_buf, count);
 	else
-		GYRO_INFO("GYRO DRIVER OLD ARCHITECTURE DON'T SUPPORT GYRO COMMON VERSION SET_CALI\n");
+		GYRO_INFO("GYRO DRIVER OLD ARCHITECTURE DON'T SUPPORT GYRO COMMON VERSION FLUSH\n");
 	if (err < 0)
 		GYRO_INFO("gyro set cali err %d\n", err);
 	mutex_unlock(&gyro_context_obj->gyro_op_mutex);
@@ -653,6 +664,7 @@ int gyro_register_data_path(struct gyro_data_path *data)
 
 	cxt = gyro_context_obj;
 	cxt->gyro_data.get_data = data->get_data;
+	cxt->gyro_data.get_temperature = data->get_temperature;
 	cxt->gyro_data.vender_div = data->vender_div;
 	cxt->gyro_data.get_raw_data = data->get_raw_data;
 	GYRO_LOG("gyro register data path vender_div: %d\n", cxt->gyro_data.vender_div);
@@ -660,6 +672,8 @@ int gyro_register_data_path(struct gyro_data_path *data)
 		GYRO_LOG("gyro register data path fail\n");
 		return -1;
 	}
+	if (cxt->gyro_data.get_temperature == NULL)
+		GYRO_LOG("gyro not register temperature path\n");
 	return 0;
 }
 
@@ -728,6 +742,7 @@ int gyro_data_report(struct gyro_data *data)
 {
 	struct sensor_event event;
 	int err = 0;
+
 	memset(&event, 0, sizeof(struct sensor_event));
 
 	check_repeat_data(data->x, data->y, data->z);
@@ -737,13 +752,14 @@ int gyro_data_report(struct gyro_data *data)
 	event.word[0] = data->x;
 	event.word[1] = data->y;
 	event.word[2] = data->z;
+	event.word[3] = data->temperature;
 	event.reserved = data->reserved[0];
 
 	if (event.reserved == 1)
 		mark_timestamp(ID_GYROSCOPE, DATA_REPORT, ktime_get_boot_ns(), event.time_stamp);
 	err = sensor_input_event(gyro_context_obj->mdev.minor, &event);
 	if (err < 0)
-		GYRO_PR_ERR("gyro_data_report failed due to event buffer full\n");
+		pr_err_ratelimited("gyro_data_report failed due to event buffer full\n");
 	return err;
 }
 
@@ -751,6 +767,7 @@ int gyro_bias_report(struct gyro_data *data)
 {
 	struct sensor_event event;
 	int err = 0;
+
 	memset(&event, 0, sizeof(struct sensor_event));
 
 	event.flush_action = BIAS_ACTION;
@@ -799,7 +816,7 @@ int gyro_temp_report(int32_t *temp)
 
 	err = sensor_input_event(gyro_context_obj->mdev.minor, &event);
 	if (err < 0)
-		GYRO_PR_ERR("gyro_bias_report failed due to event buffer full\n");
+		pr_err_ratelimited("gyro_bias_report failed due to event buffer full\n");
 	return err;
 }
 
@@ -807,6 +824,7 @@ int gyro_flush_report(void)
 {
 	struct sensor_event event;
 	int err = 0;
+
 	memset(&event, 0, sizeof(struct sensor_event));
 
 	GYRO_LOG("flush\n");

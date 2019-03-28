@@ -36,6 +36,7 @@
 #include <smp.h>
 #endif
 #include "aee-common.h"
+#include <ipanic.h>
 #include <mrdump_private.h>
 
 #undef WDT_DEBUG_VERBOSE
@@ -467,7 +468,7 @@ void aee_wdt_irq_info(void)
 	xchg(&debug_locks, 0);
 	aee_rr_rec_fiq_step(AEE_FIQ_STEP_WDT_IRQ_DONE);
 	aee_rr_rec_exp_type(1);
-	emergency_restart();
+	aee_exception_reboot();
 }
 
 #if defined(CONFIG_FIQ_GLUE)
@@ -518,6 +519,9 @@ void aee_wdt_fiq_info(void *arg, void *regs, void *svc_sp)
 
 	/* FIXME: correct mrdump function if necessary */
 	__mrdump_create_oops_dump(AEE_REBOOT_MODE_WDT, regs, "WDT/HWT");
+
+	/* add info for minidump */
+	mrdump_mini_ke_cpu_regs(regs);
 
 	aee_wdt_irq_info();
 }

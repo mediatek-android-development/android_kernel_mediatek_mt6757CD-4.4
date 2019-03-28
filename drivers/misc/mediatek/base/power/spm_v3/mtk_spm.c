@@ -18,6 +18,7 @@
 #include <linux/smp.h>
 #include <linux/delay.h>
 #include <linux/atomic.h>
+#include <mtk_sleep.h>
 #include <mtk_spm_idle.h>
 #include <mt-plat/upmu_common.h>
 #include "include/pmic_api_buck.h"
@@ -44,6 +45,15 @@
 #include <mtk_spm_resource_req_internal.h>
 
 #include <trace/events/mtk_events.h>
+
+__weak int get_spm_last_wakeup_src(struct seq_file *s, void *unused)
+{
+	return 0;
+}
+__weak int get_spm_sleep_count(struct seq_file *s, void *unused)
+{
+	return 0;
+}
 
 int spm_for_gps_flag;
 static struct dentry *spm_dir;
@@ -171,7 +181,8 @@ static void spm_register_init(void)
 	spm_err("spm_base = %p, spm_irq_0 = %d\n", spm_base, spm_irq_0);
 
 	/* kp_irq_b */
-#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758)
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || \
+	defined(CONFIG_MACH_MT6775)
 	node = of_find_compatible_node(NULL, NULL, "mediatek,kp");
 	if (!node) {
 		spm_err("find keypad node failed\n");
@@ -209,7 +220,8 @@ static void spm_register_init(void)
 		if (!edge_trig_irqs[5])
 			spm_err("get mdcldma failed\n");
 	}
-#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6758)
+#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6758) && \
+	!defined(CONFIG_MACH_MT6775)
 
 	/* lowbattery_irq_b */
 	node = of_find_compatible_node(NULL, NULL, "mediatek,auxadc");
@@ -229,7 +241,8 @@ static void spm_register_init(void)
 		 edge_trig_irqs[4],
 		 edge_trig_irqs[5],
 		 edge_trig_irqs[6]);
-#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6758)
+#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6758) && \
+	!defined(CONFIG_MACH_MT6775)
 	spm_set_dummy_read_addr(true);
 #endif
 }
@@ -240,6 +253,7 @@ int spm_load_firmware_status(void)
 	if (local_spm_load_firmware_status == -1)
 		local_spm_load_firmware_status =
 			mt_secure_call(MTK_SIP_KERNEL_SPM_FIRMWARE_STATUS, 0, 0, 0);
+
 	return local_spm_load_firmware_status;
 }
 
@@ -367,9 +381,11 @@ static struct platform_device *pspmdev;
 
 int __init spm_module_init(void)
 {
+#if defined(CONFIG_MACH_MT6799)
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 	struct spm_data spm_d;
 #endif /* CONFIG_MTK_TINYSYS_SSPM_SUPPORT */
+#endif
 	int r = 0;
 	int ret = -1;
 
@@ -412,6 +428,7 @@ int __init spm_module_init(void)
 	spm_file = debugfs_create_file("spm_sleep_count", S_IRUGO, spm_dir, NULL, &spm_sleep_count_fops);
 	spm_file = debugfs_create_file("spm_last_wakeup_src", S_IRUGO, spm_dir, NULL, &spm_last_wakeup_src_fops);
 	spm_resource_req_debugfs_init(spm_dir);
+	spm_suspend_debugfs_init(spm_dir);
 
 #if !defined(CONFIG_FPGA_EARLY_PORTING)
 #ifdef CONFIG_PM
@@ -423,6 +440,7 @@ int __init spm_module_init(void)
 #endif /* CONFIG_PM */
 #endif /* CONFIG_FPGA_EARLY_PORTING */
 
+#if defined(CONFIG_MACH_MT6799)
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 	memset(&spm_d, 0, sizeof(struct spm_data));
 
@@ -432,6 +450,7 @@ int __init spm_module_init(void)
 
 	mt_secure_call(MTK_SIP_KERNEL_SPM_ARGS, SPM_ARGS_SPMFW_IDX, ret, 0);
 #endif /* CONFIG_MTK_TINYSYS_SSPM_SUPPORT */
+#endif
 
 	spm_vcorefs_init();
 	return 0;
@@ -548,6 +567,98 @@ struct ddrphy_golden_cfg {
 	u32 value;
 };
 
+#if defined(CONFIG_MACH_MT6775)
+static struct ddrphy_golden_cfg ddrphy_setting[] = {
+	{DRAMC_AO_CHA, 0x038, 0xc0000027, 0xc0000007},
+	{DRAMC_AO_CHB, 0x038, 0xc0000027, 0xc0000007},
+	{PHY_AO_CHA, 0x284, 0x001bff00, 0x00000100},
+	{PHY_AO_CHB, 0x284, 0x001bff00, 0x00000100},
+	{PHY_AO_CHA, 0x28c, 0xffffffff, 0x806003be},
+	{PHY_AO_CHB, 0x28c, 0xffffffff, 0x806003be},
+	{PHY_AO_CHA, 0x2a8, 0x0c000000, 0x00000000},
+	{PHY_AO_CHB, 0x2a8, 0x0c000000, 0x00000000},
+	{PHY_AO_CHA, 0xc20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0xc20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1120, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x1120, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1620, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x1620, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1b20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x1b20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0xca0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0xca0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x11a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x11a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x16a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x16a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1ba0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x1ba0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0xd20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0xd20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHA, 0x1220, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1220, 0xfff80000, 0x00000000},
+	{PHY_AO_CHA, 0x1720, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1720, 0xfff80000, 0x00000000},
+	{PHY_AO_CHA, 0x1c20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1c20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHA, 0x298, 0x00770000, 0x00770000},
+	{PHY_AO_CHB, 0x298, 0x00770000, 0x00770000},
+	{PHY_AO_CHA, 0x084, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x084, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x104, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x104, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x184, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x184, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0xc34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0xc34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0xcb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0xcb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0xd34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0xd34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1134, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1134, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x11b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x11b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1234, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1234, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1634, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1634, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x16b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x16b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1734, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1734, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1b34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1b34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1bb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1bb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1c34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1c34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0xc1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0xc1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0xc9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0xc9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x111c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x111c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x119c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x119c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x161c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x161c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x169c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x169c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x1b1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x1b1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x1b9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x1b9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0xd1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0xd1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x121c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x121c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x171c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x171c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x1c1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x1c1c, 0x000e0000, 0x000e0000},
+};
+#else
 static struct ddrphy_golden_cfg ddrphy_setting[] = {
 	{DRAMC_AO_CHA, 0x038, 0xc0000027, 0xc0000007},
 	{PHY_CHA, 0x284, 0x000bff00, 0x00000100},
@@ -561,6 +672,7 @@ static struct ddrphy_golden_cfg ddrphy_setting[] = {
 	{PHY_CHA, 0x274, 0xffffffff, 0xfffffe7f},
 	{PHY_CHA, 0x27c, 0xffffffff, 0xffffffff},
 };
+#endif
 
 int spm_golden_setting_cmp(bool en)
 {
@@ -707,6 +819,7 @@ EXPORT_SYMBOL(mt_spm_for_gps_only);
 void mt_spm_dcs_s1_setting(int enable, int flags)
 {
 	flags &= 0xf;
+
 	mt_secure_call(MTK_SIP_KERNEL_SPM_DCS_S1, enable, flags, 0);
 }
 EXPORT_SYMBOL(mt_spm_dcs_s1_setting);
@@ -721,7 +834,6 @@ EXPORT_SYMBOL(mt_spm_dcs_s1_setting);
 int spm_to_sspm_command_async(u32 cmd, struct spm_data *spm_d)
 {
 	unsigned int ret = 0;
-
 
 	switch (cmd) {
 	case SPM_DPIDLE_ENTER:
@@ -799,6 +911,16 @@ int spm_to_sspm_command(u32 cmd, struct spm_data *spm_d)
 		}
 		break;
 	case SPM_VCORE_PWARP_CMD:
+#if defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6775)
+		spm_d->cmd = cmd;
+		ret = sspm_ipi_send_sync(IPI_ID_SPM_SUSPEND, IPI_OPT_POLLING, spm_d, SPM_D_LEN, &ack_data, 1);
+		if (ret != 0) {
+			pr_info("#@# %s(%d) sspm_ipi_send_sync(cmd:0x%x) ret %d\n", __func__, __LINE__, cmd, ret);
+		} else if (ack_data < 0) {
+			ret = ack_data;
+			pr_info("#@# %s(%d) cmd(%d) return %d\n", __func__, __LINE__, cmd, ret);
+		}
+#endif
 		break;
 	case SPM_SUSPEND_PREPARE:
 	case SPM_POST_SUSPEND:
@@ -899,5 +1021,23 @@ void sspm_ipi_lock_spm_scenario(int start, int id, int opt, const char *name)
 
 }
 #endif /* CONFIG_MTK_TINYSYS_SSPM_SUPPORT */
+
+#if defined(CONFIG_MACH_MT6775)
+#include <mtk_mcdi_governor.h>
+#include <mtk_hps_internal.h>
+bool is_big_buck_pdn_by_spm(void)
+{
+#if !defined(CONFIG_FPGA_EARLY_PORTING)
+	/* If big buck off by mcdi or cpu hotplug
+	 *  then return true
+	 */
+	#define BIG_BUCK_CLUSTER_ID     1
+	return !(mcdi_is_buck_off(BIG_BUCK_CLUSTER_ID)
+			|| cpuhp_is_buck_off(BIG_BUCK_CLUSTER_ID));
+#else
+	return false;
+#endif
+}
+#endif
 
 MODULE_DESCRIPTION("SPM Driver v0.1");

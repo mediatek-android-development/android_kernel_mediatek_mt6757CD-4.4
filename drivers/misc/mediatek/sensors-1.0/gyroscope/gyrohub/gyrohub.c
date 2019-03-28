@@ -27,6 +27,7 @@
 static struct gyro_init_info gyrohub_init_info;
 struct platform_device *gyroPltFmDev;
 static int gyrohub_init_flag = -1;
+static DEFINE_SPINLOCK(calibration_lock);
 
 typedef enum {
 	GYRO_TRC_FILTER = 0x01,
@@ -41,6 +42,7 @@ struct gyrohub_ipi_data {
 	atomic_t trace;
 	atomic_t suspend;
 	int32_t static_cali[GYROHUB_AXES_NUM];
+	uint8_t static_cali_status;
 	int32_t dynamic_cali[GYROHUB_AXES_NUM];
 	int32_t temperature_cali[6];
 	struct work_struct init_done_work;
@@ -49,11 +51,13 @@ struct gyrohub_ipi_data {
 	atomic_t first_ready_after_boot;
 	bool factory_enable;
 	bool android_enable;
+	struct completion calibration_done;
 };
 static struct gyrohub_ipi_data *obj_ipi_data;
 
 static int gyrohub_get_data(int *x, int *y, int *z, int *status);
 
+#ifdef MTK_OLD_FACTORY_CALIBRATION
 static int gyrohub_write_rel_calibration(struct gyrohub_ipi_data *obj, int dat[GYROHUB_AXES_NUM])
 {
 	obj->static_cali[GYROHUB_AXIS_X] = dat[GYROHUB_AXIS_X];
@@ -143,7 +147,7 @@ static int gyrohub_WriteCalibration(int dat[GYROHUB_AXES_NUM])
 
 	return gyrohub_write_rel_calibration(obj, cali);
 }
-
+#endif
 
 static int gyrohub_SetPowerMode(bool enable)
 {
@@ -161,7 +165,6 @@ static int gyrohub_ReadGyroData(char *buf, int bufsize)
 	struct gyrohub_ipi_data *obj = obj_ipi_data;
 	struct data_unit_t data;
 	uint64_t time_stamp = 0;
-	uint64_t time_stamp_gpt = 0;
 	int gyro[GYROHUB_AXES_NUM];
 	int err = 0;
 	int status = 0;
@@ -178,12 +181,11 @@ static int gyrohub_ReadGyroData(char *buf, int bufsize)
 	}
 
 	time_stamp				= data.time_stamp;
-	time_stamp_gpt			= data.time_stamp_gpt;
 	gyro[GYROHUB_AXIS_X]	= data.gyroscope_t.x;
 	gyro[GYROHUB_AXIS_Y]	= data.gyroscope_t.y;
 	gyro[GYROHUB_AXIS_Z]	= data.gyroscope_t.z;
 	status					= data.gyroscope_t.status;
-	GYROS_LOG("recv ipi: timestamp: %lld, timestamp_gpt: %lld, x: %d, y: %d, z: %d!\n", time_stamp, time_stamp_gpt,
+	GYROS_LOG("recv ipi: timestamp: %lld, x: %d, y: %d, z: %d!\n", time_stamp,
 		gyro[GYROHUB_AXIS_X], gyro[GYROHUB_AXIS_Y], gyro[GYROHUB_AXIS_Z]);
 
 
@@ -351,11 +353,27 @@ static ssize_t store_chip_orientation(struct device_driver *ddri, const char *bu
 	return tCount;
 }
 
+static int gyrohub_factory_enable_calibration(void);
+static ssize_t store_test_cali(struct device_driver *ddri, const char *buf, size_t tCount)
+{
+	int enable = 0, ret = 0;
+
+	ret = kstrtoint(buf, 10, &enable);
+	if (ret != 0) {
+		GYROS_LOG("kstrtoint fail\n");
+		return 0;
+	}
+	if (enable == 1)
+		gyrohub_factory_enable_calibration();
+	return tCount;
+}
+
 static DRIVER_ATTR(chipinfo, S_IRUGO, show_chipinfo_value, NULL);
 static DRIVER_ATTR(sensordata, S_IRUGO, show_sensordata_value, NULL);
 static DRIVER_ATTR(trace, S_IWUSR | S_IRUGO, show_trace_value, store_trace_value);
 static DRIVER_ATTR(status, S_IRUGO, show_status_value, NULL);
 static DRIVER_ATTR(orientation, S_IWUSR | S_IRUGO, show_chip_orientation, store_chip_orientation);
+static DRIVER_ATTR(test_cali, S_IWUSR | S_IRUGO, NULL, store_test_cali);
 
 static struct driver_attribute *gyrohub_attr_list[] = {
 	&driver_attr_chipinfo,	/*chip information */
@@ -363,6 +381,7 @@ static struct driver_attribute *gyrohub_attr_list[] = {
 	&driver_attr_trace,	/*trace log */
 	&driver_attr_status,
 	&driver_attr_orientation,
+	&driver_attr_test_cali,
 };
 
 static int gyrohub_create_attr(struct device_driver *driver)
@@ -399,38 +418,43 @@ static int gyrohub_delete_attr(struct device_driver *driver)
 
 static void scp_init_work_done(struct work_struct *work)
 {
-	int32_t cfg_data[12] = {0};
 	struct gyrohub_ipi_data *obj = obj_ipi_data;
 	int err = 0;
+#ifndef MTK_OLD_FACTORY_CALIBRATION
+	int32_t cfg_data[12] = {0};
+#endif
 
 	if (atomic_read(&obj->scp_init_done) == 0) {
 		GYROS_PR_ERR("scp is not ready to send cmd\n");
-	} else {
-		if (atomic_read(&obj->first_ready_after_boot) == 0) {
-			atomic_set(&obj->first_ready_after_boot, 1);
-		} else {
-			err = gyrohub_WriteCalibration_scp(obj->static_cali);
-			if (err < 0)
-				GYROS_PR_ERR("gyrohub_WriteCalibration_scp fail\n");
-			cfg_data[0] = obj->dynamic_cali[0];
-			cfg_data[1] = obj->dynamic_cali[1];
-			cfg_data[2] = obj->dynamic_cali[2];
-
-			cfg_data[3] = obj->static_cali[0];
-			cfg_data[4] = obj->static_cali[1];
-			cfg_data[5] = obj->static_cali[2];
-
-			cfg_data[6] = obj->temperature_cali[0];
-			cfg_data[7] = obj->temperature_cali[1];
-			cfg_data[8] = obj->temperature_cali[2];
-			cfg_data[9] = obj->temperature_cali[3];
-			cfg_data[10] = obj->temperature_cali[4];
-			cfg_data[11] = obj->temperature_cali[5];
-			err = sensor_cfg_to_hub(ID_GYROSCOPE, (uint8_t *)cfg_data, sizeof(cfg_data));
-			if (err < 0)
-				GYROS_PR_ERR("sensor_cfg_to_hub fail\n");
-		}
+		return;
 	}
+	if (atomic_xchg(&obj->first_ready_after_boot, 1) == 0)
+		return;
+#ifdef MTK_OLD_FACTORY_CALIBRATION
+	err = gyrohub_WriteCalibration_scp(obj->static_cali);
+	if (err < 0)
+		GYROS_PR_ERR("gyrohub_WriteCalibration_scp fail\n");
+#else
+	spin_lock(&calibration_lock);
+	cfg_data[0] = obj->dynamic_cali[0];
+	cfg_data[1] = obj->dynamic_cali[1];
+	cfg_data[2] = obj->dynamic_cali[2];
+
+	cfg_data[3] = obj->static_cali[0];
+	cfg_data[4] = obj->static_cali[1];
+	cfg_data[5] = obj->static_cali[2];
+
+	cfg_data[6] = obj->temperature_cali[0];
+	cfg_data[7] = obj->temperature_cali[1];
+	cfg_data[8] = obj->temperature_cali[2];
+	cfg_data[9] = obj->temperature_cali[3];
+	cfg_data[10] = obj->temperature_cali[4];
+	cfg_data[11] = obj->temperature_cali[5];
+	spin_unlock(&calibration_lock);
+	err = sensor_cfg_to_hub(ID_GYROSCOPE, (uint8_t *)cfg_data, sizeof(cfg_data));
+	if (err < 0)
+		GYROS_PR_ERR("sensor_cfg_to_hub fail\n");
+#endif
 }
 
 static int gyro_recv_data(struct data_unit_t *event, void *reserved)
@@ -439,41 +463,56 @@ static int gyro_recv_data(struct data_unit_t *event, void *reserved)
 	struct gyrohub_ipi_data *obj = obj_ipi_data;
 	struct gyro_data data;
 
+	memset(&data, 0, sizeof(struct gyro_data));
+
 	if (event->flush_action == DATA_ACTION && READ_ONCE(obj->android_enable) == true) {
+		if (READ_ONCE(obj->android_enable) == false)
+			return 0;
 		data.x = event->gyroscope_t.x;
 		data.y = event->gyroscope_t.y;
 		data.z = event->gyroscope_t.z;
 		data.status = event->gyroscope_t.status;
-		data.timestamp = (int64_t)(event->time_stamp + event->time_stamp_gpt);
+		data.timestamp = (int64_t)event->time_stamp;
 		data.reserved[0] = event->reserve[0];
 		err = gyro_data_report(&data);
 	} else if (event->flush_action == FLUSH_ACTION && READ_ONCE(obj->android_enable) == true) {
+		if (READ_ONCE(obj->android_enable) == false)
+			return 0;
 		err = gyro_flush_report();
 	} else if (event->flush_action == BIAS_ACTION) {
 		data.x = event->gyroscope_t.x_bias;
 		data.y = event->gyroscope_t.y_bias;
 		data.z = event->gyroscope_t.z_bias;
 		err = gyro_bias_report(&data);
+		spin_lock(&calibration_lock);
 		obj->dynamic_cali[GYROHUB_AXIS_X] = event->gyroscope_t.x_bias;
 		obj->dynamic_cali[GYROHUB_AXIS_Y] = event->gyroscope_t.y_bias;
 		obj->dynamic_cali[GYROHUB_AXIS_Z] = event->gyroscope_t.z_bias;
+		spin_unlock(&calibration_lock);
 	} else if (event->flush_action == CALI_ACTION) {
 		data.x = event->gyroscope_t.x_bias;
 		data.y = event->gyroscope_t.y_bias;
 		data.z = event->gyroscope_t.z_bias;
-		err = gyro_bias_report(&data);
+		if (event->gyroscope_t.status == 0)
+			err = gyro_cali_report(&data);
+		spin_lock(&calibration_lock);
 		obj->static_cali[GYROHUB_AXIS_X] = event->gyroscope_t.x_bias;
 		obj->static_cali[GYROHUB_AXIS_Y] = event->gyroscope_t.y_bias;
 		obj->static_cali[GYROHUB_AXIS_Z] = event->gyroscope_t.z_bias;
+		obj->static_cali_status = (uint8_t)event->gyroscope_t.status;
+		spin_unlock(&calibration_lock);
+		complete(&obj->calibration_done);
 	} else if (event->flush_action == TEMP_ACTION) {
 		/* temp action occur when gyro disable, so we always should send data to userspace */
 		err = gyro_temp_report(event->data);
+		spin_lock(&calibration_lock);
 		obj->temperature_cali[0] = event->data[0];
 		obj->temperature_cali[1] = event->data[1];
 		obj->temperature_cali[2] = event->data[2];
 		obj->temperature_cali[3] = event->data[3];
 		obj->temperature_cali[4] = event->data[4];
 		obj->temperature_cali[5] = event->data[5];
+		spin_unlock(&calibration_lock);
 	}
 	return err;
 }
@@ -503,7 +542,14 @@ static int gyrohub_factory_enable_sensor(bool enabledisable, int64_t sample_peri
 }
 static int gyrohub_factory_get_data(int32_t data[3], int *status)
 {
-	return gyrohub_get_data(&data[0], &data[1], &data[2], status);
+	int ret = 0;
+
+	ret = gyrohub_get_data(&data[0], &data[1], &data[2], status);
+	data[0] = data[0] / 1000;
+	data[1] = data[1] / 1000;
+	data[2] = data[2] / 1000;
+
+	return ret;
 }
 static int gyrohub_factory_get_raw_data(int32_t data[3])
 {
@@ -516,6 +562,7 @@ static int gyrohub_factory_enable_calibration(void)
 }
 static int gyrohub_factory_clear_cali(void)
 {
+#ifdef MTK_OLD_FACTORY_CALIBRATION
 	int err = 0;
 
 	err = gyrohub_ResetCalibration();
@@ -523,10 +570,12 @@ static int gyrohub_factory_clear_cali(void)
 		GYROS_PR_ERR("gyrohub_ResetCalibration failed!\n");
 		return -1;
 	}
+#endif
 	return 0;
 }
 static int gyrohub_factory_set_cali(int32_t data[3])
 {
+#ifdef MTK_OLD_FACTORY_CALIBRATION
 	int err = 0;
 
 	err = gyrohub_WriteCalibration(data);
@@ -534,18 +583,42 @@ static int gyrohub_factory_set_cali(int32_t data[3])
 		GYROS_PR_ERR("gyrohub_WriteCalibration failed!\n");
 		return -1;
 	}
+#endif
 	return 0;
 }
 static int gyrohub_factory_get_cali(int32_t data[3])
 {
 	int err = 0;
+#ifndef MTK_OLD_FACTORY_CALIBRATION
+	struct gyrohub_ipi_data *obj = obj_ipi_data;
+	uint8_t status = 0;
+#endif
 
+#ifdef MTK_OLD_FACTORY_CALIBRATION
 	err = gyrohub_ReadCalibration(data);
 	if (err) {
 		GYROS_PR_ERR("gyrohub_ReadCalibration failed!\n");
 		return -1;
 	}
-	return 0;
+#else
+	init_completion(&obj->calibration_done);
+	err = wait_for_completion_timeout(&obj->calibration_done, msecs_to_jiffies(3000));
+	if (!err) {
+		GYROS_PR_ERR("gyrohub_factory_get_cali fail!\n");
+		return -1;
+	}
+	spin_lock(&calibration_lock);
+	data[GYROHUB_AXIS_X] = obj->static_cali[GYROHUB_AXIS_X];
+	data[GYROHUB_AXIS_Y] = obj->static_cali[GYROHUB_AXIS_Y];
+	data[GYROHUB_AXIS_Z] = obj->static_cali[GYROHUB_AXIS_Z];
+	status = obj->static_cali_status;
+	spin_unlock(&calibration_lock);
+	if (status != 0) {
+		GYROS_LOG("gyrohub static cali detect shake!\n");
+		return -2;
+	}
+#endif
+	return err;
 }
 static int gyrohub_factory_do_self_test(void)
 {
@@ -639,6 +712,7 @@ static int gyrohub_set_cali(uint8_t *data, uint8_t count)
 	int32_t *buf = (int32_t *)data;
 	struct gyrohub_ipi_data *obj = obj_ipi_data;
 
+	spin_lock(&calibration_lock);
 	obj->dynamic_cali[0] = buf[0];
 	obj->dynamic_cali[1] = buf[1];
 	obj->dynamic_cali[2] = buf[2];
@@ -653,6 +727,7 @@ static int gyrohub_set_cali(uint8_t *data, uint8_t count)
 	obj->temperature_cali[3] = buf[9];
 	obj->temperature_cali[4] = buf[10];
 	obj->temperature_cali[5] = buf[11];
+	spin_unlock(&calibration_lock);
 	return sensor_cfg_to_hub(ID_GYROSCOPE, data, count);
 }
 
@@ -753,6 +828,7 @@ static int gyrohub_probe(struct platform_device *pdev)
 	WRITE_ONCE(obj->factory_enable, false);
 	WRITE_ONCE(obj->android_enable, false);
 	INIT_WORK(&obj->init_done_work, scp_init_work_done);
+	init_completion(&obj->calibration_done);
 
 	err = gpio_config();
 	if (err < 0) {

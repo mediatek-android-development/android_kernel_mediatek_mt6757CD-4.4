@@ -1741,7 +1741,7 @@ static void directlink_path_add_memory(struct WDMA_CONFIG_STRUCT *p_wdma, enum D
 	/* wait wdma0 sof */
 	cmdqRecWait(cmdq_wait_handle, CMDQ_EVENT_DISP_WDMA0_SOF);
 	cmdqRecFlush(cmdq_wait_handle);
-	DISPCHECK("dl_to_dc capture:Flush wait wdma sof\n");
+	DISPMSG("dl_to_dc capture:Flush wait wdma sof\n");
 out:
 	cmdqRecDestroy(cmdq_handle);
 	cmdqRecDestroy(cmdq_wait_handle);
@@ -3160,7 +3160,7 @@ static int _ovl_fence_release_callback(unsigned long userdata)
 	_primary_path_unlock(__func__);
 
 	/* check last ovl status: should be idle when config */
-	if (primary_display_is_video_mode() && !primary_display_is_decouple_mode()) {
+	if (primary_display_is_video_mode() && primary_display_is_directlink_mode()) {
 		unsigned int status;
 
 		cmdqBackupReadSlot(pgc->ovl_status_info, 0, &status);
@@ -3179,6 +3179,7 @@ static int _ovl_fence_release_callback(unsigned long userdata)
 			/* ovl is not idle !! */
 			DISPERR("disp ovl status error!! stat=0x%x\n", status);
 			/* disp_aee_print("ovl_stat 0x%x\n", status); */
+
 			mmprofile_log_ex(ddp_mmp_get_events()->primary_error, MMPROFILE_FLAG_PULSE, status, 0);
 			primary_display_diagnose();
 			ret = -1;
@@ -4137,13 +4138,13 @@ int primary_display_wait_for_vsync(void *config)
 
 	if (pgc->force_fps_keep_count && pgc->force_fps_skip_count) {
 		g_keep++;
-		DISPCHECK("vsync|keep %d\n", g_keep);
+		DISPMSG("vsync|keep %d\n", g_keep);
 		if (g_keep == pgc->force_fps_keep_count) {
 			g_keep = 0;
 
 			while (g_skip != pgc->force_fps_skip_count) {
 				g_skip++;
-				DISPCHECK("vsync|skip %d\n", g_skip);
+				DISPMSG("vsync|skip %d\n", g_skip);
 				ret =
 				    dpmgr_wait_event_timeout(pgc->dpmgr_handle,
 							     DISP_PATH_EVENT_IF_VSYNC, HZ / 10);
@@ -5689,8 +5690,11 @@ static int _config_ovl_input(struct disp_frame_cfg_t *cfg,
 			sub |= hrt_level << 16;
 		cmdqRecBackupUpdateSlot(cmdq_handle, pgc->subtractor_when_free, layer, sub);
 	}
-	if (primary_display_is_video_mode() && !primary_display_is_decouple_mode()) {
-		unsigned long ovl_base = ovl_base_addr(DISP_MODULE_OVL1_2L);
+
+	/* check last ovl status: should be idle when config */
+	if (primary_display_is_video_mode() && primary_display_is_directlink_mode()) {
+		/* 57 last ovl is ovl0_2l. */
+		unsigned long ovl_base = ovl_base_addr(DISP_MODULE_OVL0_2L);
 
 		cmdqRecBackupRegisterToSlot(cmdq_handle, pgc->ovl_status_info,
 					    0, disp_addr_convert(DISP_REG_OVL_STA + ovl_base));
@@ -6586,6 +6590,7 @@ int primary_display_setbacklight(unsigned int level)
 {
 	int ret = 0;
 	static unsigned int last_level;
+	bool aal_is_support = disp_aal_is_support();
 
 	DISPFUNC();
 	if (disp_helper_get_stage() != DISP_HELPER_STAGE_NORMAL) {
@@ -6597,11 +6602,13 @@ int primary_display_setbacklight(unsigned int level)
 		return 0;
 
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_START, 0, 0);
-#ifndef CONFIG_MTK_AAL_SUPPORT
-	_primary_path_switch_dst_lock();
 
-	_primary_path_lock(__func__);
-#endif
+	if (aal_is_support == false) {
+		_primary_path_switch_dst_lock();
+
+		_primary_path_lock(__func__);
+	}
+
 	if (pgc->state == DISP_SLEPT) {
 		DISPERR("Sleep State set backlight invald\n");
 	} else {
@@ -6620,11 +6627,13 @@ int primary_display_setbacklight(unsigned int level)
 		}
 		last_level = level;
 	}
-#ifndef CONFIG_MTK_AAL_SUPPORT
-	_primary_path_unlock(__func__);
 
-	_primary_path_switch_dst_unlock();
-#endif
+	if (aal_is_support == false) {
+		_primary_path_unlock(__func__);
+
+		_primary_path_switch_dst_unlock();
+	}
+
 	mmprofile_log_ex(ddp_mmp_get_events()->primary_set_bl, MMPROFILE_FLAG_END, 0, 0);
 	return ret;
 }
@@ -6911,11 +6920,11 @@ static int _screen_cap_by_cmdq(unsigned int mva, enum UNIFIED_COLOR_FMT ufmt, en
 
 	_cmdq_set_config_handle_dirty_mira(cmdq_handle);
 	_cmdq_flush_config_handle_mira(cmdq_handle, 0);
-	DISPCHECK("primary capture:Flush add memout mva(0x%x)\n", mva);
+	DISPMSG("primary capture:Flush add memout mva(0x%x)\n", mva);
 	/* wait wdma0 sof */
 	cmdqRecWait(cmdq_wait_handle, CMDQ_EVENT_DISP_WDMA0_SOF);
 	cmdqRecFlush(cmdq_wait_handle);
-	DISPCHECK("primary capture:Flush wait wdma sof\n");
+	DISPMSG("primary capture:Flush wait wdma sof\n");
 	cmdqRecReset(cmdq_handle);
 	_cmdq_handle_clear_dirty(cmdq_handle);
 	_cmdq_insert_wait_frame_done_token_mira(cmdq_handle);
@@ -6926,7 +6935,7 @@ static int _screen_cap_by_cmdq(unsigned int mva, enum UNIFIED_COLOR_FMT ufmt, en
 	_cmdq_set_config_handle_dirty_mira(cmdq_handle);
 	/* flush remove memory to cmdq */
 	_cmdq_flush_config_handle_mira(cmdq_handle, 1);
-	DISPCHECK("primary capture: Flush remove memout\n");
+	DISPMSG("primary capture: Flush remove memout\n");
 
 	dpmgr_path_memout_clock(pgc->dpmgr_handle, 0);
 	_primary_path_unlock(__func__);

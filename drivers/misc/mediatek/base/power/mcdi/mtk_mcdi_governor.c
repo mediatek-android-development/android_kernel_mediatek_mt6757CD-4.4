@@ -87,6 +87,20 @@ static struct all_cpu_idle all_cpu_idle_data = {
 
 static DEFINE_SPINLOCK(all_cpu_idle_spin_lock);
 
+unsigned int mcdi_get_gov_data_num_mcusys(void)
+{
+	unsigned long flags;
+	unsigned int ret;
+
+	spin_lock_irqsave(&mcdi_gov_spin_lock, flags);
+
+	ret = mcdi_gov_data.num_mcusys;
+
+	spin_unlock_irqrestore(&mcdi_gov_spin_lock, flags);
+
+	return ret;
+}
+
 void set_mcdi_enable_by_pm_qos(bool en)
 {
 	s32 latency_req = en ? PM_QOS_DEFAULT_VALUE : 2;
@@ -309,13 +323,33 @@ bool other_cpu_off_but_cluster_on(int cpu)
 	unsigned int cpu_check_mask =
 				get_pwr_stat_check_map(CPU_IN_OTHER_CLUSTER, cpu) & mcdi_gov_data.avail_cpu_mask;
 
+	unsigned int other_cluster_idx =
+				get_pwr_stat_check_map(OTHER_CLUSTER_IDX, cpu);
+
 	on_off_stat = mcdi_mbox_read(MCDI_MBOX_CPU_CLUSTER_PWR_STAT);
 
+	/*
+	 * If there is only 1 available cluster, skip checking
+	 *     (1) The other cluster is offline
+	 *     (2) System only support single cluster
+	 */
 	if (cpu_check_mask == 0 && other_cluster_check_mask == 0)
 		return false;
 
-	if (((on_off_stat & cpu_check_mask) == cpu_check_mask) && (on_off_stat & other_cluster_check_mask) == 0)
-		return true;
+	if (((on_off_stat & cpu_check_mask) == cpu_check_mask) && (on_off_stat & other_cluster_check_mask) == 0) {
+
+		unsigned int other_cluster_will_pdn =
+				mcdi_mbox_read(MCDI_MBOX_CLUSTER_0_ATF_ACTION_DONE + other_cluster_idx);
+
+		/*
+		 * If other cluster is marked as power OFF (ATF afflvl = 1),
+		 * we have to wait until mcdi_controller power OFF completed.
+		 */
+		if (other_cluster_will_pdn)
+			return false;
+		else
+			return true;
+	}
 
 	return false;
 }
@@ -505,7 +539,7 @@ end:
 	return state;
 }
 
-static bool is_mcdi_working(void)
+bool is_mcdi_working(void)
 {
 	unsigned long flags;
 	bool working = false;
@@ -719,6 +753,10 @@ void set_mcdi_enable_status(bool enabled)
 	spin_unlock_irqrestore(&mcdi_feature_stat_spin_lock, flags);
 
 	set_mcdi_enable_by_pm_qos(enabled);
+
+	/* if disabled, wakeup all cpus */
+	if (!enabled)
+		mcdi_wakeup_all_cpu();
 }
 
 void set_mcdi_s_state(int state)
@@ -759,6 +797,50 @@ void set_mcdi_s_state(int state)
 
 	spin_unlock_irqrestore(&mcdi_feature_stat_spin_lock, flags);
 }
+EXPORT_SYMBOL(set_mcdi_s_state);
+
+void set_mcdi_buck_off_mask(unsigned int buck_off_mask)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&mcdi_feature_stat_spin_lock, flags);
+
+	mcdi_feature_stat.buck_off =
+		buck_off_mask & mcdi_get_buck_ctrl_mask();
+	mcdi_mbox_write(MCDI_MBOX_BUCK_POWER_OFF_MASK,
+				mcdi_feature_stat.buck_off);
+
+	spin_unlock_irqrestore(&mcdi_feature_stat_spin_lock, flags);
+}
+
+void mcdi_enable_buck_off(unsigned int enable)
+{
+	if (enable)
+		set_mcdi_buck_off_mask(mcdi_get_buck_ctrl_mask());
+	else
+		set_mcdi_buck_off_mask(0);
+}
+EXPORT_SYMBOL(mcdi_enable_buck_off);
+
+bool mcdi_is_buck_off(int cluster_idx)
+{
+	unsigned long flags;
+	unsigned int buck_off_mask;
+	unsigned int cluster_off;
+
+	spin_lock_irqsave(&mcdi_feature_stat_spin_lock, flags);
+
+	buck_off_mask = mcdi_mbox_read(MCDI_MBOX_BUCK_POWER_OFF_MASK);
+
+	spin_unlock_irqrestore(&mcdi_feature_stat_spin_lock, flags);
+
+	cluster_off = mcdi_mbox_read(MCDI_MBOX_CPU_CLUSTER_PWR_STAT) >> 16;
+
+	if ((cluster_off & buck_off_mask) == (1 << cluster_idx))
+		return true;
+
+	return false;
+}
 
 void mcdi_governor_init(void)
 {
@@ -798,6 +880,7 @@ void get_mcdi_feature_status(struct mcdi_feature_status *stat)
 	stat->enable      = mcdi_feature_stat.enable;
 	stat->pause       = mcdi_feature_stat.pause;
 	stat->cluster_off = mcdi_feature_stat.cluster_off;
+	stat->buck_off    = mcdi_feature_stat.buck_off;
 	stat->any_core    = mcdi_feature_stat.any_core;
 	stat->s_state     = mcdi_feature_stat.s_state;
 

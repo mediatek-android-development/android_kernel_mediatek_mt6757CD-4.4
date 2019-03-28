@@ -20,7 +20,6 @@
 
 #include "lcm_drv.h"
 
-
 #ifdef BUILD_LK
 #include <platform/upmu_common.h>
 #include <platform/mt_gpio.h>
@@ -30,7 +29,7 @@
 #elif defined(BUILD_UBOOT)
 #include <asm/arch/mt_gpio.h>
 #else
-#include <linux/regulator/mediatek/mtk_regulator.h>
+#include "disp_dts_gpio.h"
 #endif
 
 #ifdef BUILD_LK
@@ -41,11 +40,10 @@
 #define LCM_LOGD(fmt, args...)  pr_debug("[KERNEL/"LOG_TAG"]"fmt, ##args)
 #endif
 
-#define LCM_ID_NT35695 (0xf5)
+#define LCM_ID_TD4310 (0xf5)
 
 static const unsigned int BL_MIN_LEVEL = 20;
 static LCM_UTIL_FUNCS lcm_util;
-
 
 #define SET_RESET_PIN(v)	(lcm_util.set_reset_pin((v)))
 #define MDELAY(n)		(lcm_util.mdelay(n))
@@ -190,93 +188,6 @@ static void lcm_get_params(LCM_PARAMS *params)
     params->dsi.lcm_esd_check_table[0].para_list[0] = 28;
 }
 
-static struct mtk_regulator disp_bias_pos;
-static struct mtk_regulator disp_bias_neg;
-static int regulator_inited;
-
-static int display_bias_regulator_init(void)
-{
-	int ret;
-
-	if (!regulator_inited) {
-		/* please only get regulator once in a driver */
-		ret = mtk_regulator_get(NULL, "dsv_pos", &disp_bias_pos);
-		if (ret < 0) { /* handle return value */
-			pr_err("get dsv_pos fail\n");
-			return -1;
-		}
-
-		ret = mtk_regulator_get(NULL, "dsv_neg", &disp_bias_neg);
-		if (ret < 0) { /* handle return value */
-			pr_err("get dsv_pos fail\n");
-			return -1;
-		}
-
-		regulator_inited = 1;
-		return ret;
-	}
-	return 0;
-}
-
-static int display_bias_enable(void)
-{
-	int ret = 0;
-
-	ret = display_bias_regulator_init();
-	if (ret)
-		return ret;
-
-	/* set voltage with min & max*/
-	ret = mtk_regulator_set_voltage(&disp_bias_pos, 5400000, 5400000);
-	if (ret < 0)
-		pr_err("set voltage disp_bias_pos fail\n");
-
-	ret = mtk_regulator_set_voltage(&disp_bias_neg, 5400000, 5400000);
-	if (ret < 0)
-		pr_err("set voltage disp_bias_neg fail\n");
-
-#if 0
-	/* get voltage */
-	ret = mtk_regulator_get_voltage(&disp_bias_pos);
-	if (ret < 0)
-		pr_err("get voltage disp_bias_pos fail\n");
-	pr_debug("pos voltage = %d\n", ret);
-
-	ret = mtk_regulator_get_voltage(&disp_bias_neg);
-	if (ret < 0)
-		pr_err("get voltage disp_bias_neg fail\n");
-	pr_debug("neg voltage = %d\n", ret);
-#endif
-	/* enable regulator */
-	ret = mtk_regulator_enable(&disp_bias_pos, true);
-	if (ret < 0)
-		pr_err("enable regulator disp_bias_pos fail\n");
-
-	ret = mtk_regulator_enable(&disp_bias_neg, true);
-	if (ret < 0)
-		pr_err("enable regulator disp_bias_neg fail\n");
-	return ret;
-}
-
-static int display_bias_disable(void)
-{
-	int ret = 0;
-
-	ret = display_bias_regulator_init();
-	if (ret)
-		return ret;
-
-	ret |= mtk_regulator_enable(&disp_bias_neg, false);
-	if (ret < 0)
-		pr_err("disable regulator disp_bias_neg fail\n");
-
-	ret |= mtk_regulator_enable(&disp_bias_pos, false);
-	if (ret < 0)
-		pr_err("disable regulator disp_bias_pos fail\n");
-
-	return ret;
-}
-
 static void lcm_init_power(void)
 {
 #ifndef CONFIG_FPGA_EARLY_PORTING
@@ -331,7 +242,7 @@ static unsigned int lcm_compare_id(void)
 static void lcm_setbacklight_cmdq(void *handle, unsigned int level)
 {
 
-	LCM_LOGI("%s,td431 backlight: level = %d\n", __func__, level);
+	LCM_LOGI("%s,td4310 backlight: level = %d\n", __func__, level);
 
 	bl_level[0].para_list[0] = level;
 

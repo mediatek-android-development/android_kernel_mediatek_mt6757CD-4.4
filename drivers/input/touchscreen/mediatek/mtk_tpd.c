@@ -19,6 +19,7 @@
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/fb.h>
+#include <linux/pinctrl/consumer.h>
 #ifdef CONFIG_MTK_MT6306_GPIO_SUPPORT
 #include <mach/mtk_6306_gpio.h>
 #endif
@@ -48,43 +49,65 @@ struct pinctrl *pinctrl1;
 struct pinctrl_state *pins_default;
 struct pinctrl_state *eint_as_int, *eint_output0, *eint_output1, *rst_output0, *rst_output1;
 const struct of_device_id touch_of_match[] = {
-	{ .compatible = "mediatek,mt6735-touch", },
-	{ .compatible = "mediatek,mt6580-touch", },
 	{ .compatible = "mediatek,mt8173-touch", },
-	{ .compatible = "mediatek,mt6755-touch", },
 	{ .compatible = "mediatek,mt6757-touch", },
 	{ .compatible = "mediatek,mt6763-touch", },
-	{ .compatible = "mediatek,mt3886-touch", },
 	{ .compatible = "mediatek,mt6797-touch", },
 	{ .compatible = "mediatek,mt8163-touch", },
 	{ .compatible = "mediatek,mt8127-touch", },
 	{ .compatible = "mediatek,mt2701-touch", },
 	{ .compatible = "mediatek,mt7623-touch", },
-	{ .compatible = "mediatek,elbrus-touch", },
 	{ .compatible = "mediatek,mt6799-touch", },
 	{ .compatible = "mediatek,mt6739-touch", },
+	{ .compatible = "mediatek,mt6771-touch", },
 	{ .compatible = "mediatek,touch", },
 	{},
 };
 
+/* Vanzo:yangzhihong on: Thu, 25 Feb 2016 20:47:40 +0800
+ */
+#if CFG_TPD_USE_BUTTON
+static int tpd_keys_local[CFG_TPD_KEY_COUNT] = CFG_TPD_KEYS;
+static int tpd_keys_dim_local[CFG_TPD_KEY_COUNT][4] = CFG_TPD_KEYS_DIM;
+#endif
+// End of Vanzo:yangzhihong
 void tpd_get_dts_info(void)
 {
 	struct device_node *node1 = NULL;
-	int key_dim_local[16], i;
+    int i,ret;
+	//int key_dim_local[16], i, ret;
 
 	node1 = of_find_matching_node(node1, touch_of_match);
 	if (node1) {
-		of_property_read_u32(node1, "tpd-max-touch-num", &tpd_dts_data.touch_max_num);
-		of_property_read_u32(node1, "use-tpd-button", &tpd_dts_data.use_tpd_button);
-		pr_debug("[tpd]use-tpd-button = %d\n", tpd_dts_data.use_tpd_button);
-		of_property_read_u32_array(node1, "tpd-resolution",
+/* Vanzo:yangzhihong on: Thu, 25 Feb 2016 20:33:41 +0800
+ * TODO: Don't get tpd parameter from dts
+ */
+#if 0
+		ret = of_property_read_u32(node1, "tpd-max-touch-num", &tpd_dts_data.touch_max_num);
+		if (ret != 0)
+			TPD_DEBUG("tpd-max-touch-num not found\n");
+		ret = of_property_read_u32(node1, "use-tpd-button", &tpd_dts_data.use_tpd_button);
+		if (ret != 0)
+			TPD_DEBUG("use-tpd-button not found\n");
+		else
+			TPD_DEBUG("[tpd]use-tpd-button = %d\n", tpd_dts_data.use_tpd_button);
+		ret = of_property_read_u32_array(node1, "tpd-resolution",
 			tpd_dts_data.tpd_resolution, ARRAY_SIZE(tpd_dts_data.tpd_resolution));
+		if (ret != 0)
+			TPD_DEBUG("tpd-resolution not found\n");
 		if (tpd_dts_data.use_tpd_button) {
-			of_property_read_u32(node1, "tpd-key-num", &tpd_dts_data.tpd_key_num);
-			of_property_read_u32_array(node1, "tpd-key-local",
+			ret = of_property_read_u32(node1, "tpd-key-num", &tpd_dts_data.tpd_key_num);
+			if (ret != 0)
+				TPD_DEBUG("tpd-key-num not found\n");
+			ret = of_property_read_u32_array(node1, "tpd-key-local",
 				tpd_dts_data.tpd_key_local, ARRAY_SIZE(tpd_dts_data.tpd_key_local));
-			of_property_read_u32_array(node1, "tpd-key-dim-local",
+			if (ret != 0)
+				TPD_DEBUG("tpd-key-local not found\n");
+			ret = of_property_read_u32_array(node1, "tpd-key-dim-local",
 				key_dim_local, ARRAY_SIZE(key_dim_local));
+			if (ret != 0)
+				TPD_DEBUG("tpd-key-dim-local not found\n");
+
 			memcpy(tpd_dts_data.tpd_key_dim_local, key_dim_local, sizeof(key_dim_local));
 			for (i = 0; i < 4; i++) {
 				pr_debug("[tpd]key[%d].key_x = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_x);
@@ -93,22 +116,71 @@ void tpd_get_dts_info(void)
 				pr_debug("[tpd]key[%d].key_H = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_height);
 			}
 		}
-		of_property_read_u32(node1, "tpd-filter-enable", &tpd_dts_data.touch_filter.enable);
+#else
+        tpd_dts_data.touch_max_num = CFG_TPD_MAX_TOUCH_NUM;
+
+        tpd_dts_data.tpd_resolution[0] = CFG_TPD_WIDTH;
+        tpd_dts_data.tpd_resolution[1] = CFG_TPD_HEIGHT;
+
+        tpd_dts_data.use_tpd_button = CFG_TPD_USE_BUTTON;
+
+#if CFG_TPD_USE_BUTTON
+        if(tpd_dts_data.use_tpd_button){
+
+          tpd_dts_data.tpd_key_num = CFG_TPD_KEY_COUNT;
+
+          for(i=0; i<4; i++) {
+            tpd_dts_data.tpd_key_local[i] = tpd_keys_local[i];
+
+            tpd_dts_data.tpd_key_dim_local[i].key_x = tpd_keys_dim_local[i][0];
+            tpd_dts_data.tpd_key_dim_local[i].key_y = tpd_keys_dim_local[i][1];
+            tpd_dts_data.tpd_key_dim_local[i].key_width = tpd_keys_dim_local[i][2];
+            tpd_dts_data.tpd_key_dim_local[i].key_height = tpd_keys_dim_local[i][3];
+
+            pr_info("[tpd]key[%d].key_x = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_x);
+            pr_info("[tpd]key[%d].key_y = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_y);
+            pr_info("[tpd]key[%d].key_W = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_width);
+            pr_info("[tpd]key[%d].key_H = %d\n", i, tpd_dts_data.tpd_key_dim_local[i].key_height);
+          }
+        }
+#endif
+        tpd_dts_data.tpd_switch_vkey = 0;    
+#endif
+// End of Vanzo:yangzhihong
+/* Vanzo:wuchuanrong on: Wed, 14 Mar 2018 16:51:49 +0800
+ * TODO: modify abort multi-touch
+		ret = of_property_read_u32(node1, "tpd-filter-enable", &tpd_dts_data.touch_filter.enable);
+		if (ret != 0)
+			TPD_DEBUG("tpd-filter-enable not found\n");
+ */
+            tpd_dts_data.touch_filter.enable = 0;
+// End of Vanzo: wuchuanrong
 		if (tpd_dts_data.touch_filter.enable) {
-			of_property_read_u32(node1, "tpd-filter-pixel-density",
+			ret = of_property_read_u32(node1, "tpd-filter-pixel-density",
 						&tpd_dts_data.touch_filter.pixel_density);
-			of_property_read_u32_array(node1, "tpd-filter-custom-prameters",
+			if (ret != 0)
+				TPD_DEBUG("tpd-filter-pixel-density not found\n");
+			ret = of_property_read_u32_array(node1, "tpd-filter-custom-prameters",
 				(u32 *)tpd_dts_data.touch_filter.W_W, ARRAY_SIZE(tpd_dts_data.touch_filter.W_W));
-			of_property_read_u32_array(node1, "tpd-filter-custom-speed",
+			if (ret != 0)
+				TPD_DEBUG("tpd-filter-custom-prameters not found\n");
+			ret = of_property_read_u32_array(node1, "tpd-filter-custom-speed",
 				tpd_dts_data.touch_filter.VECLOCITY_THRESHOLD,
 				ARRAY_SIZE(tpd_dts_data.touch_filter.VECLOCITY_THRESHOLD));
+			if (ret != 0)
+				TPD_DEBUG("tpd-filter-custom-speed not found\n");
 		}
 		memcpy(&tpd_filter, &tpd_dts_data.touch_filter, sizeof(tpd_filter));
-		pr_debug("[tpd]tpd-filter-enable = %d, pixel_density = %d\n",
+		TPD_DEBUG("[tpd]tpd-filter-enable = %d, pixel_density = %d\n",
 					tpd_filter.enable, tpd_filter.pixel_density);
+/* Vanzo:wuchuanrong on: Wed, 14 Mar 2018 16:54:10 +0800
+ * TODO: Don't get tpd parameter from dts
 		tpd_dts_data.tpd_use_ext_gpio = of_property_read_bool(node1, "tpd-use-ext-gpio");
-		of_property_read_u32(node1, "tpd-rst-ext-gpio-num", &tpd_dts_data.rst_ext_gpio_num);
-
+		ret = of_property_read_u32(node1, "tpd-rst-ext-gpio-num", &tpd_dts_data.rst_ext_gpio_num);
+		if (ret != 0)
+			TPD_DEBUG("tpd-rst-ext-gpio-num not found\n");
+ */
+// End of Vanzo: wuchuanrong
 	} else {
 		pr_err("[tpd]%s can't find touch compatible custom node\n", __func__);
 	}
@@ -524,7 +596,8 @@ pr_err("Lomen 1\n");
 	#ifdef CONFIG_MTK_LCM_PHYSICAL_ROTATION
 	if (strncmp(CONFIG_MTK_LCM_PHYSICAL_ROTATION, "90", 2) == 0
 		|| strncmp(CONFIG_MTK_LCM_PHYSICAL_ROTATION, "270", 3) == 0) {
-#ifdef CONFIG_MTK_FB	/*Fix build errors,as some projects  cannot support these apis while bring up*/
+/*Fix build errors,as some projects  cannot support these apis while bring up*/
+#if defined(CONFIG_MTK_FB) && defined(CONFIG_MTK_LCM)
 		TPD_RES_Y = DISP_GetScreenWidth();
 		TPD_RES_X = DISP_GetScreenHeight();
 #endif
@@ -533,7 +606,8 @@ pr_err("Lomen 1\n");
 	{
 #ifdef CONFIG_CUSTOM_LCM_X
 #ifndef CONFIG_FPGA_EARLY_PORTING
-#ifdef CONFIG_MTK_FB	/*Fix build errors,as some projects  cannot support these apis while bring up*/
+/*Fix build errors,as some projects  cannot support these apis while bring up*/
+#if defined(CONFIG_MTK_FB) && defined(CONFIG_MTK_LCM)
 		TPD_RES_X = DISP_GetScreenWidth();
 		TPD_RES_Y = DISP_GetScreenHeight();
 #else/*for some projects, we do not use mtk framebuffer*/

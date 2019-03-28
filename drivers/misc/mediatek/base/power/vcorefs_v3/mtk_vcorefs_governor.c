@@ -28,11 +28,22 @@
 #include <mtk_vcorefs_manager.h>
 
 #include <mtk_spm_vcore_dvfs.h>
-#if !defined(CONFIG_MACH_MT6758) /* TODO: 6758 EP */
+#if defined(CONFIG_MTK_DRAMC)
 #include <mtk_dramc.h>
 #endif
 #include <mtk_eem.h>
 #include "mmdvfs_mgr.h"
+
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+#include <mtk_dvfsrc_reg.h>
+#include <helio-dvfsrc-opp.h>
+#include <mtk_spm_vcore_dvfs_ipi.h>
+#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
+#include <sspm_ipi.h>
+#include <sspm_ipi_pin.h>
+#endif
+
+#endif
 
 __weak unsigned int get_dram_data_rate(void)
 {
@@ -79,6 +90,8 @@ __weak unsigned int get_vcore_ptp_volt(unsigned int seg)
 
 	vcorefs_crit("VCORE TEMP SETTING\n");
 	return value;
+#elif defined(CONFIG_MACH_MT6775)
+	return 0;
 #else
 	vcorefs_crit("NOT SUPPORT VOLTAG BIN\n");
 	return 0;
@@ -108,6 +121,11 @@ __weak void mmdvfs_notify_prepare_action(struct mmdvfs_prepare_action_event *eve
 	vcorefs_crit("NOT SUPPORT MM DVFS NOTIFY\n");
 }
 
+__weak unsigned short pmic_get_register_value(PMU_FLAGS_LIST_ENUM flagname)
+{
+	vcorefs_crit("PMIC FUNCTION IS NOT SUPPORTED\n");
+	return 0;
+}
 /*
  * __nosavedata will not be restored after IPO-H boot
  */
@@ -148,6 +166,7 @@ static struct governor_profile governor_ctrl = {
 };
 
 int kicker_table[LAST_KICKER] __nosavedata;
+EXPORT_SYMBOL(kicker_table);
 
 static struct opp_profile opp_table[NUM_OPP] __nosavedata;
 
@@ -195,13 +214,11 @@ void vcorefs_update_opp_table(void)
  */
 bool is_vcorefs_feature_enable(void)
 {
-#if 1
-#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6758) /* TODO: 6759 EP */
+#if !defined(CONFIG_MACH_MT6759) && !defined(CONFIG_MACH_MT6758)  && !defined(CONFIG_MACH_MT6775)
 	if (!dram_can_support_fh()) {
 		vcorefs_err("DISABLE DVFS DUE TO NOT SUPPORT DRAM FH\n");
 		return false;
 	}
-#endif
 #endif
 	if (!spm_load_firmware_status()) {
 		vcorefs_err("SPM FIRMWARE IS NOT READY\n");
@@ -209,7 +226,9 @@ bool is_vcorefs_feature_enable(void)
 	}
 
 	if (!vcorefs_vcore_dvs_en() && !vcorefs_dram_dfs_en()) {
+#if !defined(CONFIG_MACH_MT6771)
 		vcorefs_err("DISABLE DVFS DUE TO BOTH DVS & DFS DISABLE\n");
+#endif
 		return false;
 	}
 	if (0) {
@@ -218,6 +237,27 @@ bool is_vcorefs_feature_enable(void)
 	}
 
 	return true;
+}
+
+void vcorefs_set_vcore_dvs_en(bool val)
+{
+	struct governor_profile *gvrctrl = &governor_ctrl;
+
+	gvrctrl->vcore_dvs = val;
+}
+
+void vcorefs_set_ddr_dfs_en(bool val)
+{
+	struct governor_profile *gvrctrl = &governor_ctrl;
+
+	gvrctrl->ddr_dfs = val;
+}
+
+void vcorefs_set_mm_clk_en(bool val)
+{
+	struct governor_profile *gvrctrl = &governor_ctrl;
+
+	gvrctrl->mm_clk = val;
 }
 
 bool vcorefs_vcore_dvs_en(void)
@@ -260,10 +300,10 @@ int vcorefs_enable_debug_isr(bool enable)
 	gvrctrl->isr_debug = enable;
 
 	flag = spm_dvfs_flag_init();
-
+#if !defined(CONFIG_MACH_MT6771)
 	if (enable)
 		flag |= SPM_FLAG_EN_MET_DBG_FOR_VCORE_DVFS;
-
+#endif
 	spm_go_to_vcorefs(flag);
 
 	mutex_unlock(&governor_mutex);
@@ -275,11 +315,13 @@ int vcorefs_get_num_opp(void)
 {
 	return NUM_OPP;
 }
+EXPORT_SYMBOL(vcorefs_get_num_opp);
 
 int vcorefs_get_hw_opp(void)
 {
 	return spm_vcorefs_get_opp();
 }
+EXPORT_SYMBOL(vcorefs_get_hw_opp);
 
 int vcorefs_get_sw_opp(void)
 {
@@ -300,6 +342,7 @@ int vcorefs_get_curr_vcore(void)
 	return 0;
 #endif
 }
+EXPORT_SYMBOL(vcorefs_get_curr_vcore);
 
 int vcorefs_get_curr_ddr(void)
 {
@@ -313,13 +356,14 @@ int vcorefs_get_curr_ddr(void)
 	return 0;
 #endif
 }
+EXPORT_SYMBOL(vcorefs_get_curr_ddr);
 
 int vcorefs_get_vcore_by_steps(u32 opp)
 {
-#if 1
-	return vcore_pmic_to_uv(get_vcore_ptp_volt(opp));
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+	return get_vcore_opp_volt(opp);
 #else
-	return 0;
+	return vcore_pmic_to_uv(get_vcore_ptp_volt(opp));
 #endif
 }
 
@@ -340,6 +384,7 @@ char *governor_get_kicker_name(int id)
 {
 	return kicker_name[id];
 }
+EXPORT_SYMBOL(governor_get_kicker_name);
 
 char *vcorefs_get_opp_table_info(char *p)
 {
@@ -388,8 +433,15 @@ static void set_vcorefs_en(void)
 	flag = spm_dvfs_flag_init();
 	spm_go_to_vcorefs(flag);
 	mutex_unlock(&governor_mutex);
-#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758)
+#if defined(CONFIG_MACH_MT6759) || defined(CONFIG_MACH_MT6758) || defined(CONFIG_MACH_MT6771)
 	vcorefs_late_init_dvfs();
+#endif
+#if defined(CONFIG_MACH_MT6771)
+#if defined(CONFIG_MTK_TINYSYS_SSPM_SUPPORT)
+	dvfsrc_update_sspm_qos_enable(is_vcorefs_feature_enable(), __spm_get_dram_type());
+	vcorefs_crit("[%s] dvfsrc_update_sspm_qos_enable(%d, %d)\n",
+			__func__, is_vcorefs_feature_enable(), __spm_get_dram_type());
+#endif
 #endif
 }
 
@@ -412,6 +464,8 @@ int governor_debug_store(const char *buf)
 
 		if (!strcmp(cmd, "emibw"))
 			r = vcorefs_set_emi_bw_ctrl(val, val2);
+		else if (!strcmp(cmd, "spmdvfs"))
+			spm_request_dvfs_opp(val, val2);
 		else
 			r = -EPERM;
 
@@ -441,7 +495,16 @@ int governor_debug_store(const char *buf)
 		} else if (!strcmp(cmd, "isr_debug")) {
 			vcorefs_enable_debug_isr(val);
 		} else if (!strcmp(cmd, "i_hwpath")) {
-			gvrctrl->i_hwpath = val;
+			gvrctrl->i_hwpath = !!val;
+#if defined(CONFIG_MACH_MT6771)
+			dvfsrc_hw_policy_mask(gvrctrl->i_hwpath);
+		} else if (!strcmp(cmd, "lt_opp_feature")) {
+			vcorefs_set_lt_opp_feature(!!val);
+		} else if (!strcmp(cmd, "lt_opp_enter_temp")) {
+			vcorefs_set_lt_opp_enter_temp(val);
+		} else if (!strcmp(cmd, "lt_opp_leave_temp")) {
+			vcorefs_set_lt_opp_leave_temp(val);
+#endif
 		} else {
 			r = -EPERM;
 		}
@@ -547,6 +610,119 @@ int vcorefs_late_init_dvfs(void)
 	return 0;
 }
 
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+void dvfsrc_force_opp(int opp)
+{
+	int level;
+
+	if (opp >= VCORE_DVFS_OPP_NUM || opp < 0) {
+		writel(readl(DVFSRC_BASIC_CONTROL) & ~(1 << 15), DVFSRC_BASIC_CONTROL);
+		writel(readl(DVFSRC_FORCE) & 0xFFFF0000, DVFSRC_FORCE);
+	} else {
+		level = 1 << (VCORE_DVFS_OPP_NUM - opp - 1);
+		writel((readl(DVFSRC_FORCE) & 0xFFFF0000) | level, DVFSRC_FORCE);
+		writel(readl(DVFSRC_BASIC_CONTROL) | (1 << 15), DVFSRC_BASIC_CONTROL);
+		writel(readl(DVFSRC_FORCE) & 0xFFFF0000, DVFSRC_FORCE);
+	}
+}
+#endif
+
+#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+int qos_ipi_to_sspm_command(void *buffer, int slot)
+{
+	int ack_data;
+
+	return sspm_ipi_send_sync(IPI_ID_QOS, IPI_OPT_POLLING, buffer, slot, &ack_data, 1);
+}
+
+void dvfsrc_update_sspm_vcore_opp_table(int opp, unsigned int vcore_uv)
+{
+	struct qos_data qos_d;
+
+	qos_d.cmd = QOS_IPI_VCORE_OPP;
+	qos_d.u.vcore_opp.opp = opp;
+	qos_d.u.vcore_opp.vcore_uv = vcore_uv;
+
+	qos_ipi_to_sspm_command(&qos_d, 3);
+}
+
+void dvfsrc_update_sspm_ddr_opp_table(int opp, unsigned int ddr_khz)
+{
+	struct qos_data qos_d;
+
+	qos_d.cmd = QOS_IPI_DDR_OPP;
+	qos_d.u.ddr_opp.opp = opp;
+	qos_d.u.ddr_opp.ddr_khz = ddr_khz;
+
+	qos_ipi_to_sspm_command(&qos_d, 3);
+}
+
+void dvfsrc_update_sspm_qos_enable(int dvfs_en, unsigned int dram_type)
+{
+	struct qos_data qos_d;
+
+	qos_d.cmd = QOS_IPI_QOS_ENABLE;
+	qos_d.u.qos_init.enable = 1;
+	qos_d.u.qos_init.dvfs_en = dvfs_en;
+	qos_d.u.qos_init.spm_dram_type = dram_type;
+
+	qos_ipi_to_sspm_command(&qos_d, 4);
+}
+
+#endif
+#endif
+
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+int dvfsrc_get_bw(int type)
+{
+	int ret = 0;
+	int i;
+
+	switch (type) {
+	case QOS_TOTAL:
+		ret = readl(QOS_TOTAL_BW);
+		break;
+	case QOS_CPU:
+		ret = readl(QOS_CPU_BW);
+		break;
+	case QOS_MM:
+		ret = readl(QOS_MM_BW);
+		break;
+	case QOS_GPU:
+		ret = readl(QOS_GPU_BW);
+		break;
+	case QOS_MD_PERI:
+		ret = readl(QOS_MD_PERI_BW);
+		break;
+	case QOS_TOTAL_AVE:
+		for (i = 0; i < QOS_TOTAL_BW_BUF_SIZE; i++)
+			ret += readl(QOS_TOTAL_BW_BUF(i));
+		ret /= QOS_TOTAL_BW_BUF_SIZE;
+		break;
+	default:
+		break;
+	}
+
+	return ret;
+}
+#endif
+
+#if defined(CONFIG_MACH_MT6775)
+int get_cur_vcore_dvfs_opp(void)
+{
+	int dvfsrc_level_bit = readl(DVFSRC_LEVEL) >> 16;
+	int dvfsrc_level = 0;
+
+	for (dvfsrc_level = 0; dvfsrc_level < VCORE_DVFS_OPP_NUM - 1; dvfsrc_level++)
+		if ((dvfsrc_level_bit & (1 << dvfsrc_level)) > 0)
+			break;
+
+	return VCORE_DVFS_OPP_NUM - dvfsrc_level - 1;
+}
+
+#endif
+
 void vcorefs_init_opp_table(void)
 {
 	struct governor_profile *gvrctrl = &governor_ctrl;
@@ -565,12 +741,25 @@ void vcorefs_init_opp_table(void)
 		opp_ctrl_table[opp].vcore_uv = vcorefs_get_vcore_by_steps(opp);
 		opp_ctrl_table[opp].ddr_khz = vcorefs_get_ddr_by_steps(opp);
 
+#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+		dvfsrc_update_sspm_vcore_opp_table(opp,
+				opp_ctrl_table[opp].vcore_uv);
+		dvfsrc_update_sspm_ddr_opp_table(opp,
+				opp_ctrl_table[opp].ddr_khz);
+#endif
+#endif
+
 		vcorefs_crit("opp %u: vcore_uv: %u, ddr_khz: %u\n", opp,
-								opp_ctrl_table[opp].vcore_uv,
-								opp_ctrl_table[opp].ddr_khz);
+				opp_ctrl_table[opp].vcore_uv,
+				opp_ctrl_table[opp].ddr_khz);
 	}
 
+#if defined(CONFIG_MACH_MT6775) || defined(CONFIG_MACH_MT6771)
+	spm_vcorefs_pwarp_cmd();
+#else
 	mt_eem_vcorefs_set_volt();
+#endif
 	mutex_unlock(&governor_mutex);
 }
 

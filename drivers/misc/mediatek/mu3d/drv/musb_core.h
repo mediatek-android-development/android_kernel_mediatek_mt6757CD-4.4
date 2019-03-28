@@ -56,10 +56,8 @@ struct musb;
 struct musb_hw_ep;
 struct musb_ep;
 
-#ifdef CONFIG_MTK_KERNEL_POWER_OFF_CHARGING
 #include <mt-plat/mtk_boot_common.h>
-#endif
-extern u32 fake_CDP;
+extern int fake_CDP;
 extern unsigned int musb_speed;
 
 extern struct musb *_mu3d_musb;
@@ -820,6 +818,10 @@ extern void usb_phy_switch_to_uart(void);
 extern ssize_t musb_cmode_show(struct device *dev, struct device_attribute *attr, char *buf);
 extern ssize_t musb_cmode_store(struct device *dev, struct device_attribute *attr, const char *buf,
 				size_t count);
+extern ssize_t musb_saving_mode_show(struct device *dev, struct device_attribute *attr, char *buf);
+extern ssize_t musb_saving_mode_store(struct device *dev, struct device_attribute *attr, const char *buf,
+				size_t count);
+extern bool is_saving_mode(void);
 
 extern void usb20_pll_settings(bool host, bool forceOn);
 
@@ -844,4 +846,5 @@ extern int typec_switch_usb_connect(void *data);
 extern int mu3d_force_on;
 extern void mt_usb_connect(void);
 extern void mt_usb_connect_test(int start);
+extern void trigger_disconnect_check_work(void);
 #endif	/* __MUSB_CORE_H__ */

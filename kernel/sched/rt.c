@@ -290,8 +290,12 @@ static void pull_rt_task(struct rq *this_rq);
 
 static inline bool need_pull_rt_task(struct rq *rq, struct task_struct *prev)
 {
-	/* Try to pull RT tasks here if we lower this rq's prio */
-	return rq->rt.highest_prio.curr > prev->prio;
+	/*
+	 * Try to pull RT tasks here if we lower this rq's prio and cpu is not
+	 * isolated
+	 */
+	return rq->rt.highest_prio.curr > prev->prio &&
+	       !cpu_isolated(cpu_of(rq));
 }
 
 static inline int rt_overloaded(struct rq *rq)
@@ -957,6 +961,51 @@ static inline int rt_se_prio(struct sched_rt_entity *rt_se)
 	return rt_task_of(rt_se)->prio;
 }
 
+static void dump_throttled_rt_tasks(struct rt_rq *rt_rq)
+{
+	struct rt_prio_array *array = &rt_rq->active;
+	struct sched_rt_entity *rt_se;
+	char buf[500];
+	char *pos = buf;
+	char *end = buf + sizeof(buf);
+	int idx;
+
+	pos += snprintf(pos, sizeof(buf),
+		"sched: RT throttling activated for rt_rq %p (cpu %d)\n",
+		rt_rq, cpu_of(rq_of_rt_rq(rt_rq)));
+
+	if (bitmap_empty(array->bitmap, MAX_RT_PRIO))
+		goto out;
+
+	pos += snprintf(pos, end - pos, "potential CPU hogs:\n");
+	idx = sched_find_first_bit(array->bitmap);
+	while (idx < MAX_RT_PRIO) {
+		list_for_each_entry(rt_se, array->queue + idx, run_list) {
+			struct task_struct *p;
+
+			if (!rt_entity_is_task(rt_se))
+				continue;
+
+			p = rt_task_of(rt_se);
+			if (pos < end)
+				pos += snprintf(pos, end - pos, "\t%s (%d)\n",
+					p->comm, p->pid);
+		}
+		idx = find_next_bit(array->bitmap, MAX_RT_PRIO, idx + 1);
+	}
+out:
+#ifdef CONFIG_PANIC_ON_RT_THROTTLING
+	/*
+	 * Use pr_err() in the BUG() case since printk_sched() will
+	 * not get flushed and deadlock is not a concern.
+	 */
+	pr_err("%s", buf);
+	BUG();
+#else
+	printk_deferred("%s", buf);
+#endif
+}
+
 /* sched:add rt exec info*/
 DEFINE_PER_CPU(u64, rt_throttling_start);
 DEFINE_PER_CPU(u64, exec_delta_time);
@@ -1018,7 +1067,7 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 		if (likely(rt_b->rt_runtime)) {
 			rt_rq->rt_throttled = 1;
 			/* sched:print throttle every time*/
-			printk_deferred("sched: RT throttling activated\n");
+			dump_throttled_rt_tasks(rt_rq);
 #ifdef CONFIG_RT_GROUP_SCHED
 			mt_sched_printf(sched_rt_info, "cpu=%d rt_throttled=%d",
 					cpu, rt_rq->rt_throttled);
@@ -1794,33 +1843,56 @@ extern unsigned int hmp_cpu_is_slowest(int cpu)
 static int mt_sched_interop_rt(int cpu, struct cpumask *lowest_mask)
 {
 	int lowest_cpu = -1, lowest_prio = 0;
+	int lowest_preempt_cpu = -1, lowest_preempt_prio = 0;
+	struct thread_info *ti;
 
 	mt_sched_printf(sched_interop, "current cpu=%d, find idle cpu from cpumask 0x%lx",
 			cpu, lowest_mask->bits[0]);
 
-	if (cpumask_test_cpu(cpu, lowest_mask) && idle_cpu(cpu) && hmp_cpu_is_slowest(cpu))
+	if (cpumask_test_cpu(cpu, lowest_mask) && idle_cpu(cpu) && hmp_cpu_is_slowest(cpu)
+				&& !cpu_isolated(cpu))
 		return cpu;
 
 	for_each_cpu(cpu, lowest_mask) {
 		struct rq *rq;
 		struct task_struct *curr;
 
+		if (cpu_isolated(cpu))
+			continue;
+
 		if (idle_cpu(cpu))
 			return cpu;
 
 		rq = cpu_rq(cpu);
 		curr = rq->curr;
-		if ((curr->sched_class == &fair_sched_class) && (curr->prio > lowest_prio)) {
-			lowest_prio = curr->prio;
-			lowest_cpu = cpu;
+		ti = task_thread_info(curr);
 
-			mt_sched_printf(sched_interop, "lowest_cpu=%d, lowest_prio=%d",
-					lowest_cpu, lowest_prio);
+		if (curr->sched_class == &fair_sched_class) {
+
+			if (ti->preempt_count != 0) {
+				if (curr->prio > lowest_preempt_prio) {
+					lowest_preempt_prio = curr->prio;
+					lowest_preempt_cpu = cpu;
+					mt_sched_printf(sched_interop, "lowest_preempt_cpu=%d, lowest_preempt_prio=%d",
+						lowest_preempt_cpu, lowest_preempt_prio);
+				}
+			} else {
+				if (curr->prio > lowest_prio) {
+					lowest_prio = curr->prio;
+					lowest_cpu = cpu;
+
+					mt_sched_printf(sched_interop, "lowest_cpu=%d, lowest_prio=%d",
+						lowest_cpu, lowest_prio);
+				}
+			}
 		}
 	}
 
 	if (-1 != lowest_cpu)
 		return lowest_cpu;
+
+	if (-1 != lowest_preempt_cpu)
+		return lowest_preempt_cpu;
 
 	return -1;
 }
@@ -1835,6 +1907,14 @@ static int find_lowest_rq(struct task_struct *task)
 #ifdef CONFIG_MTK_SCHED_INTEROP
 	int interop_cpu;
 #endif
+
+	if (sched_boost()) {
+		int idle_cpu;
+
+		idle_cpu = find_best_idle_cpu(task, 1);
+		if (idle_cpu >= 0)
+			return idle_cpu;
+	}
 
 	/* Make sure the mask is initialized first */
 	if (unlikely(!lowest_mask))
@@ -1862,7 +1942,7 @@ static int find_lowest_rq(struct task_struct *task)
 	 * We prioritize the last cpu that the task executed on since
 	 * it is most likely cache-hot in that location.
 	 */
-	if (cpumask_test_cpu(cpu, lowest_mask))
+	if (cpumask_test_cpu(cpu, lowest_mask) && !cpu_isolated(cpu))
 		return cpu;
 
 	/*
@@ -1882,14 +1962,15 @@ static int find_lowest_rq(struct task_struct *task)
 			 * remote processor.
 			 */
 			if (this_cpu != -1 &&
-			    cpumask_test_cpu(this_cpu, sched_domain_span(sd))) {
+			    cpumask_test_cpu(this_cpu, sched_domain_span(sd)) &&
+				!cpu_isolated(this_cpu)) {
 				rcu_read_unlock();
 				return this_cpu;
 			}
 
 			best_cpu = cpumask_first_and(lowest_mask,
 						     sched_domain_span(sd));
-			if (best_cpu < nr_cpu_ids) {
+			if (best_cpu < nr_cpu_ids && !cpu_isolated(best_cpu)) {
 				rcu_read_unlock();
 				return best_cpu;
 			}
@@ -1906,7 +1987,7 @@ static int find_lowest_rq(struct task_struct *task)
 		return this_cpu;
 
 	cpu = cpumask_any(lowest_mask);
-	if (cpu < nr_cpu_ids)
+	if (cpu < nr_cpu_ids && !cpu_isolated(cpu))
 		return cpu;
 	return -1;
 }
@@ -2066,9 +2147,11 @@ retry:
 		goto retry;
 	}
 
+	next_task->on_rq = TASK_ON_RQ_MIGRATING;
 	deactivate_task(rq, next_task, 0);
 	set_task_cpu(next_task, lowest_rq->cpu);
 	activate_task(lowest_rq, next_task, 0);
+	next_task->on_rq = TASK_ON_RQ_QUEUED;
 	ret = 1;
 
 	resched_curr(lowest_rq);
@@ -2320,9 +2403,11 @@ static void pull_rt_task(struct rq *this_rq)
 
 			resched = true;
 
+			p->on_rq = TASK_ON_RQ_MIGRATING;
 			deactivate_task(src_rq, p, 0);
 			set_task_cpu(p, this_cpu);
 			activate_task(this_rq, p, 0);
+			p->on_rq = TASK_ON_RQ_QUEUED;
 			/*
 			 * We continue with the search, just in
 			 * case there's an even higher prio task
@@ -2402,7 +2487,8 @@ static void switched_from_rt(struct rq *rq, struct task_struct *p)
 	 * we may need to handle the pulling of RT tasks
 	 * now.
 	 */
-	if (!task_on_rq_queued(p) || rq->rt.rt_nr_running)
+	if (!task_on_rq_queued(p) || rq->rt.rt_nr_running ||
+		cpu_isolated(cpu_of(rq)))
 		return;
 
 	queue_pull_task(rq);
@@ -2512,7 +2598,8 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 
 	update_curr_rt(rq);
 
-	sched_rt_update_capacity_req(rq);
+	if (rq->rt.rt_nr_running)
+		sched_rt_update_capacity_req(rq);
 
 	watchdog(rq, p);
 

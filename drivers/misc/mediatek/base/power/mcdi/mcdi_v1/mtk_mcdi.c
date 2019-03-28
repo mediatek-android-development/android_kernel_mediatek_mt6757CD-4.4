@@ -38,9 +38,8 @@
 #include <mtk_mcdi_governor_hint.h>
 
 #include <sspm_mbox.h>
-
 #include <trace/events/mtk_idle_event.h>
-
+#include <linux/irqchip/mtk-gic-extend.h>
 /* #define USING_TICK_BROADCAST */
 
 #define MCDI_CPU_OFF        1
@@ -58,6 +57,7 @@ static unsigned long mcdi_cnt_cpu[NF_CPU];
 static unsigned long mcdi_cnt_cluster[NF_CLUSTER];
 
 void __iomem *mcdi_sysram_base;
+#define MCDI_SYSRAM (mcdi_sysram_base + MCDI_DEBUG_INFO_NON_REPLACE_OFFSET)
 
 /* #define WORST_LATENCY_DBG */
 
@@ -95,7 +95,7 @@ static DEFINE_SPINLOCK(mcdi_heart_beat_spin_lock);
 static unsigned int mcdi_heart_beat_log_dump_thd = 5000;          /* 5 sec */
 
 #define log2buf(p, s, fmt, args...) \
-	(p += snprintf(p, sizeof(s) - strlen(s), fmt, ##args))
+	(p += scnprintf(p, sizeof(s) - strlen(s), fmt, ##args))
 
 #undef mcdi_log
 #define mcdi_log(fmt, args...)	log2buf(p, dbg_buf, fmt, ##args)
@@ -110,6 +110,11 @@ struct mtk_mcdi_buf {
 #define mcdi_buf_append(mcdi, fmt, args...) \
 	((mcdi).p_idx += snprintf((mcdi).p_idx, LOG_BUF_LEN - strlen((mcdi).buf), fmt, ##args))
 
+int __attribute__((weak)) mtk_enter_idle_state(int mode)
+{
+	return 0;
+}
+
 int __attribute__((weak)) soidle_enter(int cpu)
 {
 	return 1;
@@ -123,6 +128,15 @@ int __attribute__((weak)) dpidle_enter(int cpu)
 int __attribute__((weak)) soidle3_enter(int cpu)
 {
 	return 1;
+}
+
+unsigned long long __attribute__((weak)) idle_get_current_time_ms(void)
+{
+	return 0;
+}
+
+void __attribute__((weak)) aee_rr_rec_mcdi_val(int id, u32 val)
+{
 }
 
 static int cluster_idx_map[NF_CPU] = {
@@ -177,6 +191,16 @@ static unsigned int cpu_cluster_pwr_stat_map[NF_PWR_STAT_MAP_TYPE][NF_CPU] = {
 		0x0000F,
 		0x0000F,
 		0x0000F
+	},
+	[OTHER_CLUSTER_IDX] = {
+		1,
+		1,
+		1,
+		1,
+		0,
+		0,
+		0,
+		0
 	}
 };
 
@@ -185,12 +209,34 @@ unsigned int get_pwr_stat_check_map(int type, int idx)
 	if (!(type >= 0 && type < NF_PWR_STAT_MAP_TYPE))
 		return 0;
 
-	if (!(idx >= 0 && idx <= NF_CPU))
+	if (!(idx >= 0 && idx < NF_CPU))
 		return 0;
 
 	return cpu_cluster_pwr_stat_map[type][idx];
 }
 
+void wakeup_all_cpu(void)
+{
+	int cpu = 0;
+
+	for (cpu = 0; cpu < NF_CPU; cpu++) {
+		if (cpu_online(cpu))
+			smp_send_reschedule(cpu);
+	}
+}
+
+void wait_until_all_cpu_powered_on(void)
+{
+	while (!(mcdi_get_gov_data_num_mcusys() == 0x0))
+		;
+}
+
+void mcdi_wakeup_all_cpu(void)
+{
+	wakeup_all_cpu();
+
+	wait_until_all_cpu_powered_on();
+}
 /* debugfs */
 static char dbg_buf[4096] = { 0 };
 static char cmd_buf[512] = { 0 };
@@ -224,6 +270,7 @@ static ssize_t mcdi_state_read(struct file *filp,
 	mcdi_log("\tpause = %d\n", feature_stat.pause);
 	mcdi_log("\tmax s_state = %d\n", feature_stat.s_state);
 	mcdi_log("\tcluster_off = %d\n", feature_stat.cluster_off);
+	mcdi_log("\tbuck_off = %d\n", feature_stat.buck_off);
 	mcdi_log("\tany_core = %d\n", feature_stat.any_core);
 
 	mcdi_log("\n");
@@ -294,6 +341,12 @@ static ssize_t mcdi_state_write(struct file *filp,
 		return count;
 	} else if (!strncmp(cmd_str, "s_state", sizeof("s_state"))) {
 		set_mcdi_s_state(param);
+		return count;
+	} else if (!strncmp(cmd_str, "set_buck_off", sizeof("set_buck_off"))) {
+		set_mcdi_buck_off_mask(param);
+		return count;
+	} else if (!strncmp(cmd_str, "en_buck_off", sizeof("en_buck_off"))) {
+		mcdi_enable_buck_off(param);
 		return count;
 	} else if (!strncmp(cmd_str, "hint", sizeof("hint"))) {
 		system_idle_hint_request(SYSTEM_IDLE_HINT_USER_MCDI_TEST, param != 0);
@@ -504,12 +557,17 @@ static int mcdi_debugfs_init(void)
 	return 0;
 }
 
-static void __go_to_wfi(void)
+static void __go_to_wfi(int cpu)
 {
+	trace_rgidle_rcuidle(cpu, 1);
+	remove_cpu_from_prefer_schedule_domain(cpu);
 	isb();
 	/* memory barrier before WFI */
 	mb();
 	__asm__ __volatile__("wfi" : : : "memory");
+
+	add_cpu_to_prefer_schedule_domain(cpu);
+	trace_rgidle_rcuidle(cpu, 0);
 }
 
 unsigned int mcdi_mbox_read(int id)
@@ -530,15 +588,7 @@ void mcdi_mbox_write(int id, unsigned int val)
 #endif
 }
 
-void mcdi_sysram_init(void)
-{
-	if (!mcdi_sysram_base)
-		return;
 
-	memset_io((void __iomem *)(mcdi_sysram_base + MCDI_DEBUG_INFO_NON_REPLACE_OFFSET),
-				0,
-				MCDI_SYSRAM_SIZE - MCDI_DEBUG_INFO_NON_REPLACE_OFFSET);
-}
 
 void mcdi_cpu_off(int cpu)
 {
@@ -587,12 +637,12 @@ void mcdi_cpu_off(int cpu)
 		break;
 	default:
 		/* should NOT happened */
-		__go_to_wfi();
+		__go_to_wfi(cpu);
 
 		break;
 	}
 #else
-	__go_to_wfi();
+	__go_to_wfi(cpu);
 #endif
 }
 
@@ -613,7 +663,7 @@ void mcdi_cluster_off(int cpu)
 #elif MCDI_CPU_OFF
 	mcdi_cpu_off(cpu);
 #else
-	__go_to_wfi();
+	__go_to_wfi(cpu);
 #endif
 }
 
@@ -682,11 +732,13 @@ void mcdi_heart_beat_log_dump(void)
 
 	get_mcdi_feature_status(&feature_stat);
 
-	mcdi_buf_append(buf, ", enabled = %d, max_s_state = %d",
+	mcdi_buf_append(buf, ", enabled = %d, max_s_state = %d (buck_off = %d)",
 						feature_stat.enable,
-						feature_stat.s_state);
+						feature_stat.s_state,
+						feature_stat.buck_off);
 
-	mcdi_buf_append(buf, ", system_idle_hint = %08x\n", system_idle_hint_result_raw());
+	mcdi_buf_append(buf, ", system_idle_hint = %08x\n",
+						system_idle_hint_result_raw());
 
 	pr_warn("%s\n", get_mcdi_buf(buf));
 }
@@ -708,7 +760,7 @@ int mcdi_enter(int cpu)
 
 	switch (state) {
 	case MCDI_STATE_WFI:
-		__go_to_wfi();
+		__go_to_wfi(cpu);
 
 		break;
 	case MCDI_STATE_CPU_OFF:
@@ -784,22 +836,6 @@ int mcdi_enter(int cpu)
 	return 0;
 }
 
-void wakeup_all_cpu(void)
-{
-	int cpu = 0;
-
-	for (cpu = 0; cpu < NF_CPU; cpu++) {
-		if (cpu_online(cpu))
-			smp_send_reschedule(cpu);
-	}
-}
-
-void wait_until_all_cpu_powered_on(void)
-{
-	while (!(mcdi_mbox_read(MCDI_MBOX_CPU_CLUSTER_PWR_STAT) == 0x0))
-		;
-}
-
 bool mcdi_pause(bool paused)
 {
 	struct mcdi_feature_status feature_stat;
@@ -811,10 +847,8 @@ bool mcdi_pause(bool paused)
 
 	if (paused) {
 		mcdi_state_pause(true);
+		mcdi_wakeup_all_cpu();
 
-		wakeup_all_cpu();
-
-		wait_until_all_cpu_powered_on();
 	} else {
 		mcdi_state_pause(false);
 	}
@@ -825,6 +859,9 @@ bool mcdi_pause(bool paused)
 bool mcdi_task_pause(bool paused)
 {
 	bool ret = false;
+
+	if (!is_mcdi_working())
+		return ret;
 
 	/* TODO */
 #if 1
@@ -860,6 +897,20 @@ void update_avail_cpu_mask_to_mcdi_controller(unsigned int cpu_mask)
 	mcdi_mbox_write(MCDI_MBOX_AVAIL_CPU_MASK, cpu_mask);
 }
 
+void update_cpu_isolation_mask_to_mcdi_controller(unsigned int iso_mask)
+{
+	iso_mask &= 0xff;
+
+	/*
+	 * If isolation bit of ALL CPU are set, means iso_mask is not reasonable
+	 * Do NOT update iso_mask to mcdi controller
+	 */
+	if (iso_mask == 0xff)
+		return;
+
+	mcdi_mbox_write(MCDI_MBOX_CPU_ISOLATION_MASK, iso_mask);
+}
+
 bool is_cpu_pwr_on_event_pending(void)
 {
 	return (!(mcdi_mbox_read(MCDI_MBOX_PENDING_ON_EVENT) == 0));
@@ -876,14 +927,23 @@ static int mcdi_cpu_callback(struct notifier_block *nfb,
 	case CPU_DOWN_PREPARE_FROZEN:
 		mcdi_pause(true);
 		break;
+	}
 
+	return NOTIFY_OK;
+}
+
+static int mcdi_cpu_callback_leave_hotplug(struct notifier_block *nfb,
+				   unsigned long action, void *hcpu)
+{
+	switch (action) {
 	case CPU_ONLINE:
 	case CPU_ONLINE_FROZEN:
 	case CPU_UP_CANCELED:
 	case CPU_UP_CANCELED_FROZEN:
 	case CPU_DOWN_FAILED:
 	case CPU_DOWN_FAILED_FROZEN:
-	case CPU_POST_DEAD:
+	case CPU_DEAD:
+	case CPU_DEAD_FROZEN:
 		mcdi_avail_cpu_cluster_update();
 
 		mcdi_pause(false);
@@ -899,9 +959,15 @@ static struct notifier_block mcdi_cpu_notifier = {
 	.priority   = INT_MAX,
 };
 
+static struct notifier_block mcdi_cpu_notifier_leave_hotplug = {
+	.notifier_call = mcdi_cpu_callback_leave_hotplug,
+	.priority   = INT_MIN,
+};
+
 static int mcdi_hotplug_cb_init(void)
 {
 	register_cpu_notifier(&mcdi_cpu_notifier);
+	register_cpu_notifier(&mcdi_cpu_notifier_leave_hotplug);
 
 	return 0;
 }
@@ -909,6 +975,23 @@ static int mcdi_hotplug_cb_init(void)
 static void __init mcdi_pm_qos_init(void)
 {
 }
+
+static int __init mcdi_sysram_init(void)
+{
+	/* of init */
+	mcdi_of_init();
+
+	if (!mcdi_sysram_base)
+		return -1;
+
+	memset_io((void __iomem *)MCDI_SYSRAM,
+		0,
+		MCDI_SYSRAM_SIZE - MCDI_DEBUG_INFO_NON_REPLACE_OFFSET);
+
+	return 0;
+}
+
+subsys_initcall(mcdi_sysram_init);
 
 static int __init mcdi_init(void)
 {
@@ -924,13 +1007,9 @@ static int __init mcdi_init(void)
 	/* MCDI governor init */
 	mcdi_governor_init();
 
-	/* of init */
-	mcdi_of_init();
-
-	/* MCDI sysram space init */
-	mcdi_sysram_init();
-
 	mcdi_pm_qos_init();
+
+	update_cpu_isolation_mask_to_mcdi_controller(0x0);
 
 	return 0;
 }

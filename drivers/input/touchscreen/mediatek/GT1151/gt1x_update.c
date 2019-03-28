@@ -30,7 +30,7 @@
 #ifdef CONFIG_GTP_REQUEST_FW_UPDATE
 #include <linux/firmware.h>
 #endif
-#include "gt1x_config.h"
+//#include "gt1x_config.h"
 #include "include/gt1x_tpd_common.h"
 #ifdef CONFIG_GTP_HEADER_FW_UPDATE
 #include "gt1x_firmware.h"
@@ -68,38 +68,38 @@
 #define _bRW_MISCTL__PATCH_AREA_EN_  0x404D
 
 /*
- * 1.  firmware structure
- *    header: 128b
- *
- *   offset           size          content
- *   0                 4              firmware length
- *   4                 2              checksum
- *   6                 6              target MASK name
- *   12               3              target MASK version
- *   15               6              TP subsystem PID
- *   21               3              TP subsystem version
- *   24               1              subsystem count
- *   25               1              chip type                             0x91: GT1X,   0x92: GT2X
- *   26               6              reserved
- *   32               8              subsystem info[0]
- *   32               8              subsystem info[1]
- *   .....
- *   120             8              subsystem info[11]
- *
- *   body: followed header
- *
- *   128             N0              subsystem[0]
- *   128+N0       N1              subsystem[1]
- *   ....
- *
- * 2. subsystem info structure
- *   offset           size          content
- *   0                 1              subsystem type
- *   1                 2              subsystem length
- *   3                 2              stored address in flash           addr = value * 256
- *   5                 3              reserved
- *
- */
+ 1.  firmware structure
+    header: 128b
+
+    offset           size          content
+    0                 4              firmware length
+    4                 2              checksum
+    6                 6              target MASK name
+    12               3              target MASK version
+    15               6              TP subsystem PID
+    21               3              TP subsystem version
+    24               1              subsystem count
+    25               1              chip type                             0x91: GT1X,   0x92: GT2X
+    26               6              reserved
+    32               8              subsystem info[0]
+    32               8              subsystem info[1]
+    .....
+    120             8              subsystem info[11]
+
+    body: followed header
+
+    128             N0              subsystem[0]
+    128+N0       N1              subsystem[1]
+    ....
+
+ 2. subsystem info structure
+    offset           size          content
+    0                 1              subsystem type
+    1                 2              subsystem length
+    3                 2              stored address in flash           addr = value * 256
+    5                 3              reserved
+
+*/
 
 #define FW_HEAD_SIZE                         128
 #define FW_HEAD_SUBSYSTEM_INFO_SIZE          8
@@ -255,8 +255,11 @@ int gt1x_update_prepare(char *filename)
 		GTP_INFO("firmware size: 0x%x\n", (unsigned int)fw_entry->size);
 
 		update_info.fw_data = (u8 *)devm_kzalloc(&gt1x_i2c_client->dev, fw_entry->size, GFP_KERNEL);
-		if (!update_info.fw_data)
+		if (!update_info.fw_data) {
 			GTP_ERROR("Alloca memory fail\n");
+			release_firmware(fw_entry);
+			return ERROR_MEM;
+		}
 		memcpy(update_info.fw_data, fw_entry->data, fw_entry->size);
 		update_info.fw_length = fw_entry->size;
 		release_firmware(fw_entry);
@@ -912,7 +915,7 @@ int __gt1x_hold_ss51_dsp_20(void)
 			GTP_DEBUG("Hold ss51 & dsp I2C error,retry:%d", retry);
 			continue;
 		}
-		if (buf[0] == 0x0C) {
+		if (0x0C == buf[0]) {
 			if (hold_times++ < 20)
 				continue;
 			else

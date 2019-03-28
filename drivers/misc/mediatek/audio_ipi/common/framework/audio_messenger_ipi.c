@@ -24,7 +24,7 @@
 #include "audio_ipi_platform.h"
 
 /* using for filter ipi message*/
-#ifdef CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT
+#ifdef CONFIG_MTK_AUDIO_SCP_SPKPROTECT_SUPPORT
 #include "audio_spkprotect_msg_id.h"
 #endif
 
@@ -103,12 +103,12 @@ static void audio_ipi_msg_dispatcher(int id, void *data, unsigned int len)
 void audio_messenger_ipi_init(void)
 {
 	int i = 0;
-	ipi_status retval = ERROR;
+	enum scp_ipi_status retval = SCP_IPI_ERROR;
 
 	current_idx = 0;
 
 	retval = scp_ipi_registration(IPI_AUDIO, audio_ipi_msg_dispatcher, "audio");
-	if (retval != DONE)
+	if (retval != SCP_IPI_DONE)
 		AUD_LOG_E("%s(), scp_ipi_registration fail!!\n", __func__);
 
 	for (i = 0; i < TASK_SCENE_SIZE; i++)
@@ -129,10 +129,13 @@ void audio_reg_recv_message(uint8_t task_scene, recv_message_t recv_message)
 
 static bool check_print_msg_info(const struct ipi_msg_t *p_ipi_msg)
 {
-
-#ifdef	CONFIG_MTK_AURISYS_PHONE_CALL_SUPPORT
+#ifdef CONFIG_MTK_AUDIO_SCP_SPKPROTECT_SUPPORT
 	if (p_ipi_msg->task_scene == TASK_SCENE_SPEAKER_PROTECTION
 		&& p_ipi_msg->msg_id == SPK_PROTECT_DLCOPY)
+		return false;
+#endif
+#ifdef CONFIG_MTK_VOW_SUPPORT
+	if (p_ipi_msg->task_scene == TASK_SCENE_VOW)
 		return false;
 #endif
 	return true;
@@ -140,7 +143,7 @@ static bool check_print_msg_info(const struct ipi_msg_t *p_ipi_msg)
 
 int send_message_to_scp(const struct ipi_msg_t *p_ipi_msg)
 {
-	ipi_status send_status = ERROR;
+	enum scp_ipi_status send_status = SCP_IPI_ERROR;
 
 	const int k_max_try_count = 10000;
 	int try_count = 0;
@@ -161,14 +164,14 @@ int send_message_to_scp(const struct ipi_msg_t *p_ipi_msg)
 				      0, /* default don't wait */
 				      get_audio_ipi_scp_location());
 
-		if (send_status == DONE)
+		if (send_status == SCP_IPI_DONE)
 			break;
 
 		AUD_LOG_V("%s(), #%d scp_ipi_send error %d\n",
 			  __func__, try_count, send_status);
 	}
 
-	if (send_status != DONE) {
+	if (send_status != SCP_IPI_DONE) {
 		AUD_LOG_E("%s(), scp_ipi_send error %d\n", __func__, send_status);
 		print_msg_info(__func__, "fail", p_ipi_msg);
 	} else if (check_print_msg_info(p_ipi_msg) == true)
@@ -176,6 +179,6 @@ int send_message_to_scp(const struct ipi_msg_t *p_ipi_msg)
 
 
 	AUD_LOG_V("%s(-)\n", __func__);
-	return (send_status == DONE) ? 0 : -1;
+	return (send_status == SCP_IPI_DONE) ? 0 : -1;
 }
 

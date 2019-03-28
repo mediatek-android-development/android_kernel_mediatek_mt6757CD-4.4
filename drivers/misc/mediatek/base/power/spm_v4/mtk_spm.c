@@ -18,6 +18,7 @@
 #include <linux/smp.h>
 #include <linux/delay.h>
 #include <linux/atomic.h>
+#include <mtk_sleep.h>
 #include <mtk_spm_idle.h>
 #if defined(CONFIG_MTK_PMIC) || defined(CONFIG_MTK_PMIC_NEW_ARCH)
 #include <mt-plat/upmu_common.h>
@@ -65,6 +66,8 @@ u32 spm_irq_0;
 #define NF_EDGE_TRIG_IRQS	7
 #elif defined(CONFIG_MACH_MT6739)
 #define NF_EDGE_TRIG_IRQS	3
+#elif defined(CONFIG_MACH_MT6771)
+#define NF_EDGE_TRIG_IRQS	4		/* TODO: confirm & modify */
 #endif
 static u32 edge_trig_irqs[NF_EDGE_TRIG_IRQS];
 
@@ -102,7 +105,17 @@ void __attribute__((weak)) spm_vcorefs_init(void)
 	spm_crit2("NO %s !!!\n", __func__);
 }
 
-void __attribute__((weak)) mt_power_gs_dump_suspend(void)
+void __attribute__((weak)) mt_power_gs_t_dump_suspend(int count, ...)
+{
+	spm_crit2("NO %s !!!\n", __func__);
+}
+
+void __attribute__((weak)) mt_power_gs_t_dump_dpidle(int count, ...)
+{
+	spm_crit2("NO %s !!!\n", __func__);
+}
+
+void __attribute__((weak)) mt_power_gs_t_dump_sodi3(int count, ...)
 {
 	spm_crit2("NO %s !!!\n", __func__);
 }
@@ -115,6 +128,23 @@ void __attribute__((weak)) set_wakeup_sources(u32 *list, u32 num_events)
 int __attribute__((weak)) spm_fs_init(void)
 {
 	spm_crit2("NO %s !!!\n", __func__);
+	return 0;
+}
+
+char *__attribute__((weak)) spm_vcorefs_dump_dvfs_regs(char *p)
+{
+	return NULL;
+}
+
+int __attribute__((weak))
+get_spm_last_wakeup_src(struct seq_file *s, void *unused)
+{
+	return 0;
+}
+
+int __attribute__((weak))
+get_spm_sleep_count(struct seq_file *s, void *unused)
+{
 	return 0;
 }
 
@@ -286,6 +316,46 @@ static void spm_register_init(void)
 		if (!edge_trig_irqs[2])
 			spm_err("get mt6739-consys failed\n");
 	}
+#elif defined(CONFIG_MACH_MT6771)
+	/* mediatek,infracfg_ao */
+	node = of_find_compatible_node(NULL, NULL, "mediatek,infracfg_ao");
+	if (!node) {
+		spm_err("find mediatek,infracfg_ao syscon node failed\n");
+	} else {
+		edge_trig_irqs[0] = irq_of_parse_and_map(node, 0);
+		if (!edge_trig_irqs[0])
+			spm_err("get mediatek,infracfg_ao syscon failed\n");
+	}
+
+	/* mediatek,kp */
+	node = of_find_compatible_node(NULL, NULL, "mediatek,kp");
+	if (!node) {
+		spm_err("find mediatek,kp node failed\n");
+	} else {
+		edge_trig_irqs[1] = irq_of_parse_and_map(node, 0);
+		if (!edge_trig_irqs[1])
+			spm_err("get mediatek,kp failed\n");
+	}
+
+	/* mediatek,mdcldma */
+	node = of_find_compatible_node(NULL, NULL, "mediatek,mdcldma");
+	if (!node) {
+		spm_err("find mdcldma node failed\n");
+	} else {
+		edge_trig_irqs[2] = irq_of_parse_and_map(node, 3);
+		if (!edge_trig_irqs[2])
+			spm_err("get mdcldma failed\n");
+	}
+
+	/* mediatek,auxadc */
+	node = of_find_compatible_node(NULL, NULL, "mediatek,auxadc");
+	if (!node) {
+		spm_err("find mediatek,auxadc node failed\n");
+	} else {
+		edge_trig_irqs[3] = irq_of_parse_and_map(node, 0);
+		if (!edge_trig_irqs[3])
+			spm_err("get mediatek,auxadc failed\n");
+	}
 #endif
 
 #if defined(CONFIG_MACH_MT6763)
@@ -302,6 +372,12 @@ static void spm_register_init(void)
 		 edge_trig_irqs[0],
 		 edge_trig_irqs[1],
 		 edge_trig_irqs[2]);
+#elif defined(CONFIG_MACH_MT6771)
+	spm_err("edge trigger irqs: %d, %d, %d, %d\n",
+		 edge_trig_irqs[0],
+		 edge_trig_irqs[1],
+		 edge_trig_irqs[2],
+		 edge_trig_irqs[3]);
 #endif
 
 #if defined(CONFIG_MACH_MT6739)
@@ -461,6 +537,24 @@ static void __spm_check_dram_type(void)
 		__spmfw_idx = SPMFW_LP3_1CH;
 	pr_info("#@# %s(%d) __spmfw_idx 0x%x\n", __func__, __LINE__, __spmfw_idx);
 };
+#elif defined(CONFIG_MACH_MT6771)
+static void __spm_check_dram_type(void)
+{
+	int ddr_type = get_ddr_type();
+	int ddr_hz = dram_steps_freq(0);
+
+	if (ddr_type == TYPE_LPDDR4X && ddr_hz == 3600)
+		__spmfw_idx = SPMFW_LP4X_2CH_3733;
+	else if (ddr_type == TYPE_LPDDR4X && ddr_hz == 3200)
+		__spmfw_idx = SPMFW_LP4X_2CH_3200;
+	else if (ddr_type == TYPE_LPDDR4 && ddr_hz == 3600)
+		__spmfw_idx = SPMFW_LP4X_2CH_3733;
+	else if (ddr_type == TYPE_LPDDR4 && ddr_hz == 3200)
+		__spmfw_idx = SPMFW_LP4X_2CH_3200;
+	else if (ddr_type == TYPE_LPDDR3 && ddr_hz == 1866)
+		__spmfw_idx = SPMFW_LP3_1CH_1866;
+	pr_info("#@# %s(%d) __spmfw_idx 0x%x\n", __func__, __LINE__, __spmfw_idx);
+};
 #elif defined(CONFIG_MACH_MT6739)
 static void __spm_check_dram_type(void)
 {
@@ -476,8 +570,11 @@ static void __spm_check_dram_type(void)
 
 int __spm_get_dram_type(void)
 {
-	if (__spmfw_idx == -1)
+	if (__spmfw_idx == -1) {
+		__spmfw_idx++;
 		__spm_check_dram_type();
+	}
+
 	return __spmfw_idx;
 }
 
@@ -519,9 +616,11 @@ int __init spm_module_init(void)
 #if !defined(CONFIG_FPGA_EARLY_PORTING)
 #ifdef CONFIG_MTK_DRAMC
 	if (spm_golden_setting_cmp(1) != 0)
-		aee_kernel_warning("SPM Warring", "dram golden setting mismach");
+		aee_kernel_warning("SPM Warning", "dram golden setting mismach");
 #endif /* CONFIG_MTK_DRAMC */
 #endif /* CONFIG_FPGA_EARLY_PORTING */
+
+	spm_phypll_mode_check();
 
 	ret = platform_driver_register(&spm_dev_drv);
 	if (ret) {
@@ -544,6 +643,7 @@ int __init spm_module_init(void)
 	spm_file = debugfs_create_file("spm_sleep_count", S_IRUGO, spm_dir, NULL, &spm_sleep_count_fops);
 	spm_file = debugfs_create_file("spm_last_wakeup_src", S_IRUGO, spm_dir, NULL, &spm_last_wakeup_src_fops);
 	spm_resource_req_debugfs_init(spm_dir);
+	spm_suspend_debugfs_init(spm_dir);
 
 #if !defined(CONFIG_FPGA_EARLY_PORTING)
 #ifdef CONFIG_PM
@@ -747,6 +847,152 @@ static struct ddrphy_golden_cfg ddrphy_setting_lp3_1ch[] = {
 	/* {PHY_AO_CHB, 0xc00, 0x0001000f, 0x0001000f}, */
 	/* {PHY_AO_CHB, 0xc80, 0x0001000f, 0x0001000f}, */
 };
+#elif defined(CONFIG_MACH_MT6771)
+static struct ddrphy_golden_cfg ddrphy_setting_lp4_2ch[] = {
+	{DRAMC_AO_CHA, 0x038, 0xc0000027, 0xc0000007},
+	{DRAMC_AO_CHB, 0x038, 0xc0000027, 0xc0000007},
+	{PHY_AO_CHA, 0x0284, 0x001bff00, 0x00000100},
+	{PHY_AO_CHB, 0x0284, 0x001bff00, 0x00000100},
+	{PHY_AO_CHA, 0x0c20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x0c20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1120, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x1120, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1620, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x1620, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x0ca0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x0ca0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x11a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x11a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x16a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x16a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x0d20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x0d20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHA, 0x1220, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1220, 0xfff80000, 0x00000000},
+	{PHY_AO_CHA, 0x1720, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1720, 0xfff80000, 0x00000000},
+	{PHY_AO_CHA, 0x0298, 0x00770000, 0x00770000},
+	{PHY_AO_CHB, 0x0298, 0x00770000, 0x00770000},
+	{PHY_AO_CHA, 0x02a8, 0x0c000000, 0x00000000},
+	{PHY_AO_CHB, 0x02a8, 0x0c000000, 0x00000000},
+	{PHY_AO_CHA, 0x028c, 0xffffffff, 0x806003be},
+	{PHY_AO_CHB, 0x028c, 0xffffffff, 0x806003be},
+	{PHY_AO_CHA, 0x0084, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x0084, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x0104, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x0104, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x0184, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x0184, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x0c34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x0c34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x0cb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x0cb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x0d34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x0d34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1134, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1134, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x11b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x11b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1234, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1234, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1634, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1634, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x16b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x16b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1734, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1734, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x0c1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x0c1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x0c9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x0c9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x0d1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x0d1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x111c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x111c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x119c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x119c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x121c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x121c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x161c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x161c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x169c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x169c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x171c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x171c, 0x000e0000, 0x000e0000},
+};
+
+static struct ddrphy_golden_cfg ddrphy_setting_lp3_1ch[] = {
+	{DRAMC_AO_CHA, 0x038, 0xc0000027, 0xc0000007},
+	{DRAMC_AO_CHB, 0x038, 0xc0000027, 0xc0000007},
+	{PHY_AO_CHA, 0x0284, 0x001bff00, 0x00000100},
+	{PHY_AO_CHB, 0x0284, 0x001bff00, 0x00100000},
+	{PHY_AO_CHA, 0x0c20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x0c20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1120, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1120, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1160, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1160, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x0ca0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x0ca0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x11a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x11a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x16a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHB, 0x16a0, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x0d20, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x0d20, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1220, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1220, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x1720, 0xfff80000, 0x00000000},
+	{PHY_AO_CHB, 0x1720, 0xfff80000, 0x00200000},
+	{PHY_AO_CHA, 0x0298, 0x00770000, 0x00570000},
+	{PHY_AO_CHB, 0x0298, 0x00770000, 0x00070000},
+	{PHY_AO_CHA, 0x02a8, 0x0c000000, 0x00000000},
+	{PHY_AO_CHB, 0x02a8, 0x0c000000, 0x00000000},
+	{PHY_AO_CHA, 0x028c, 0xffffffff, 0x806003be},
+	{PHY_AO_CHB, 0x028c, 0xffffffff, 0x806003be},
+	{PHY_AO_CHA, 0x0084, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x0084, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x0104, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x0104, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x0184, 0x00100000, 0x00000000},
+	{PHY_AO_CHB, 0x0184, 0x00100000, 0x00000000},
+	{PHY_AO_CHA, 0x0c34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x0c34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x0cb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x0cb4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x0d34, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x0d34, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1134, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1134, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x11b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x11b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1234, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1234, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1634, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1634, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x16b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x16b4, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x1734, 0x00000001, 0x00000001},
+	{PHY_AO_CHB, 0x1734, 0x00000001, 0x00000001},
+	{PHY_AO_CHA, 0x0c1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x0c1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x0c9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x0c9c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x0d1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x0d1c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x111c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x111c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x119c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x119c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x121c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x121c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x161c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x161c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x169c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x169c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHA, 0x171c, 0x000e0000, 0x000e0000},
+	{PHY_AO_CHB, 0x171c, 0x000e0000, 0x000e0000},
+};
 #elif defined(CONFIG_MACH_MT6739)
 static struct ddrphy_golden_cfg _ddrphy_setting[] = {
 	{PHY_AO_CHA, 0x5c0, 0xffffffff, 0x063C0000},
@@ -782,6 +1028,23 @@ int spm_golden_setting_cmp(bool en)
 		return r;
 	}
 	/*Compare Dramc Goldeing Setting */
+#elif defined(CONFIG_MACH_MT6771)
+	switch (__spm_get_dram_type()) {
+	case SPMFW_LP4X_2CH_3733:
+		ddrphy_setting = ddrphy_setting_lp4_2ch;
+		ddrphy_num = ARRAY_SIZE(ddrphy_setting_lp4_2ch);
+		break;
+	case SPMFW_LP4X_2CH_3200:
+		ddrphy_setting = ddrphy_setting_lp4_2ch;
+		ddrphy_num = ARRAY_SIZE(ddrphy_setting_lp4_2ch);
+		break;
+	case SPMFW_LP3_1CH_1866:
+		ddrphy_setting = ddrphy_setting_lp3_1ch;
+		ddrphy_num = ARRAY_SIZE(ddrphy_setting_lp3_1ch);
+		break;
+	default:
+		return r;
+	}
 #elif defined(CONFIG_MACH_MT6739)
 	ddrphy_setting = _ddrphy_setting;
 	ddrphy_num = ARRAY_SIZE(_ddrphy_setting);
@@ -803,6 +1066,22 @@ int spm_golden_setting_cmp(bool en)
 
 }
 #endif /* CONFIG_MTK_DRAMC */
+
+void spm_phypll_mode_check(void)
+{
+#if defined(CONFIG_MACH_MT6771)
+	unsigned int val = spm_read(SPM_POWER_ON_VAL0);
+
+	if ((val & (R0_SC_PHYPLL_MODE_SW_PCM | R0_SC_PHYPLL2_MODE_SW_PCM))
+			!= R0_SC_PHYPLL_MODE_SW_PCM) {
+
+		aee_kernel_warning(
+			"SPM Warning",
+			"Invalid SPM_POWER_ON_VAL0: 0x%08x\n",
+			val);
+	}
+#endif
+}
 
 #if !defined(CONFIG_MTK_TINYSYS_SSPM_SUPPORT)
 void spm_pmic_power_mode(int mode, int force, int lock)
@@ -827,6 +1106,8 @@ void spm_pmic_power_mode(int mode, int force, int lock)
 		/* nothing */
 #elif defined(CONFIG_MACH_MT6739)
 		pmic_ldo_vldo28_lp(SRCLKEN2, 1, HW_LP);
+#elif defined(CONFIG_MACH_MT6771)
+		/* nothing */
 #endif
 		break;
 	case PMIC_PWR_SODI3:
@@ -835,6 +1116,9 @@ void spm_pmic_power_mode(int mode, int force, int lock)
 		pmic_ldo_vldo28_lp(SRCLKEN0, 0, HW_LP);
 		pmic_ldo_vldo28_lp(SW, 1, SW_ON);
 #elif defined(CONFIG_MACH_MT6739)
+		/* nothing */
+#elif defined(CONFIG_MACH_MT6771)
+		/* nothing */
 #endif
 		break;
 	case PMIC_PWR_SODI:
@@ -851,6 +1135,9 @@ void spm_pmic_power_mode(int mode, int force, int lock)
 		pmic_ldo_vsram_proc_lp(SW, 1, SW_OFF);
 		pmic_ldo_vldo28_lp(SRCLKEN0, 1, HW_LP);
 #elif defined(CONFIG_MACH_MT6739)
+		/* nothing */
+#elif defined(CONFIG_MACH_MT6771)
+		/* nothing */
 #endif
 		break;
 	default:

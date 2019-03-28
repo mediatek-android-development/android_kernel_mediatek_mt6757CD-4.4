@@ -19,6 +19,7 @@
 
 #include "cmdq_record.h"
 #include "cmdq_core.h"
+#include "cmdq_sec.h"
 #include "cmdq_virtual.h"
 #include "cmdq_reg.h"
 #include "cmdq_prof.h"
@@ -39,6 +40,16 @@
 #define CMDQ_EVENT_ARGA(event_id)	(CMDQ_CODE_WFE << 24 | event_id)
 
 #define CMDQ_TASK_CPR_POSITION_ARRAY_UNIT_SIZE	(32)
+
+static void cmdq_task_release_property(struct cmdqRecStruct *handle)
+{
+	if (!handle)
+		return;
+
+	kfree(handle->prop_addr);
+	handle->prop_addr = NULL;
+	handle->prop_size = 0;
+}
 
 /* push a value into a stack */
 int32_t cmdq_op_condition_push(struct cmdq_stack_node **top_node, uint32_t position,
@@ -133,32 +144,43 @@ static bool cmdq_is_cpr(uint32_t argument, uint32_t arg_type)
 	return false;
 }
 
-static void cmdq_save_op_variable_position(struct cmdqRecStruct *handle, u32 index)
+static void cmdq_save_op_variable_position(struct cmdqRecStruct *handle,
+	u32 index)
 {
-	uint32_t *p_new_buffer = NULL;
-	uint32_t *p_instr_position = NULL;
-	uint32_t array_num = 0;
+	u32 *p_new_buffer = NULL;
+	u32 *p_instr_position = NULL;
+	u32 array_num = 0;
 
 	/* Exceed max number of SPR, use CPR */
-	if ((handle->replace_instr.number % CMDQ_TASK_CPR_POSITION_ARRAY_UNIT_SIZE) == 0) {
-		array_num = (handle->replace_instr.number + CMDQ_TASK_CPR_POSITION_ARRAY_UNIT_SIZE) * sizeof(uint32_t);
+	if ((handle->replace_instr.number %
+		CMDQ_TASK_CPR_POSITION_ARRAY_UNIT_SIZE) == 0) {
+		array_num = (handle->replace_instr.number +
+			CMDQ_TASK_CPR_POSITION_ARRAY_UNIT_SIZE) *
+			sizeof(uint32_t);
 
 		p_new_buffer = kzalloc(array_num, GFP_KERNEL);
+		CMDQ_MSG("allocate array with size:%u p:0x%p\n",
+			array_num, p_new_buffer);
 
 		/* copy and release old buffer */
-		if (handle->replace_instr.position != (cmdqU32Ptr_t) (unsigned long)NULL) {
-			memcpy(p_new_buffer, CMDQ_U32_PTR(handle->replace_instr.position),
-				handle->replace_instr.number * sizeof(uint32_t));
+		if (handle->replace_instr.position !=
+			(cmdqU32Ptr_t)(unsigned long)NULL) {
+			memcpy(p_new_buffer,
+				CMDQ_U32_PTR(handle->replace_instr.position),
+				handle->replace_instr.number *
+				sizeof(uint32_t));
 			kfree(CMDQ_U32_PTR(handle->replace_instr.position));
 		}
-		handle->replace_instr.position = (cmdqU32Ptr_t) (unsigned long)p_new_buffer;
+		handle->replace_instr.position =
+			(cmdqU32Ptr_t)(unsigned long)p_new_buffer;
 	}
 
 	p_instr_position = CMDQ_U32_PTR(handle->replace_instr.position);
 	p_instr_position[handle->replace_instr.number] = index;
 	handle->replace_instr.number++;
-	CMDQ_MSG("Add replace_instr: position:%u, number: %u\n",
-		p_instr_position[handle->replace_instr.number-1], handle->replace_instr.number);
+	CMDQ_MSG("Add replace_instr: index:%u position:%u number:%u\n",
+		index, p_instr_position[handle->replace_instr.number-1],
+		handle->replace_instr.number);
 }
 
 static int32_t cmdq_var_data_type(CMDQ_VARIABLE arg_in, uint32_t *arg_out, uint32_t *arg_type)
@@ -222,8 +244,8 @@ int32_t cmdq_reset_v3_struct(struct cmdqRecStruct *handle)
 
 	/* reset local variable setting */
 	handle->local_var_num = CMDQ_THR_SPR_START;
-	handle->arg_source = CMDQ_TASK_CPR_INITIAL_VALUE;
 	handle->arg_value = CMDQ_TASK_CPR_INITIAL_VALUE;
+	handle->arg_source = CMDQ_TASK_CPR_INITIAL_VALUE;
 	handle->arg_timeout = CMDQ_TASK_CPR_INITIAL_VALUE;
 
 	do {
@@ -345,6 +367,7 @@ int32_t cmdq_task_create(enum CMDQ_SCENARIO_ENUM scenario, struct cmdqRecStruct 
 	handle->engineFlag = cmdq_get_func()->flagFromScenario(scenario);
 	handle->priority = CMDQ_REC_DEFAULT_PRIORITY;
 	handle->pRunningTask = NULL;
+	handle->ext.ctrl = cmdq_core_get_controller();
 
 	cmdq_task_reset(handle);
 
@@ -607,6 +630,27 @@ static int32_t cmdq_append_rw_s_command(struct cmdqRecStruct *handle, enum CMDQ_
 	if (status < 0)
 		return status;
 
+	if (handle->ext.exclusive_thread != CMDQ_INVALID_THREAD) {
+		u32 cpr_offset = CMDQ_CPR_STRAT_ID + CMDQ_THR_CPR_MAX *
+			handle->ext.exclusive_thread;
+
+		/* change cpr to thread cpr directly,
+		 * if we already have exclusive thread.
+		 */
+		if (cmdq_is_cpr(arg_addr, arg_addr_type))
+			arg_addr = cpr_offset + (arg_addr - CMDQ_THR_SPR_MAX);
+		if (cmdq_is_cpr(arg_value, arg_value_type))
+			arg_value = cpr_offset + (arg_value - CMDQ_THR_SPR_MAX);
+	} else if (cmdq_is_cpr(arg_a, arg_a_type) ||
+		cmdq_is_cpr(arg_b, arg_b_type)) {
+		/* save local variable position */
+		CMDQ_MSG(
+			"save op: 0x%02x, CMD: arg_a: 0x%08x, arg_b: 0x%08x, arg_a_type: %d, arg_b_type: %d\n",
+		     code, arg_a, arg_b, arg_a_type, arg_b_type);
+		cmdq_save_op_variable_position(handle,
+			cmdq_task_get_instruction_count(handle));
+	}
+
 	if (CMDQ_CODE_WRITE_S == code || CMDQ_CODE_WRITE_S_W_MASK == code) {
 		/* For write_s command */
 		new_arg_a = (arg_addr & 0xffff) | ((subsys & 0x1f) << subsys_bit);
@@ -620,14 +664,6 @@ static int32_t cmdq_append_rw_s_command(struct cmdqRecStruct *handle, enum CMDQ_
 		new_arg_a = (arg_value & 0xffff) | ((subsys & 0x1f) << subsys_bit);
 		new_arg_b = (arg_addr & 0xffff) << 16;
 		arg_type = (arg_value_type << 2) | (arg_addr_type << 1);
-	}
-
-	if (true == cmdq_is_cpr(arg_a, arg_a_type)
-		|| true == cmdq_is_cpr(arg_b, arg_b_type)) {
-		/* save local variable position */
-		CMDQ_MSG("save op: 0x%02x, CMD: arg_a: 0x%08x, arg_b: 0x%08x, arg_a_type: %d, arg_b_type: %d\n",
-		     code, arg_a, arg_b, arg_a_type, arg_b_type);
-		cmdq_save_op_variable_position(handle, cmdq_task_get_instruction_count(handle));
 	}
 
 	/* new_arg_a is the HW register address to access from or GPR value store the HW register address */
@@ -755,7 +791,8 @@ int32_t cmdq_append_command(struct cmdqRecStruct *handle, enum CMDQ_CODE_ENUM co
 		return -EFAULT;
 	}
 
-	if (code == CMDQ_CODE_JUMP && (arg_a & 0x1) == 0) {
+	if (code == CMDQ_CODE_JUMP && (arg_a & 0x1) == 0 &&
+		handle->ext.ctrl->change_jump) {
 		cmdq_save_op_variable_position(handle, cmdq_task_get_instruction_count(handle));
 		CMDQ_MSG("save jump event: 0x%02x, CMD: arg_a: 0x%08x\n", code, arg_a);
 	}
@@ -785,6 +822,7 @@ int32_t cmdq_task_reset(struct cmdqRecStruct *handle)
 
 	cmdq_reset_v3_struct(handle);
 
+	handle->ext.ctrl = cmdq_core_get_controller();
 	handle->blockSize = 0;
 	handle->prefetchCount = 0;
 	handle->finalized = false;
@@ -812,6 +850,9 @@ int32_t cmdq_task_reset(struct cmdqRecStruct *handle)
 	/* profile marker */
 	cmdq_reset_profile_maker_data(handle);
 
+	/* initialize property */
+	cmdq_task_release_property(handle);
+
 	return 0;
 }
 
@@ -820,13 +861,23 @@ int32_t cmdq_task_set_secure(struct cmdqRecStruct *handle, const bool is_secure)
 	if (handle == NULL)
 		return -EFAULT;
 
-	if (false == is_secure) {
-		handle->secData.is_secure = is_secure;
+	handle->secData.is_secure = is_secure;
+
+	if (handle->blockSize > 0)
+		CMDQ_MSG("[warn]set secure after record size:%u\n",
+			handle->blockSize);
+
+	if (!is_secure) {
+		handle->ext.ctrl = cmdq_core_get_controller();
+		handle->ext.exclusive_thread = CMDQ_INVALID_THREAD;
 		return 0;
 	}
 #ifdef CMDQ_SECURE_PATH_SUPPORT
-	CMDQ_VERBOSE("REC: %p secure:%d\n", handle, is_secure);
-	handle->secData.is_secure = is_secure;
+	handle->ext.ctrl = cmdq_sec_get_controller();
+	handle->ext.exclusive_thread = cmdq_get_func()->getThreadID(
+		handle->scenario, true);
+	CMDQ_VERBOSE("REC:%p secure:%d exclusive thread:%d\n",
+		handle, is_secure, handle->ext.exclusive_thread);
 	return 0;
 #else
 	CMDQ_ERR("%s failed since not support secure path\n", __func__);
@@ -1199,135 +1250,77 @@ int32_t cmdq_free_mem(cmdqBackupSlotHandle h_backup_slot)
  *  AFTER cmdq_task_flush() returns, or INSIDE the callback of cmdq_task_flush_async_callback().
  *
  */
-int32_t cmdq_op_read_reg_to_mem(struct cmdqRecStruct *handle,
-			    cmdqBackupSlotHandle h_backup_slot, uint32_t slot_index, uint32_t addr)
+s32 cmdq_op_read_reg_to_mem(struct cmdqRecStruct *handle,
+	cmdqBackupSlotHandle h_backup_slot, u32 slot_index, u32 addr)
 {
-#ifdef CMDQ_GPR_SUPPORT
-	const enum CMDQ_DATA_REGISTER_ENUM valueRegId = CMDQ_DATA_REG_DEBUG;
-	const enum CMDQ_DATA_REGISTER_ENUM destRegId = CMDQ_DATA_REG_DEBUG_DST;
-	const enum CMDQ_EVENT_ENUM regAccessToken = CMDQ_SYNC_TOKEN_GPR_SET_4;
-	const dma_addr_t dramAddr = h_backup_slot + slot_index * sizeof(uint32_t);
-	uint32_t highAddr = 0;
+	const dma_addr_t dram_addr = h_backup_slot + slot_index * sizeof(u32);
+	CMDQ_VARIABLE var_mem_addr = CMDQ_TASK_TEMP_CPR_VAR;
+	s32 status;
 
-	/* lock GPR because we may access it in multiple CMDQ HW threads */
-	cmdq_op_wait(handle, regAccessToken);
+	do {
+		status = cmdq_op_read_reg(handle, addr,
+			&handle->arg_value, ~0);
+		CMDQ_CHECK_AND_BREAK_STATUS(status);
 
-	if (cmdq_core_subsys_from_phys_addr(addr) != CMDQ_SPECIAL_SUBSYS_ADDR) {
-		/* Load into 32-bit GPR (R0-R15) */
-		cmdq_append_command(handle, CMDQ_CODE_READ, addr, valueRegId, 0, 1);
-	} else {
-		/*
-		 * for special sw subsys addr,
-		 * we don't read directly due to append command will acquire
-		 * CMDQ_SYNC_TOKEN_GPR_SET_4 event again.
-		 */
+		status = cmdq_op_assign(handle, &var_mem_addr, (u32)dram_addr);
+		CMDQ_CHECK_AND_BREAK_STATUS(status);
 
-		/* set GPR to address */
-		cmdq_append_command(handle, CMDQ_CODE_MOVE,
-				((valueRegId & 0x1f) << 16) | (4 << 21), addr, 0, 0);
+		status = cmdq_append_command(handle, CMDQ_CODE_WRITE_S,
+			(u32)(var_mem_addr & 0xFFFF),
+			(u32)(handle->arg_value & 0xFFFF),
+			1, 1);
+	} while (0);
 
-		/* read data from address in GPR to GPR */
-		cmdq_append_command(handle, CMDQ_CODE_READ, valueRegId, valueRegId, 1, 1);
-	}
-
-	/* Note that <MOVE> arg_b is 48-bit */
-	/* so writeAddress is split into 2 parts */
-	/* and we store address in 64-bit GPR (P0-P7) */
-	CMDQ_GET_HIGH_ADDR(dramAddr, highAddr);
-	cmdq_append_command(handle, CMDQ_CODE_MOVE,
-			    highAddr |
-			    ((destRegId & 0x1f) << 16) | (4 << 21), (uint32_t) dramAddr, 0, 0);
-
-	/* write value in GPR to memory pointed by GPR */
-	cmdq_append_command(handle, CMDQ_CODE_WRITE, destRegId, valueRegId, 1, 1);
-	/* release the GPR lock */
-	cmdq_op_set_event(handle, regAccessToken);
-
-	return 0;
-
-#else
-	CMDQ_ERR("func:%s failed since CMDQ doesn't support GPR\n", __func__);
-	return -EFAULT;
-#endif				/* CMDQ_GPR_SUPPORT */
+	return status;
 }
 
-int32_t cmdq_op_read_mem_to_reg(struct cmdqRecStruct *handle,
-			    cmdqBackupSlotHandle h_backup_slot, uint32_t slot_index, uint32_t addr)
+s32 cmdq_op_read_mem_to_reg(struct cmdqRecStruct *handle,
+	cmdqBackupSlotHandle h_backup_slot, u32 slot_index, u32 addr)
 {
-#ifdef CMDQ_GPR_SUPPORT
-	const enum CMDQ_DATA_REGISTER_ENUM valueRegId = CMDQ_DATA_REG_DEBUG;
-	const enum CMDQ_DATA_REGISTER_ENUM addrRegId = CMDQ_DATA_REG_DEBUG_DST;
-	const enum CMDQ_EVENT_ENUM regAccessToken = CMDQ_SYNC_TOKEN_GPR_SET_4;
-	const dma_addr_t dramAddr = h_backup_slot + slot_index * sizeof(uint32_t);
-	uint32_t highAddr = 0;
+	const dma_addr_t dram_addr = h_backup_slot + slot_index * sizeof(u32);
+	CMDQ_VARIABLE var_mem_addr = CMDQ_TASK_TEMP_CPR_VAR;
+	s32 status;
 
-	/* lock GPR because we may access it in multiple CMDQ HW threads */
-	cmdq_op_wait(handle, regAccessToken);
+	do {
+		status = cmdq_create_variable_if_need(handle,
+			&handle->arg_value);
+		CMDQ_CHECK_AND_BREAK_STATUS(status);
 
-	/* 1. MOVE slot address to addr GPR */
+		status = cmdq_op_assign(handle, &var_mem_addr, (u32)dram_addr);
+		CMDQ_CHECK_AND_BREAK_STATUS(status);
 
-	/* Note that <MOVE> arg_b is 48-bit */
-	/* so writeAddress is split into 2 parts */
-	/* and we store address in 64-bit GPR (P0-P7) */
-	CMDQ_GET_HIGH_ADDR(dramAddr, highAddr);
-	cmdq_append_command(handle, CMDQ_CODE_MOVE,
-			    highAddr |
-			    ((addrRegId & 0x1f) << 16) | (4 << 21), (uint32_t) dramAddr, 0, 0);	/* arg_a is GPR */
+		/* read dram to temp var */
+		status = cmdq_append_command(handle, CMDQ_CODE_READ_S,
+			(u32)(handle->arg_value & 0xFFFF),
+			(u32)(var_mem_addr & 0xFFFF), 1, 1);
+		CMDQ_CHECK_AND_BREAK_STATUS(status);
 
-	/* 2. read value from src address, which is stroed in GPR, to valueRegId */
-	cmdq_append_command(handle, CMDQ_CODE_READ, addrRegId, valueRegId, 1, 1);
+		status = cmdq_op_write_reg(handle, addr,
+			handle->arg_value, ~0);
+	} while (0);
 
-	/* 3. write from data register */
-	cmdq_op_write_from_data_register(handle, valueRegId, addr);
-
-	/* release the GPR lock */
-	cmdq_op_set_event(handle, regAccessToken);
-
-	return 0;
-#else
-	CMDQ_ERR("func:%s failed since CMDQ doesn't support GPR\n", __func__);
-	return -EFAULT;
-#endif				/* CMDQ_GPR_SUPPORT */
+	return status;
 }
 
-int32_t cmdq_op_write_mem(struct cmdqRecStruct *handle, cmdqBackupSlotHandle h_backup_slot,
-			    uint32_t slot_index, uint32_t value)
+s32 cmdq_op_write_mem(struct cmdqRecStruct *handle,
+	cmdqBackupSlotHandle h_backup_slot, u32 slot_index, u32 value)
 {
-#ifdef CMDQ_GPR_SUPPORT
-	const enum CMDQ_DATA_REGISTER_ENUM valueRegId = CMDQ_DATA_REG_DEBUG;
-	const enum CMDQ_DATA_REGISTER_ENUM destRegId = CMDQ_DATA_REG_DEBUG_DST;
-	const enum CMDQ_EVENT_ENUM regAccessToken = CMDQ_SYNC_TOKEN_GPR_SET_4;
-	const dma_addr_t dramAddr = h_backup_slot + slot_index * sizeof(uint32_t);
-	uint32_t arg_a;
-	uint32_t highAddr = 0;
+	const dma_addr_t dram_addr = h_backup_slot + slot_index * sizeof(u32);
+	CMDQ_VARIABLE var_mem_addr = CMDQ_TASK_TEMP_CPR_VAR;
+	s32 status;
 
-	/* lock GPR because we may access it in multiple CMDQ HW threads */
-	cmdq_op_wait(handle, regAccessToken);
+	do {
+		status = cmdq_op_assign(handle, &handle->arg_value, value);
+		CMDQ_CHECK_AND_BREAK_STATUS(status);
 
-	/* Assign 32-bit GRP with value */
-	arg_a = (CMDQ_CODE_MOVE << 24) | (valueRegId << 16) | (4 << 21);	/* arg_a is GPR */
-	cmdq_append_command(handle, CMDQ_CODE_RAW, arg_a, value, 0, 0);
+		status = cmdq_op_assign(handle, &var_mem_addr, (u32)dram_addr);
+		CMDQ_CHECK_AND_BREAK_STATUS(status);
 
-	/* Note that <MOVE> arg_b is 48-bit */
-	/* so writeAddress is split into 2 parts */
-	/* and we store address in 64-bit GPR (P0-P7) */
-	CMDQ_GET_HIGH_ADDR(dramAddr, highAddr);
-	cmdq_append_command(handle, CMDQ_CODE_MOVE,
-			    highAddr |
-			    ((destRegId & 0x1f) << 16) | (4 << 21), (uint32_t) dramAddr, 0, 0);
+		status = cmdq_append_command(handle, CMDQ_CODE_WRITE_S,
+			var_mem_addr, handle->arg_value, 1, 1);
+	} while (0);
 
-	/* write value in GPR to memory pointed by GPR */
-	cmdq_append_command(handle, CMDQ_CODE_WRITE, destRegId, valueRegId, 1, 1);
-
-	/* release the GPR lock */
-	cmdq_op_set_event(handle, regAccessToken);
-
-	return 0;
-
-#else
-	CMDQ_ERR("func:%s failed since CMDQ doesn't support GPR\n", __func__);
-	return -EFAULT;
-#endif				/* CMDQ_GPR_SUPPORT */
+	return status;
 }
 
 int32_t cmdq_op_finalize_command(struct cmdqRecStruct *handle, bool loop)
@@ -1447,6 +1440,8 @@ int32_t cmdq_task_flush(struct cmdqRecStruct *handle)
 	desc.engineFlag = handle->engineFlag;
 	desc.pVABase = (cmdqU32Ptr_t) (unsigned long)handle->pBuffer;
 	desc.blockSize = handle->blockSize;
+	desc.prop_addr = (cmdqU32Ptr_t) (unsigned long)handle->prop_addr;
+	desc.prop_size = handle->prop_size;
 	/* secure path */
 	cmdq_setup_sec_data_of_command_desc_by_rec_handle(&desc, handle);
 	/* replace instuction position */
@@ -1480,6 +1475,8 @@ int32_t cmdq_task_flush_and_read_register(struct cmdqRecStruct *handle, uint32_t
 	desc.regRequest.regAddresses = (cmdqU32Ptr_t) (unsigned long)addrArray;
 	desc.regValue.count = regCount;
 	desc.regValue.regValues = (cmdqU32Ptr_t) (unsigned long)valueArray;
+	desc.prop_addr = (cmdqU32Ptr_t) (unsigned long)handle->prop_addr;
+	desc.prop_size = handle->prop_size;
 	/* secure path */
 	cmdq_setup_sec_data_of_command_desc_by_rec_handle(&desc, handle);
 	/* replace instuction position */
@@ -1509,6 +1506,8 @@ int32_t cmdq_task_flush_async(struct cmdqRecStruct *handle)
 	desc.regRequest.regAddresses = (cmdqU32Ptr_t) (unsigned long)NULL;
 	desc.regValue.count = 0;
 	desc.regValue.regValues = (cmdqU32Ptr_t) (unsigned long)NULL;
+	desc.prop_addr = (cmdqU32Ptr_t) (unsigned long)handle->prop_addr;
+	desc.prop_size = handle->prop_size;
 	/* secure path */
 	cmdq_setup_sec_data_of_command_desc_by_rec_handle(&desc, handle);
 	/* replace instuction position */
@@ -1557,6 +1556,8 @@ int32_t cmdq_task_flush_async_callback(struct cmdqRecStruct *handle,
 	desc.regRequest.regAddresses = (cmdqU32Ptr_t) (unsigned long)NULL;
 	desc.regValue.count = 0;
 	desc.regValue.regValues = (cmdqU32Ptr_t) (unsigned long)NULL;
+	desc.prop_addr = (cmdqU32Ptr_t) (unsigned long)handle->prop_addr;
+	desc.prop_size = handle->prop_size;
 	/* secure path */
 	cmdq_setup_sec_data_of_command_desc_by_rec_handle(&desc, handle);
 	/* replace instuction position */
@@ -1619,6 +1620,8 @@ s32 _cmdq_task_start_loop_callback(struct cmdqRecStruct *handle,
 	desc.engineFlag = handle->engineFlag;
 	desc.blockSize = handle->blockSize;
 	desc.pVABase = (cmdqU32Ptr_t) (unsigned long)handle->pBuffer;
+	desc.prop_addr = (cmdqU32Ptr_t) (unsigned long)handle->prop_addr;
+	desc.prop_size = handle->prop_size;
 	if (strlen(SRAM_owner_name) > 0) {
 		CMDQ_MSG("Submit task loop in SRAM: %s\n", SRAM_owner_name);
 		desc.use_sram_buffer = true;
@@ -1860,7 +1863,8 @@ int32_t cmdq_task_destroy(struct cmdqRecStruct *handle)
 	vfree(handle->pBuffer);
 	handle->pBuffer = NULL;
 
-	/* Free command handle */
+	cmdq_task_release_property(handle);
+
 	kfree(handle);
 
 	return 0;
@@ -2030,6 +2034,10 @@ s32 cmdq_task_create_delay_thread_dram(void **pp_delay_thread_buffer, u32 *buffe
 	cmdq_task_reset(handle);
 	arg_delay_cpr_start = CMDQ_ARG_CPR_START + cmdq_core_get_delay_start_cpr();
 
+	cmdq_op_wait(handle, CMDQ_SYNC_TOKEN_TIMER);
+	cmdq_op_write_reg(handle, CMDQ_TPR_MASK_PA, CMDQ_DELAY_TPR_MASK_VALUE,
+		CMDQ_DELAY_TPR_MASK_VALUE);
+
 	cmdq_op_wait(handle, CMDQ_EVENT_TIMER_00 + CMDQ_DELAY_TPR_MASK_BIT);
 	for (i = 0; i < CMDQ_DELAY_MAX_SET; i++) {
 		arg_delay_set_cpr_start = arg_delay_cpr_start + CMDQ_DELAY_SET_MAX_CPR * i;
@@ -2086,7 +2094,7 @@ s32 cmdq_task_create_delay_thread_sram(void **pp_delay_thread_buffer, u32 *buffe
 	u32 i;
 	u32 wait_tpr_index = 0;
 	u32 wait_tpr_arg_a = 0;
-	u32 replace_overwrite_index[4] = {0};
+	u32 replace_overwrite_index[2] = {0};
 	u32 replace_overwrite_debug = 0;
 	CMDQ_VARIABLE arg_delay_cpr_start, arg_delay_set_cpr_start;
 	CMDQ_VARIABLE arg_delay_set_start, arg_delay_set_duration, arg_delay_set_result;
@@ -2108,7 +2116,8 @@ s32 cmdq_task_create_delay_thread_sram(void **pp_delay_thread_buffer, u32 *buffe
 	cmdq_op_wait(handle, CMDQ_SYNC_TOKEN_TIMER);
 	wait_tpr_index = cmdq_task_get_instruction_count(handle) - 1;
 	wait_tpr_arg_a = wait_tpr_index * 2 + 1;
-	cmdq_op_write_reg(handle, CMDQ_TPR_MASK_PA, CMDQ_DELAY_TPR_MASK_VALUE, ~0);
+	cmdq_op_write_reg(handle, CMDQ_TPR_MASK_PA, CMDQ_DELAY_TPR_MASK_VALUE,
+		CMDQ_DELAY_TPR_MASK_VALUE);
 	cmdq_op_assign(handle, &spr_min_delay, INIT_MIN_DELAY);
 	cmdq_op_assign(handle, &temp_cpr, INIT_MIN_DELAY);
 
@@ -2136,25 +2145,14 @@ s32 cmdq_task_create_delay_thread_sram(void **pp_delay_thread_buffer, u32 *buffe
 
 	cmdq_op_if(handle, spr_min_delay, CMDQ_EQUAL, temp_cpr);
 		/* no one is waiting, reset wait event value */
-		cmdq_op_write_reg(handle, CMDQ_TPR_MASK_PA, 0, ~0);
+		cmdq_op_write_reg(handle, CMDQ_TPR_MASK_PA, 0,
+			CMDQ_DELAY_TPR_MASK_VALUE);
 		cmdq_op_assign(handle, &spr_temp, CMDQ_EVENT_ARGA(CMDQ_SYNC_TOKEN_TIMER));
 		replace_overwrite_index[0] = cmdq_task_get_instruction_count(handle) - 1;
 	cmdq_op_else(handle);
 		/* wait precisely */
-		cmdq_op_right_shift(handle, &spr_temp, spr_min_delay, 18);
-		cmdq_op_if(handle, spr_temp, CMDQ_NOT_EQUAL, 0);
-			cmdq_op_assign(handle, &spr_temp, CMDQ_EVENT_ARGA(CMDQ_EVENT_TIMER_17));
-			replace_overwrite_index[1] = cmdq_task_get_instruction_count(handle) - 1;
-		cmdq_op_else(handle);
-			cmdq_op_right_shift(handle, &spr_temp, spr_min_delay, 15);
-			cmdq_op_if(handle, spr_temp, CMDQ_NOT_EQUAL, 0);
-				cmdq_op_assign(handle, &spr_temp, CMDQ_EVENT_ARGA(CMDQ_EVENT_TIMER_14));
-				replace_overwrite_index[2] = cmdq_task_get_instruction_count(handle) - 1;
-			cmdq_op_else(handle);
-				cmdq_op_assign(handle, &spr_temp, CMDQ_EVENT_ARGA(CMDQ_EVENT_TIMER_11));
-				replace_overwrite_index[3] = cmdq_task_get_instruction_count(handle) - 1;
-			cmdq_op_end_if(handle);
-		cmdq_op_end_if(handle);
+		cmdq_op_assign(handle, &spr_temp, CMDQ_EVENT_ARGA(CMDQ_EVENT_TIMER_11));
+		replace_overwrite_index[1] = cmdq_task_get_instruction_count(handle) - 1;
 	cmdq_op_end_if(handle);
 
 	cmdq_op_add(handle, &spr_debug, spr_temp, 0);
@@ -2162,6 +2160,7 @@ s32 cmdq_task_create_delay_thread_sram(void **pp_delay_thread_buffer, u32 *buffe
 
 	cmdq_op_finalize_command(handle, true);
 
+	*buffer_size = handle->blockSize;
 	if (handle->blockSize <= 0 || handle->pBuffer == NULL) {
 		CMDQ_ERR("REC: create delay thread fail, block_size = %d\n", handle->blockSize);
 		cmdq_task_destroy(handle);
@@ -2198,7 +2197,6 @@ s32 cmdq_task_create_delay_thread_sram(void **pp_delay_thread_buffer, u32 *buffe
 	if (*pp_delay_thread_buffer != NULL)
 		kfree(*pp_delay_thread_buffer);
 	*pp_delay_thread_buffer = p_new_buffer;
-	*buffer_size = handle->blockSize;
 
 	cmdq_task_destroy(handle);
 	return 0;
@@ -2244,13 +2242,33 @@ static int32_t cmdq_append_logic_command(struct cmdqRecStruct *handle, CMDQ_VARI
 
 		/* arg_a always be SW register */
 		arg_abc_type = (1 << 2) | (arg_b_type << 1) | (arg_c_type);
-		if (true == cmdq_is_cpr(arg_a_i, arg_a_type)
-			|| true == cmdq_is_cpr(arg_b_i, arg_b_type)
-			|| true == cmdq_is_cpr(arg_c_i, arg_c_type)) {
+
+		if (handle->ext.exclusive_thread != CMDQ_INVALID_THREAD) {
+			u32 cpr_offset = CMDQ_CPR_STRAT_ID + CMDQ_THR_CPR_MAX *
+				handle->ext.exclusive_thread;
+
+			/* change cpr to thread cpr directly,
+			 * if we already have exclusive thread.
+			 */
+			if (cmdq_is_cpr(arg_a_i, arg_a_type))
+				arg_a_i = cpr_offset + (arg_a_i -
+					CMDQ_THR_SPR_MAX);
+			if (cmdq_is_cpr(arg_b_i, arg_b_type))
+				arg_b_i = cpr_offset + (arg_b_i -
+					CMDQ_THR_SPR_MAX);
+			if (cmdq_is_cpr(arg_c_i, arg_c_type))
+				arg_c_i = cpr_offset + (arg_c_i -
+					CMDQ_THR_SPR_MAX);
+		} else if (cmdq_is_cpr(arg_a_i, arg_a_type) ||
+			cmdq_is_cpr(arg_b_i, arg_b_type) ||
+			cmdq_is_cpr(arg_c_i, arg_c_type)) {
 			/* save local variable position */
-			CMDQ_MSG("save logic: sop:%d, arg_a: 0x%08x, arg_b: 0x%08x, arg_c: 0x%08x, arg_abc_type: %d\n",
-				 s_op, arg_a_i, arg_b_i, arg_c_i, arg_abc_type);
-			cmdq_save_op_variable_position(handle, cmdq_task_get_instruction_count(handle));
+			CMDQ_MSG(
+				"save logic: sop:%d arg_a:0x%08x arg_b:0x%08x arg_c:0x%08x arg_abc_type:%d\n",
+				 s_op, arg_a_i, arg_b_i, arg_c_i,
+				 arg_abc_type);
+			cmdq_save_op_variable_position(handle,
+				cmdq_task_get_instruction_count(handle));
 		}
 
 		*p_command++ = (arg_b_i << 16) | (arg_c_i);
@@ -3294,4 +3312,30 @@ int32_t cmdqRecWriteAndReleaseResource(struct cmdqRecStruct *handle, enum CMDQ_E
 							uint32_t addr, uint32_t value, uint32_t mask)
 {
 	return cmdq_resource_release_and_write(handle, resourceEvent, addr, value, mask);
+}
+
+s32 cmdq_task_update_property(struct cmdqRecStruct *handle, void *prop_addr, u32 prop_size)
+{
+	void *pprop_addr = NULL;
+
+	if (!handle || !prop_addr || !prop_size) {
+		CMDQ_ERR("Invalid input: handle=%p, prop_addr=%p, prop_size=%d\n",
+			handle, prop_addr, prop_size);
+		return -EINVAL;
+	}
+
+	cmdq_task_release_property(handle);
+
+	/* copy another buffer so that we can release after used */
+	pprop_addr = kzalloc(prop_size, GFP_KERNEL);
+	if (!pprop_addr) {
+		CMDQ_ERR("alloc pprop_addr memory failed\n");
+		return -ENOMEM;
+	}
+
+	memcpy(pprop_addr, prop_addr, prop_size);
+	handle->prop_addr = pprop_addr;
+	handle->prop_size = prop_size;
+
+	return 0;
 }

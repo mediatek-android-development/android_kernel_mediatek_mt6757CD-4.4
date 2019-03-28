@@ -29,7 +29,7 @@ extern void aee_dumpnative(void);
 #endif
 #ifdef CONFIG_SCHED_DEBUG
 extern void sysrq_sched_debug_show(void);
-extern int sysrq_sched_debug_show_at_AEE(void);
+extern void sysrq_sched_debug_show_at_AEE(void);
 #endif
 extern int aee_rr_reboot_reason_show(struct seq_file *m, void *v);
 extern int aee_rr_last_fiq_step(void);
@@ -47,5 +47,8 @@ extern void irq_raise_softirq(const struct cpumask *mask, unsigned int irq);
 
 /* for test case only */
 extern int no_zap_locks;
+
+/* dedicated reboot flow for exception */
+extern void aee_exception_reboot(void);
 
 #endif				/* AEE_COMMON_H */

@@ -81,6 +81,15 @@ config TARGET_COPY_OUT_ODM
 	  OTA project will disable it to prevent exception
 	  If you are not sure about this, do not set it to n
 
+config EXTREME_LOW_RAM
+	bool "Support the device with memory smaller than 512M"
+	default n
+	help
+	  This config decide if device memory < 512M
+	  For 512M device, it has many low mem shrinking mechanism
+	  Normal project will disable it first
+	  If you are not sure about this, do not set it to y
+
 config MTK_LDVT
 	bool "LDVT"
 	help
@@ -146,7 +155,7 @@ config MTK_DCS
 
 config MTK_PASR
 	bool "Support Mediatek DRAM PASR mechanism"
-	depends on MTK_MEMORY_LOWPOWER
+	depends on MTK_MEMORY_LOWPOWER && (MTK_EMI || MTK_EMI_MPU) && MTK_DRAMC
 	default n
 	help
 	  Mediatek DRAM PASR mechanism.
@@ -321,6 +330,7 @@ source "drivers/misc/mediatek/devapc/Kconfig"
 source "drivers/misc/mediatek/dfd/Kconfig"
 source "drivers/misc/mediatek/dramc/Kconfig"
 source "drivers/misc/mediatek/dxcc/Kconfig"
+source "drivers/misc/mediatek/emi/Kconfig"
 source "drivers/misc/mediatek/emi_bwl/Kconfig"
 source "drivers/misc/mediatek/emi_mbw/Kconfig"
 source "drivers/misc/mediatek/emi_mpu/Kconfig"
@@ -369,6 +379,54 @@ config GATOR
 	help
 	  Gator module for ARM's Streamline Performance Analyzer
 
+config MTK_FPSGO
+	bool "Support FPSGO framework"
+	default n
+	depends on MTK_ACAO_SUPPORT
+	help
+	  Support FPSGO framework for UX & Gaming FPS performance and
+	  low power balance. As a perquisite to ensure FPS performance,
+	  FPSGO persuades lowest power consumption for better DoU
+	  endurance and gaming experience.
+	  If you are not sure about this, set n.
+
+config MTK_FPSGO_FBT_GAME
+	bool "Support FPSGO Frame Budget Tuner for Game"
+	default n
+	depends on MTK_FPSGO
+	help
+	  Support FPSGO Frame Budget Tuner for Gaming FPS performance
+	  and low power balance. FBT is designated to achieve on-time
+	  rendering through manipulation of CPU frequencies.
+	  If you are not sure about this, set n.
+
+config MTK_FPSGO_FBT_UX
+	bool "Support FPSGO Frame Budget Tuner for UX"
+	default n
+	depends on MTK_FPSGO
+	help
+	  Support FPSGO Frame Budget Tuner for UX FPS performance and
+	  and low power balance. FBT is designated to achieve on-time
+	  rendering through manipulation of CPU frequencies.
+	  If you are not sure about this, set n.
+
+config MTK_FPSGO_FSTB
+	bool "Support FPSGO FPS STBailizer"
+	default n
+	depends on MTK_FPSGO
+	help
+	  Support FPSGO FPS stabilizer for FPS performance and low
+	  power balance.
+	  If you are not sure about this, set n.
+
+config MTK_FPSGO_MULTI_STAGE_RESCUE
+	bool "Support FPSGO FBT multi-stage rescuer"
+	default n
+	depends on MTK_FPSGO
+	help
+	  Support FPSGO FBT milti-stage boost rescuer.
+	  If you are not sure about this, set n.
+
 endmenu  # PPT
 
 menu "Misc configs"
@@ -413,6 +471,7 @@ config MTK_CACHE_FLUSH_RANGE_PARALLEL
 config MTK_SVP
 	bool "Support Mediatek Shareable Secure Video Playback technology"
 	depends on CMA
+	default y if (ARM || ARM64)
 	help
 	  Mediatek Shareable SVP technology.
 	  It tries to save memory by switching
@@ -467,6 +526,7 @@ source "drivers/misc/mediatek/selinux_warning/Kconfig"
 source "drivers/misc/mediatek/sysenv/Kconfig"
 #
 source "drivers/misc/mediatek/teei/Kconfig"
+source "drivers/misc/mediatek/watchtrust/Kconfig"
 source "drivers/misc/mediatek/vow/Kconfig"
 source "drivers/misc/mediatek/watchpoint/Kconfig"
 source "drivers/misc/mediatek/rt-regmap/Kconfig"
@@ -476,10 +536,18 @@ source "drivers/misc/mediatek/iccs/Kconfig"
 source "drivers/misc/mediatek/fiq_cache/Kconfig"
 source "drivers/misc/mediatek/base/power/mcdi/Kconfig"
 source "drivers/misc/mediatek/geniezone/Kconfig"
-source "drivers/misc/mediatek/time/Kconfig"
+source "drivers/misc/mediatek/timer/Kconfig"
+source "drivers/misc/mediatek/io_boost/Kconfig"
+source "drivers/misc/mediatek/es_reg/Kconfig"
+source "drivers/misc/mediatek/cmo/Kconfig"
+source "drivers/misc/mediatek/tkcore/Kconfig"
 
 config MTK_DM_VERITY_OFF
 	bool "Disable dm-verity"
+	default n
+
+config MTK_IRIS_SUPPORT
+	bool "Biometric authentication - iris secure camera"
 	default n
 
 endmenu    # Misc

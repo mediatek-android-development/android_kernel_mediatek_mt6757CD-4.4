@@ -53,6 +53,7 @@ struct sched_entity;
 #include <linux/resource.h>
 #include <linux/timer.h>
 #include <linux/hrtimer.h>
+#include <linux/kcov.h>
 #include <linux/task_io_accounting.h>
 #include <linux/latencytop.h>
 #include <linux/cred.h>
@@ -353,6 +354,42 @@ extern void init_idle_bootup_task(struct task_struct *idle);
 extern cpumask_var_t cpu_isolated_map;
 
 extern int runqueue_is_locked(int cpu);
+
+#ifdef CONFIG_HOTPLUG_CPU
+extern int sched_isolate_count(const cpumask_t *mask, bool include_offline);
+extern int sched_isolate_cpu(int cpu);
+extern int sched_deisolate_cpu(int cpu);
+extern int sched_deisolate_cpu_unlocked(int cpu);
+extern void update_cpu_isolation_mask_to_mcdi_controller(unsigned int iso_mask);
+#else
+static inline int sched_isolate_count(const cpumask_t *mask,
+				      bool include_offline)
+{
+	cpumask_t count_mask;
+
+	if (include_offline)
+		cpumask_andnot(&count_mask, mask, cpu_online_mask);
+	else
+		return 0;
+
+	return cpumask_weight(&count_mask);
+}
+
+static inline int sched_isolate_cpu(int cpu)
+{
+	return 0;
+}
+
+static inline int sched_deisolate_cpu(int cpu)
+{
+	return 0;
+}
+
+static inline int sched_deisolate_cpu_unlocked(int cpu)
+{
+	return 0;
+}
+#endif
 
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ_COMMON)
 extern void nohz_balance_enter_idle(int cpu);
@@ -1067,30 +1104,6 @@ struct idle_state {
 	unsigned long power;	 /* power consumption in this idle state */
 };
 
-struct energy_env {
-	struct sched_group      *sg_top;
-	struct sched_group      *sg_cap;
-	int                     cap_idx;
-	int                     util_delta;
-	int                     src_cpu;
-	int                     dst_cpu;
-	int                     energy;
-	int                     opp_idx[3]; /* [FIXME] cluster may > 3 */
-	int                     payoff;
-	struct task_struct      *task;
-	struct {
-		int before;
-		int after;
-		int delta;
-		int diff;
-	} nrg;
-	struct {
-		int before;
-		int after;
-		int delta;
-	} cap;
-};
-
 #ifdef CONFIG_MTK_SCHED_EAS_POWER_SUPPORT
 typedef int (*idle_power_func)(int, int, void*, int);
 typedef int (*busy_power_func)(int, void*, int);
@@ -1106,10 +1119,14 @@ typedef enum {
 	SCHED_UNKNOWN_LB
 } SCHED_LB_TYPE;
 
-#ifdef CONFIG_MTK_SCHED_EAS_POWER_SUPPORT
-extern bool is_eas_enabled(void);
-extern bool is_hybrid_enabled(void);
-extern int mtk_cluster_capacity_idx(int cid, struct energy_env *eenv);
+
+#ifdef CONFIG_MTK_SCHED_BOOST
+extern bool sched_boost(void);
+#else
+static inline bool sched_boost(void)
+{
+	return 0;
+}
 #endif
 
 #ifdef CONFIG_MTK_UNIFY_POWER
@@ -1659,9 +1676,6 @@ struct task_struct {
 	unsigned int policy;
 	int nr_cpus_allowed;
 	cpumask_t cpus_allowed;
-#ifdef CONFIG_MTK_ACAO_SUPPORT
-	cpumask_t cpus_allowed_isolated;
-#endif
 
 #ifdef CONFIG_PREEMPT_RCU
 	int rcu_read_lock_nesting;
@@ -2052,6 +2066,16 @@ struct task_struct {
 	/* bitmask and counter of trace recursion */
 	unsigned long trace_recursion;
 #endif /* CONFIG_TRACING */
+#ifdef CONFIG_KCOV
+	/* Coverage collection mode enabled for this task (0 if disabled). */
+	enum kcov_mode kcov_mode;
+	/* Size of the kcov_area. */
+	unsigned	kcov_size;
+	/* Buffer for coverage collection. */
+	void		*kcov_area;
+	/* kcov desciptor wired with this task or NULL. */
+	struct kcov	*kcov;
+#endif
 #ifdef CONFIG_MEMCG
 	struct mem_cgroup *memcg_in_oom;
 	gfp_t memcg_oom_gfp_mask;
@@ -2063,10 +2087,11 @@ struct task_struct {
 
 #ifdef CONFIG_MTK_ENG_BUILD
 #ifdef CONFIG_STACKTRACE
-#define TASK_ADDRS_COUNT 16
+#define TASK_ADDRS_COUNT 5
 	spinlock_t stack_trace_lock;
 	struct stack_trace stack_trace;
-	unsigned long addrs[TASK_ADDRS_COUNT];
+	int selected_trace;
+	unsigned long addrs[2][TASK_ADDRS_COUNT];
 #endif
 #endif
 
@@ -2103,28 +2128,12 @@ extern int arch_task_struct_size __read_mostly;
 #endif
 
 /* Future-safe accessor for struct task_struct's cpus_allowed. */
-#ifndef CONFIG_MTK_ACAO_SUPPORT
 #define tsk_cpus_allowed(tsk) (&(tsk)->cpus_allowed)
-#else
-extern struct cpumask *iso_cpus_ptr;
-extern int enter_isolation;
-enum iso_prio_t {ISO_TURBO, ISO_SCHED, ISO_UNSET};
-
-static inline struct cpumask *tsk_cpus_allowed(struct task_struct *tsk)
-{
-
-	if (enter_isolation &&
-			cpumask_and(&(tsk)->cpus_allowed_isolated, &(tsk)->cpus_allowed, iso_cpus_ptr) &&
-			cpumask_and(&(tsk)->cpus_allowed_isolated, &(tsk)->cpus_allowed_isolated, cpu_active_mask))
-		return (&(tsk)->cpus_allowed_isolated);
-	else
-		return (&(tsk)->cpus_allowed);
-}
-
+enum iso_prio_t {ISO_CUSTOMIZE, ISO_TURBO, ISO_SCHED, ISO_UNSET};
 extern int set_cpu_isolation(enum iso_prio_t prio, struct cpumask *cpumask_ptr);
 extern int unset_cpu_isolation(enum iso_prio_t prio);
-extern void iso_cpumask_init(void);
-#endif
+extern struct cpumask cpu_all_masks;
+extern enum iso_prio_t iso_prio;
 
 #define TNF_MIGRATED	0x01
 #define TNF_NO_GROUP	0x02
@@ -2325,16 +2334,18 @@ static inline void put_task_struct(struct task_struct *t)
 {
 #ifdef CONFIG_MTK_ENG_BUILD
 #ifdef CONFIG_STACKTRACE
-#define TASK_ADDRS_COUNT 16
+#define TASK_ADDRS_COUNT 5
 	unsigned long flags;
 
 	spin_lock_irqsave(&t->stack_trace_lock, flags);
+
 	t->stack_trace.nr_entries = 0;
 	t->stack_trace.max_entries = TASK_ADDRS_COUNT;
-	t->stack_trace.entries = t->addrs;
-	t->stack_trace.skip = 1;
+	t->stack_trace.entries = t->addrs[t->selected_trace];
+	t->stack_trace.skip = 2;
 
 	save_stack_trace(&t->stack_trace);
+	t->selected_trace = (t->selected_trace ^ 0x1) & 0x1;
 	spin_unlock_irqrestore(&t->stack_trace_lock, flags);
 #endif
 #endif
@@ -2375,9 +2386,6 @@ static inline cputime_t task_gtime(struct task_struct *t)
 #endif
 extern void task_cputime_adjusted(struct task_struct *p, cputime_t *ut, cputime_t *st);
 extern void thread_group_cputime_adjusted(struct task_struct *p, cputime_t *ut, cputime_t *st);
-
-extern int task_free_register(struct notifier_block *n);
-extern int task_free_unregister(struct notifier_block *n);
 
 /*
  * Per process flags
@@ -2583,6 +2591,12 @@ static inline void calc_load_exit_idle(void) { }
  * Please use one of the three interfaces below.
  */
 extern unsigned long long notrace sched_clock(void);
+
+/*
+ * alternative sched_clock to get arch_timer cycle as well
+ */
+extern unsigned long long notrace sched_clock_get_cyc(unsigned long long *cyc_ret);
+
 /*
  * See the comment in kernel/sched/clock.c
  */
@@ -3631,6 +3645,36 @@ extern inline int throttled_lb_pair(struct task_group *tg,
 extern int task_hot(struct task_struct *p, struct lb_env *env);
 
 /* for EAS */
+struct energy_env {
+	struct sched_group      *sg_top;
+	struct sched_group      *sg_cap;
+	int                     cap_idx;
+	int                     util_delta;
+	int                     src_cpu;
+	int                     dst_cpu;
+	int                     energy;
+	int                     opp_idx[3]; /* [FIXME] cluster may > 3 */
+	int                     payoff;
+	struct task_struct      *task;
+	struct {
+		int before;
+		int after;
+		int delta;
+		int diff;
+	} nrg;
+	struct {
+		int before;
+		int after;
+		int delta;
+	} cap;
+};
+
+#ifdef CONFIG_MTK_SCHED_EAS_POWER_SUPPORT
+extern bool is_eas_enabled(void);
+extern bool is_hybrid_enabled(void);
+extern int mtk_cluster_capacity_idx(int cid, struct energy_env *eenv);
+#endif
+
 extern int calc_util_delta(struct energy_env *eenv, int cpu);
 extern unsigned long __get_cpu_usage(int cpu, int delta);
 extern int calc_usage_delta(struct energy_env *eenv, int cpu);
@@ -3639,8 +3683,7 @@ extern int calc_usage_delta(struct energy_env *eenv, int cpu);
 extern inline struct cfs_rq *group_cfs_rq(struct sched_entity *grp);
 extern inline struct cfs_rq *cfs_rq_of(struct sched_entity *se);
 extern struct sched_entity *__pick_next_entity(struct sched_entity *se);
-extern unsigned long
-get_boosted_task_util(struct task_struct *task);
+extern void get_task_util(struct task_struct *p, unsigned long *util, unsigned long *boost);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 /* An entity is a task if it doesn't "own" a runqueue */

@@ -684,7 +684,7 @@ static int mtk_pconf_parse_conf(struct pinctrl_dev *pctldev,
 		ret = mtk_pconf_set_pull_select(pctl, pin, true, false, arg);
 		break;
 	case PIN_CONFIG_INPUT_ENABLE:
-		mtk_pmx_gpio_set_direction(pctldev, NULL, pin, false);
+		/* mtk_pmx_gpio_set_direction(pctldev, NULL, pin, false); */
 		ret = mtk_pconf_set_ies_smt(pctl, pin, arg, param);
 		break;
 	case PIN_CONFIG_OUTPUT:
@@ -692,7 +692,7 @@ static int mtk_pconf_parse_conf(struct pinctrl_dev *pctldev,
 		ret = mtk_pmx_gpio_set_direction(pctldev, NULL, pin, false);
 		break;
 	case PIN_CONFIG_INPUT_SCHMITT_ENABLE:
-		mtk_pmx_gpio_set_direction(pctldev, NULL, pin, true);
+		/* mtk_pmx_gpio_set_direction(pctldev, NULL, pin, true); */
 		ret = mtk_pconf_set_ies_smt(pctl, pin, arg, param);
 		break;
 	case PIN_CONFIG_DRIVE_STRENGTH:
@@ -1158,7 +1158,7 @@ static int mtk_gpio_get_direction(struct gpio_chip *chip, unsigned offset)
 		return !mtk_pinctrl_get_gpio_direction(pctl, offset);
 
 	if (pctl->devdata->mt_get_gpio_dir) {
-		/* Used by smartphone projects */
+		/* Used by smartphone projects with MTK GPIO driver */
 		dir = pctl->devdata->mt_get_gpio_dir(offset | 0x80000000);
 		return dir;
 	}
@@ -1351,6 +1351,33 @@ static void mtk_eint_unmask(struct irq_data *d)
 }
 #endif
 
+unsigned int mtk_gpio_debounce_select(const unsigned int *dbnc_infos,
+	int dbnc_infos_num, unsigned int debounce)
+{
+	unsigned int i;
+	unsigned int dbnc = dbnc_infos_num;
+
+	for (i = 0; i < dbnc_infos_num; i++) {
+		if (debounce <= dbnc_infos[i]) {
+			dbnc = i;
+			break;
+		}
+	}
+	return dbnc;
+}
+
+#ifndef CONFIG_MTK_EIC
+static void mtk_eint_set_sw_debounce(struct irq_data *d,
+				     struct mtk_pinctrl *pctl,
+				     unsigned debounce)
+{
+	unsigned int eint = d->hwirq;
+
+	pctl->eint_sw_debounce_en[eint] = 1;
+	pctl->eint_sw_debounce[eint] = debounce;
+}
+#endif
+
 static int mtk_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
 	unsigned debounce)
 {
@@ -1386,6 +1413,12 @@ static int mtk_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
 		}
 	}
 
+	if (pctl->devdata->spec_debounce_select)
+		dbnc = pctl->devdata->spec_debounce_select(debounce);
+	else
+		dbnc = mtk_gpio_debounce_select(debounce_time,
+			ARRAY_SIZE(debounce_time), debounce);
+
 	if (!mtk_eint_get_mask(pctl, eint_num)) {
 		mtk_eint_mask(d);
 		unmask = 1;
@@ -1404,9 +1437,12 @@ static int mtk_gpio_set_debounce(struct gpio_chip *chip, unsigned offset,
 	/* Delay a while (more than 2T) to wait for hw debounce counter reset
 	 * work correctly
 	 */
-	udelay(1);
+	udelay(100);
 	if (unmask == 1)
 		mtk_eint_unmask(d);
+
+	if (d->hwirq >= pctl->devdata->db_cnt)
+		mtk_eint_set_sw_debounce(d, pctl, debounce);
 
 	return 0;
 #endif
@@ -2079,6 +2115,77 @@ mtk_eint_debounce_process(struct mtk_pinctrl *pctl, int index)
 }
 
 #ifndef CONFIG_MTK_EIC
+/*
+ * mt_eint_print_status: Print the EINT status register.
+ */
+void mt_eint_print_status(void)
+{
+	unsigned int status, eint_num;
+	unsigned int offset;
+	const struct mtk_eint_offsets *eint_offsets =
+		&pctl->devdata->eint_offsets;
+	void __iomem *reg_base =  mtk_eint_get_offset(pctl, 0, eint_offsets->stat);
+	unsigned int triggered_eint;
+
+	pr_notice("EINT_STA:");
+	for (eint_num = 0; eint_num < pctl->devdata->ap_num; reg_base += 4, eint_num += 32) {
+		/* read status register every 32 interrupts */
+		status = readl(reg_base);
+		if (status)
+			pr_notice("EINT Module - addr:%p,EINT_STA = 0x%x\n",
+				reg_base, status);
+		else
+			continue;
+
+		while (status) {
+			offset = __ffs(status);
+			triggered_eint = eint_num + offset;
+			pr_notice("EINT %d is pending\n", triggered_eint);
+			status &= ~BIT(offset);
+		}
+	}
+	pr_notice("\n");
+}
+EXPORT_SYMBOL(mt_eint_print_status);
+
+static void mtk_eint_sw_debounce_end(unsigned long data)
+{
+	unsigned long flags;
+	struct irq_data *d = (struct irq_data *)data;
+	struct mtk_pinctrl *pctl = irq_data_get_irq_chip_data(d);
+	const struct mtk_eint_offsets *eint_offsets =
+					&pctl->devdata->eint_offsets;
+	void __iomem *reg = mtk_eint_get_offset(pctl, d->hwirq,
+						eint_offsets->stat);
+	unsigned int status;
+
+	local_irq_save(flags);
+
+	mtk_eint_unmask(d);
+	status = readl(reg) & (1 << (d->hwirq%32));
+	if (status)
+		generic_handle_irq(d->irq);
+
+	local_irq_restore(flags);
+}
+
+static void mtk_eint_sw_debounce_start(struct mtk_pinctrl *pctl,
+				       struct irq_data *d,
+				       int index)
+{
+	struct timer_list *t = &pctl->eint_timers[index];
+	u32 debounce = pctl->eint_sw_debounce[index];
+
+	t->expires = jiffies + usecs_to_jiffies(debounce);
+	t->data = (unsigned long)d;
+	t->function = mtk_eint_sw_debounce_end;
+
+	if (!timer_pending(t)) {
+		init_timer(t);
+		add_timer(t);
+	}
+}
+
 static void mtk_eint_irq_handler(struct irq_desc *desc)
 {
 	struct irq_chip *chip = irq_desc_get_chip(desc);
@@ -2115,7 +2222,11 @@ static void mtk_eint_irq_handler(struct irq_desc *desc)
 							   pin->pin.number);
 			}
 
-			generic_handle_irq(virq);
+			if (pctl->eint_sw_debounce_en[index]) {
+				mtk_eint_mask(irq_get_irq_data(virq));
+				mtk_eint_sw_debounce_start(pctl, irq_get_irq_data(virq), index);
+			} else
+				generic_handle_irq(virq);
 
 			if (dual_edges) {
 				curr_level = mtk_eint_flip_edge(pctl, index);
@@ -2398,11 +2509,12 @@ int mtk_pctrl_init(struct platform_device *pdev,
 	if (mt_gpio_create_attr(&pdev->dev))
 		pr_warn("mt_gpio create attribute error\n");
 
+#ifndef CONFIG_MTK_EIC
 	if (!of_property_read_bool(np, "interrupt-controller")) {
 		pr_warn("pinctrl doesnot have inter\n");
 		return 0;
 	}
-#ifndef CONFIG_MTK_EIC
+
 	/* Get EINT register base from dts. */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -2439,6 +2551,27 @@ int mtk_pctrl_init(struct platform_device *pdev,
 		goto chip_error;
 	}
 
+	pctl->eint_timers = devm_kcalloc(&pdev->dev, pctl->devdata->ap_num,
+					 sizeof(struct timer_list), GFP_KERNEL);
+	if (!pctl->eint_timers) {
+		ret = -ENOMEM;
+		goto chip_error;
+	}
+
+	pctl->eint_sw_debounce_en = devm_kcalloc(&pdev->dev, pctl->devdata->ap_num,
+						 sizeof(int), GFP_KERNEL);
+	if (!pctl->eint_sw_debounce_en) {
+		ret = -ENOMEM;
+		goto chip_error;
+	}
+
+	pctl->eint_sw_debounce = devm_kcalloc(&pdev->dev, pctl->devdata->ap_num,
+					      sizeof(u32), GFP_KERNEL);
+	if (!pctl->eint_sw_debounce) {
+		ret = -ENOMEM;
+		goto chip_error;
+	}
+
 	irq = irq_of_parse_and_map(np, 0);
 	if (!irq) {
 		dev_err(&pdev->dev, "couldn't parse and map irq\n");
@@ -2446,8 +2579,14 @@ int mtk_pctrl_init(struct platform_device *pdev,
 		goto chip_error;
 	}
 
-	pctl->domain = irq_domain_add_linear(np,
-		pctl->devdata->ap_num, &irq_domain_simple_ops, NULL);
+	if (pctl->devdata->mtk_irq_domain_ops) {
+		pctl->domain = irq_domain_add_linear(np,
+			pctl->devdata->ap_num, pctl->devdata->mtk_irq_domain_ops, NULL);
+	} else {
+		pctl->domain = irq_domain_add_linear(np,
+			pctl->devdata->ap_num, &irq_domain_simple_ops, NULL);
+	}
+
 	if (!pctl->domain) {
 		dev_err(&pdev->dev, "Couldn't register IRQ domain\n");
 		ret = -ENOMEM;

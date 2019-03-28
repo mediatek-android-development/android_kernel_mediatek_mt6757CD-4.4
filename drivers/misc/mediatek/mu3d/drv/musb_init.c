@@ -363,6 +363,7 @@ static inline void mtu3d_u2_common_intr_handler(u32 dwIntrUsbValue)
 		os_writel(U3D_LTSSM_INFO, CLR_DISABLE_CNT);
 		os_printk(K_NOTICE, "w1c, U3D_LTSSM_INFO, CLR_DISABLE_CNT\n");
 #endif
+		trigger_disconnect_check_work();
 	}
 
 	if (dwIntrUsbValue & RESUME_INTR) {
@@ -894,7 +895,7 @@ static int mtu3d_probe(struct platform_device *pdev)
 	}
 
 /* run time force on */
-#if defined(CONFIG_FPGA_EARLY_PORTING) || defined(U3_COMPLIANCE) || defined(FOR_BRING_UP)
+#if defined(CONFIG_FPGA_EARLY_PORTING) || defined(FOR_BRING_UP)
 	mu3d_force_on = 1;
 #endif
 

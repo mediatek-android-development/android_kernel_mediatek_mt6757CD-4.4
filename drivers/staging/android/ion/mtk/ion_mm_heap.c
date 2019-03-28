@@ -801,10 +801,11 @@ void ion_mm_heap_memory_detail(void)
 	bool has_orphaned = false;
 	struct ion_mm_buffer_info *bug_info;
 	struct ion_mm_buf_debug_info *pdbg;
+	char seq_log[448];
+	char seq_fmt[] = "|0x%p %10zu %5d(%5d) %16s %2d %5u-%-6u %48s |";
+	int seq_log_count = 0;
 
-	/* ion_mm_heap_for_each_pool(write_mm_page_pool); */
-
-	ION_PRINT_LOG_OR_SEQ(NULL, "%16.s(%16.s) %16.s %16.s %s\n",
+	ION_PRINT_LOG_OR_SEQ(NULL, "%16s(%16s) %6s %12s %s\n",
 			     "client", "dbg_name", "pid", "size", "address");
 	ION_PRINT_LOG_OR_SEQ(NULL, "----------------------------------------------------\n");
 
@@ -817,6 +818,7 @@ void ion_mm_heap_memory_detail(void)
 			need_dev_lock = false;
 	}
 
+	memset(seq_log, 0, 448);
 	for (n = rb_first(&dev->clients); n; n = rb_next(n)) {
 		struct ion_client
 		*client = rb_entry(n, struct ion_client, node);
@@ -829,17 +831,29 @@ void ion_mm_heap_memory_detail(void)
 				continue;
 		}
 
+		seq_log_count++;
 		if (client->task) {
 			char task_comm[TASK_COMM_LEN];
 
 			get_task_comm(task_comm, client->task);
-			ION_PRINT_LOG_OR_SEQ(NULL, "%16.s(%16.s) %16u %16zu 0x%p\n",
-					     task_comm, client->dbg_name, client->pid, size, client);
+			sprintf(seq_log + strlen(seq_log),
+				"|%16s(%16s) %6u %12zu 0x%p |",
+				task_comm, client->dbg_name,
+				client->pid, size, client);
 		} else {
-			ION_PRINT_LOG_OR_SEQ(NULL, "%16.s(%16.s) %16u %16zu 0x%p\n",
-					     client->name, "from_kernel", client->pid, size, client);
+			sprintf(seq_log + strlen(seq_log),
+				"|%16s(%16s) %6u %12zu 0x%p |",
+				client->name, "from_kernel",
+				client->pid, size, client);
+		}
+
+		if ((seq_log_count % 3) == 0) {
+			ION_PRINT_LOG_OR_SEQ(NULL, "%s\n", seq_log);
+			memset(seq_log, 0, 448);
 		}
 	}
+
+	ION_PRINT_LOG_OR_SEQ(NULL, "%s\n", seq_log);
 
 	if (need_dev_lock)
 		up_read(&dev->lock);
@@ -849,16 +863,14 @@ void ion_mm_heap_memory_detail(void)
 skip_client_entry:
 
 	ION_PRINT_LOG_OR_SEQ(NULL,
-			     "%s %8s %s %16s %10s %10s %10s %10s %32s\n",
-			     "buffer    ", "size",
-			     "pid(alloc_pid)", "comm(client)", "v1", "v2", "v3", "v4", "dbg_name");
+			     "%s %8s %s %16s %6s %10s %32s\n",
+			     "buffer	", "size",
+			     "pid(alloc_pid)", "comm(client)", "heapid", "v1-v2", "dbg_name");
 
 	if (mutex_trylock(&dev->buffer_lock)) {
-		char seq_log[384];
-		int seq_log_count = 0;
-		char seq_fmt[] = "0x%p %10zu %5d(%5d) %16s %10u %10u %10u %10u %48s  ";
+		seq_log_count = 0;
 
-		memset(seq_log, 0, 384);
+		memset(seq_log, 0, 448);
 		for (n = rb_first(&dev->buffers); n; n = rb_next(n)) {
 			struct ion_buffer
 			*buffer = rb_entry(n, struct ion_buffer, node);
@@ -886,13 +898,14 @@ skip_client_entry:
 				seq_log_count++;
 				sprintf(seq_log + strlen(seq_log), seq_fmt,
 					buffer, buffer->size,
-					buffer->pid, bug_info->pid, buffer->task_comm,
-					pdbg->value1, pdbg->value2, pdbg->value3, pdbg->value4,
-					cam_heap ? "ion_camera_heap" : pdbg->dbg_name);
+					buffer->pid, bug_info->pid,
+					buffer->task_comm, buffer->heap->id,
+					pdbg->value1, pdbg->value2,
+					pdbg->dbg_name);
 
-				if ((seq_log_count % 2) == 0) {
+				if ((seq_log_count % 3) == 0) {
 					ION_PRINT_LOG_OR_SEQ(NULL, "%s\n", seq_log);
-					memset(seq_log, 0, 384);
+					memset(seq_log, 0, 448);
 				}
 			}
 		}
@@ -962,6 +975,7 @@ struct ion_heap *ion_mm_heap_create(struct ion_platform_heap *unused)
 	}
 
 	heap->heap.debug_show = ion_mm_heap_debug_show;
+	ion_comm_init();
 	return &heap->heap;
 
 err_create_pool:
@@ -1223,6 +1237,26 @@ long ion_mm_ioctl(struct ion_client *client, unsigned int cmd, unsigned long arg
 		}
 	}
 	break;
+	case ION_MM_ACQ_CACHE_POOL:
+	{
+		ion_comm_event_notify(1, param.cache_pool_info_param.len);
+		IONMSG("[ion_heap]: ION_MM_ACQ_CACHE_POOL-%d.\n", param.mm_cmd);
+	}
+	break;
+	case ION_MM_QRY_CACHE_POOL:
+	{
+		struct ion_heap *movable_ion_heap =
+					ion_drv_get_heap(g_ion_device,
+							 ION_HEAP_TYPE_MULTIMEDIA_FOR_CAMERA,
+							 1);
+		param.cache_pool_info_param.ret = ion_mm_heap_pool_size(movable_ion_heap,
+									__GFP_HIGHMEM | __GFP_MOVABLE,
+									true);
+		IONMSG("[ion_heap]: ION_MM_QRY_CACHE_POOL, heap 0x%p, id %d, ret: %d.\n",
+		       movable_ion_heap, param.cache_pool_info_param.heap_id_mask,
+		       param.cache_pool_info_param.ret);
+	}
+	break;
 	default:
 		IONMSG("[ion_heap]: Error. Invalid command(%d).\n", param.mm_cmd);
 		ret = -EFAULT;
@@ -1234,6 +1268,128 @@ long ion_mm_ioctl(struct ion_client *client, unsigned int cmd, unsigned long arg
 		ret_copy = copy_to_user((void __user *)arg, &param, sizeof(struct ion_mm_data));
 	ION_FUNC_LEAVE;
 	return ret;
+}
+
+int ion_mm_heap_cache_allocate(struct ion_heap *heap,
+			       struct ion_buffer *buffer,
+			       unsigned long size,
+			       unsigned long align,
+			       unsigned long flags)
+{
+	struct ion_system_heap
+	*sys_heap = container_of(heap,
+			struct ion_system_heap,
+			heap);
+	struct sg_table *table = NULL;
+	struct scatterlist *sg;
+	int ret;
+	struct list_head pages;
+	struct page_info *info = NULL;
+	struct page_info *tmp_info = NULL;
+	int i = 0;
+	unsigned long size_remaining = PAGE_ALIGN(size);
+	unsigned int max_order = orders[0];
+	unsigned long long start, end;
+
+	INIT_LIST_HEAD(&pages);
+	start = sched_clock();
+
+	/* add time interval to alloc 64k page in low memory status*/
+	if ((start - alloc_large_fail_ts) < 500000000)
+		max_order = orders[1];
+
+	while (size_remaining > 0) {
+		info = alloc_largest_available(sys_heap, buffer, size_remaining,
+					       max_order);
+		if (!info) {
+			IONMSG("%s cache_alloc largest available failed info is null.\n", __func__);
+			break;
+		}
+		list_add_tail(&info->list, &pages);
+		size_remaining -= (1 << info->order) * PAGE_SIZE;
+		max_order = info->order;
+		i++;
+	}
+	end = sched_clock();
+
+	table = kzalloc(sizeof(*table), GFP_KERNEL);
+	if (!table) {
+		IONMSG("%s cache kzalloc failed table is null.\n", __func__);
+		goto err;
+	}
+
+	ret = sg_alloc_table(table, i, GFP_KERNEL);
+	if (ret) {
+		IONMSG("%s sg cache alloc table failed %d.\n", __func__, ret);
+		goto err1;
+	}
+
+	sg = table->sgl;
+	list_for_each_entry_safe(info, tmp_info, &pages, list) {
+		struct page *page = info->page;
+
+		sg_set_page(sg, page, (1 << info->order) * PAGE_SIZE, 0);
+		sg = sg_next(sg);
+		list_del(&info->list);
+		kfree(info);
+	}
+
+	buffer->sg_table = table;
+	if (size != size_remaining)
+		IONMSG("%s cache_alloc alloc, size %ld, remain %ld.\n", __func__, size, size_remaining);
+	return 0;
+err1:
+	kfree(table);
+	IONMSG("error: cache_alloc for sg_table fail\n");
+err:
+	if (info) {
+		list_for_each_entry_safe(info, tmp_info, &pages, list) {
+			free_buffer_page(sys_heap, buffer, info->page, info->order);
+			kfree(info);
+		}
+	}
+	IONMSG("error: mm_cache_alloc fail: size=%lu, flag=%lu.\n", size, flags);
+
+	return -ENOMEM;
+}
+
+void ion_mm_heap_cache_free(struct ion_buffer *buffer)
+{
+	struct ion_heap *heap = buffer->heap;
+	struct ion_system_heap *sys_heap = container_of(heap, struct ion_system_heap, heap);
+	struct sg_table *table = buffer->sg_table;
+	struct scatterlist *sg;
+	LIST_HEAD(pages);
+	int i;
+
+	if (!(buffer->private_flags & ION_PRIV_FLAG_SHRINKER_FREE))
+		ion_heap_buffer_zero(buffer);
+
+	for_each_sg(table->sgl, sg, table->nents, i)
+		free_buffer_page(sys_heap, buffer, sg_page(sg), get_order(sg->length));
+
+	sg_free_table(table);
+	kfree(table);
+}
+
+int ion_mm_heap_pool_size(struct ion_heap *heap, gfp_t gfp_mask, bool cache)
+{
+	struct ion_system_heap *sys_heap;
+	int nr_total = 0;
+	int i;
+
+	sys_heap = container_of(heap, struct ion_system_heap, heap);
+
+	for (i = 0; i < num_orders; i++) {
+		struct ion_page_pool *pool = sys_heap->pools[i];
+
+		if (!cache)
+			nr_total += (ion_page_pool_shrink(pool, gfp_mask, 0) * PAGE_SIZE);
+		if (cache)
+			nr_total += (ion_page_pool_shrink(sys_heap->cached_pools[i], gfp_mask, 0) * PAGE_SIZE);
+	}
+
+	return nr_total;
 }
 
 #ifdef CONFIG_PM

@@ -29,4 +29,10 @@ obj-y += met_smi_configuration_6758.o
 else ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6739"))
 ccflags-y += -DSMI_MET_ZIO
 obj-y += met_smi_configuration_6739.o
+else ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6775"))
+ccflags-y += -DSMI_MET_CAN
+obj-y += met_smi_configuration_6775.o
+else ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6771"))
+ccflags-y += -DSMI_MET_SYL
+obj-y += met_smi_configuration_6771.o
 endif

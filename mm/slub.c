@@ -44,7 +44,9 @@
 
 #ifdef CONFIG_ARM64
 #ifdef CONFIG_MTK_MEMCFG
+#ifndef CONFIG_RANDOMIZE_BASE
 #define MTK_COMPACT_SLUB_TRACK
+#endif
 #endif
 #endif
 
@@ -194,7 +196,12 @@ static struct notifier_block slab_notifier;
 /*
  * Tracking user of a slab.
  */
+#ifdef CONFIG_RANDOMIZE_BASE
+#define TRACK_ADDRS_COUNT 4
+#else
 #define TRACK_ADDRS_COUNT 8
+#endif
+
 
 #ifdef MTK_COMPACT_SLUB_TRACK
 struct track {
@@ -5564,6 +5571,10 @@ static int sysfs_slab_add(struct kmem_cache *s)
 	const char *name;
 	int unmergeable = slab_unmergeable(s);
 
+	if (!unmergeable && disable_higher_order_debug &&
+			(slub_debug & DEBUG_METADATA_FLAGS))
+		unmergeable = 1;
+
 	if (unmergeable) {
 		/*
 		 * Slabcache can never be merged so we can use the name proper.
@@ -5937,6 +5948,12 @@ static int mtk_memcfg_slabtrace_show(struct seq_file *m, void *p)
 
 	mutex_lock(&slab_mutex);
 	list_for_each_entry(s, &slab_caches, list) {
+		/* We only want to know the backtraces of kmalloc-*
+		 * Backtraces of other kmem_cache can be find easily
+		 */
+		if (!strstr(s->name, "kmalloc-"))
+			continue;
+
 		seq_printf(m, "========== kmem_cache: %s alloc_calls ==========\n", s->name);
 		if (!(s->flags & SLAB_STORE_USER))
 			continue;

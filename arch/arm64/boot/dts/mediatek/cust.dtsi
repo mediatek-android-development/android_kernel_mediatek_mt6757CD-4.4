@@ -54,17 +54,17 @@
 		status = "okay";
 	};
 
-		synaptics_touch_mtk:synaptics_touch@70 {
-			compatible = "mediatek,synaptics_touch";
-			reg = <0x70>;
-			status = "okay";
-		};
+	synaptics_touch_mtk:synaptics_touch@70 {
+		compatible = "mediatek,synaptics_touch";
+		reg = <0x70>;
+		status = "okay";
+	};
 
-		nvt_touch_mtk:nvt_touch@62 {
-			compatible = "mediatek,nvt_touch";
-			reg = <0x62>;
-			status = "okay";
-		};
+	nvt_touch_mtk:nvt_touch@62 {
+		compatible = "mediatek,nvt_touch";
+		reg = <0x62>;
+		status = "okay";
+	};
 
 };
 
@@ -434,8 +434,8 @@
 };
 
 &touch {
-	interrupt-parent = <&eintc>;
-	interrupts = <1 IRQ_TYPE_EDGE_FALLING>;
+	interrupt-parent = <0x10>;
+	interrupts = <1 2>;
 	debounce = <1 0>;
 	status = "okay";
 };
@@ -595,7 +595,7 @@
 };
 
 &touch {
-	vtouch-supply = <&mt_pmic_vldo28_ldo_reg>;
+	vtouch-supply = <0x25>;
 	status = "okay";
 };
 
@@ -611,23 +611,19 @@
 *************************/
 
 &keypad {
-	mediatek,kpd-key-debounce = <1024>;
-	mediatek,kpd-sw-pwrkey = <116>;
-	mediatek,kpd-hw-pwrkey = <8>;
-	mediatek,kpd-sw-rstkey  = <115>;
-	mediatek,kpd-hw-rstkey = <17>;
-	mediatek,kpd-use-extend-type = <0>;
-	/*HW Keycode [0~71] -> Linux Keycode*/
-	mediatek,kpd-hw-map-num = <72>;
-	mediatek,kpd-hw-init-map = <114 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 >;
-	mediatek,kpd-pwrkey-eint-gpio = <0>;
-	mediatek,kpd-pwkey-gpio-din  = <0>;
-	mediatek,kpd-hw-dl-key0 = <17>;
-	mediatek,kpd-hw-dl-key1 = <0>;
-	mediatek,kpd-hw-dl-key2 = <8>;
-	mediatek,kpd-hw-recovery-key = <17>;
-	mediatek,kpd-hw-factory-key = <0>;
-	status = "okay";
+		mediatek,kpd-key-debounce = <0x400>;
+		mediatek,kpd-sw-pwrkey = <0x74>;
+		mediatek,kpd-hw-pwrkey = <0x8>;
+		mediatek,kpd-sw-rstkey = <0x66>;
+		mediatek,kpd-hw-rstkey = <0x11>;
+		mediatek,kpd-use-extend-type = <0x0>;
+		mediatek,kpd-hw-map-num = <0x48>;
+		mediatek,kpd-hw-init-map = <0x73 0x72 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0 0x0>;
+		mediatek,kpd-pwrkey-eint-gpio = <0x0>;
+		mediatek,kpd-pwkey-gpio-din = <0x0>;
+		mediatek,kpd-hw-recovery-key = <0x0>;
+		mediatek,kpd-hw-factory-key = <0x1>;
+    	status = "okay";
 };
 
 

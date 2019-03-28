@@ -73,21 +73,6 @@ static const struct of_device_id rgu_of_match[] = {
 #define AP_RGU_WDT_IRQ_ID       wdt_irq_id
 #define AP_RGU_SSPM_WDT_IRQ_ID  wdt_sspm_irq_id
 
-/**
- * Set the reset length: we will set a special magic key.
- * For Power off and power on reset, the INTERVAL default value is 0x7FF.
- * We set Interval[1:0] to different value to distinguish different stage.
- * Enter pre-loader, we will set it to 0x0
- * Enter u-boot, we will set it to 0x1
- * Enter kernel, we will set it to 0x2
- * And the default value is 0x3 which means reset from a power off and power on reset
- */
-#define POWER_OFF_ON_MAGIC	(0x3)
-#define PRE_LOADER_MAGIC	(0x0)
-#define U_BOOT_MAGIC		(0x1)
-#define KERNEL_MAGIC		(0x2)
-#define MAGIC_NUM_MASK		(0x3)
-
 #ifdef CONFIG_KICK_SPM_WDT
 #include <mach/mt_spm.h>
 static void spm_wdt_init(void);
@@ -103,6 +88,16 @@ static bool wdt_intr_has_trigger; /* For test use */
 #ifndef CONFIG_KICK_SPM_WDT
 static unsigned int timeout;
 #endif
+
+static void mtk_wdt_mark_stage(unsigned int stage)
+{
+	unsigned int reg = __raw_readl(MTK_WDT_NONRST_REG2);
+
+	reg = (reg & ~(RGU_STAGE_MASK << MTK_WDT_NONRST2_STAGE_OFS))
+		| (stage << MTK_WDT_NONRST2_STAGE_OFS);
+
+	mt_reg_sync_writel(reg, MTK_WDT_NONRST_REG2);
+}
 
 /*
  *   this function set the timeout value.
@@ -258,12 +253,15 @@ void mtk_wdt_restart(enum wd_restart_type type)
 {
 	struct device_node *np_rgu;
 
-	np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
-
 	if (!toprgu_base) {
+
+		np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
 		toprgu_base = of_iomap(np_rgu, 0);
-		if (!toprgu_base)
+
+		if (!toprgu_base) {
 			pr_debug("RGU iomap failed\n");
+			return;
+		}
 	}
 
 	if (type == WD_TYPE_NORMAL) {
@@ -355,14 +353,18 @@ void wdt_arch_reset(char mode)
 {
 	unsigned int wdt_mode_val;
 	struct device_node *np_rgu;
-
-	pr_debug("wdt_arch_reset called@Kernel mode =%d\n", mode);
-	np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
+	pr_debug("%s: mode=0x%x\n", __func__, mode);
 
 	if (!toprgu_base) {
+
+		np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
 		toprgu_base = of_iomap(np_rgu, 0);
-		if (!toprgu_base)
+
+		if (!toprgu_base) {
 			pr_info("RGU iomap failed\n");
+			return;
+		}
+
 		pr_debug("RGU base: 0x%p  RGU irq: %d\n", toprgu_base, wdt_irq_id);
 	}
 
@@ -389,7 +391,7 @@ void wdt_arch_reset(char mode)
 
 	wdt_mode_val = __raw_readl(MTK_WDT_MODE);
 
-	pr_debug("wdt_arch_reset called MTK_WDT_MODE =%x\n", wdt_mode_val);
+	pr_debug("%s: wdt_mode=0x%x\n", __func__, wdt_mode_val);
 
 	/* clear autorestart bit: autoretart: 1, bypass power key, 0: not bypass power key */
 	wdt_mode_val &= (~MTK_WDT_MODE_AUTO_RESTART);
@@ -398,10 +400,10 @@ void wdt_arch_reset(char mode)
 	wdt_mode_val &= (~(MTK_WDT_MODE_IRQ | MTK_WDT_MODE_IRQ_LEVEL_EN |
 						MTK_WDT_MODE_ENABLE | MTK_WDT_MODE_DUAL_MODE));
 
-	if (mode)
-		/* mode != 0 means by pass power key reboot, We using auto_restart bit as by pass power key flag */
+	if (mode & WD_SW_RESET_BYPASS_PWR_KEY) {
+		/* Bypass power key reboot, We using auto_restart bit as by pass power key flag */
 		wdt_mode_val = wdt_mode_val | (MTK_WDT_MODE_KEY | MTK_WDT_MODE_EXTEN | MTK_WDT_MODE_AUTO_RESTART);
-	else
+	} else
 		wdt_mode_val = wdt_mode_val | (MTK_WDT_MODE_KEY | MTK_WDT_MODE_EXTEN);
 
 	/*set latch register to 0 for SW reset*/
@@ -409,22 +411,35 @@ void wdt_arch_reset(char mode)
 
 	mt_reg_sync_writel(wdt_mode_val, MTK_WDT_MODE);
 
-	pr_debug("wdt_arch_reset called end MTK_WDT_MODE =%x\n", wdt_mode_val);
+	/*
+	 * disable ddr reserve mode if we are doing normal reboot to avoid unexpected dram issue.
+	 * exception types:
+	 *   0: normal
+	 *   1: HWT
+	 *   2: KE
+	 *   3: nested panic
+	 *   4: mrdump key
+	 */
+	if (!(mode & WD_SW_RESET_KEEP_DDR_RESERVE))
+		mtk_rgu_dram_reserved(0);
 
 	udelay(100);
 
-	pr_debug("wdt_arch_reset: SW_reset happen\n");
-
 	__inner_flush_dcache_all();
 
-	/* dump RGU registers */
+	/* dump RGU registers (before SW reset) */
 	wdt_dump_reg();
+
+	pr_info("%s: sw reset happen!\n", __func__);
 
 	/* delay awhile to make above dump as complete as possible */
 	udelay(100);
 
 	/* trigger SW reset */
 	mt_reg_sync_writel(MTK_WDT_SWRST_KEY, MTK_WDT_SWRST);
+
+	/* dump RGU registers (after SW reset) */
+	wdt_dump_reg();
 
 	spin_unlock(&rgu_reg_operation_spinlock);
 
@@ -602,6 +617,7 @@ int mtk_wdt_swsysret_config(int bit, int set_value)
 
 	return 0;
 }
+EXPORT_SYMBOL(mtk_wdt_swsysret_config);
 
 int mtk_wdt_request_en_set(int mark_bit, enum wk_req_en en)
 {
@@ -610,11 +626,14 @@ int mtk_wdt_request_en_set(int mark_bit, enum wk_req_en en)
 	struct device_node *np_rgu;
 
 	if (!toprgu_base) {
+
 		np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
 		toprgu_base = of_iomap(np_rgu, 0);
 
-		if (!toprgu_base)
+		if (!toprgu_base) {
 			pr_info("RGU iomap failed\n");
+			return -1;
+		}
 
 		pr_info("RGU base: 0x%p, RGU irq: %d\n", toprgu_base, wdt_irq_id);
 	}
@@ -675,10 +694,15 @@ int mtk_wdt_request_mode_set(int mark_bit, enum wk_req_mode mode)
 	struct device_node *np_rgu;
 
 	if (!toprgu_base) {
+
 		np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
 		toprgu_base = of_iomap(np_rgu, 0);
-		if (!toprgu_base)
+
+		if (!toprgu_base) {
 			pr_info("RGU iomap failed\n");
+			return -1;
+		}
+
 		pr_debug("RGU base: 0x%p  RGU irq: %d\n", toprgu_base, wdt_irq_id);
 	}
 
@@ -727,12 +751,16 @@ void mtk_wdt_set_c2k_sysrst(unsigned int flag, unsigned int shift)
 	struct device_node *np_rgu;
 	unsigned int ret;
 
-	np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
-
 	if (!toprgu_base) {
+
+		np_rgu = of_find_compatible_node(NULL, NULL, rgu_of_match[0].compatible);
 		toprgu_base = of_iomap(np_rgu, 0);
-		if (!toprgu_base)
+
+		if (!toprgu_base) {
 			pr_info("mtk_wdt_set_c2k_sysrst RGU iomap failed\n");
+			return;
+		}
+
 		pr_debug("mtk_wdt_set_c2k_sysrst RGU base: 0x%p  RGU irq: %d\n", toprgu_base, wdt_irq_id);
 	}
 
@@ -924,6 +952,7 @@ void mtk_wd_suspend(void){}
 void mtk_wd_resume(void){}
 void wdt_dump_reg(void){}
 int mtk_wdt_swsysret_config(int bit, int set_value) { return 0; }
+EXPORT_SYMBOL(mtk_wdt_swsysret_config);
 int mtk_wdt_request_mode_set(int mark_bit, enum wk_req_mode mode) {return 0; }
 int mtk_wdt_request_en_set(int mark_bit, enum wk_req_en en) {return 0; }
 void mtk_wdt_set_c2k_sysrst(unsigned int flag) {}
@@ -941,7 +970,6 @@ int mtk_wdt_dfd_timeout(int value) {return 0; }
 static int mtk_wdt_probe(struct platform_device *dev)
 {
 	int ret = 0;
-	unsigned int interval_val;
 	struct device_node *node;
 	u32 ints[2] = { 0, 0 };
 
@@ -954,6 +982,8 @@ static int mtk_wdt_probe(struct platform_device *dev)
 			return -ENODEV;
 		}
 	}
+
+	mtk_wdt_mark_stage(RGU_STAGE_KERNEL);
 
 	/* get irq for AP WDT */
 	if (!wdt_irq_id) {
@@ -983,8 +1013,10 @@ static int mtk_wdt_probe(struct platform_device *dev)
 	node = of_find_compatible_node(NULL, NULL, "mediatek, mrdump_ext_rst-eint");
 
 	if (node) {
-		of_property_read_u32_array(node, "interrupts", ints, ARRAY_SIZE(ints));
-		ext_debugkey_io_eint = ints[0];
+		if (!of_property_read_u32_array(node, "interrupts", ints, ARRAY_SIZE(ints)))
+			ext_debugkey_io_eint = ints[0];
+		else
+			pr_info("failed to get interrupts in mrdump_ext_rst-eint node\n");
 	}
 
 	pr_info("ext_debugkey_eint=%d\n", ext_debugkey_io_eint);
@@ -1041,13 +1073,6 @@ static int mtk_wdt_probe(struct platform_device *dev)
 	mtk_wdt_mode_config(FALSE, FALSE, TRUE, FALSE, FALSE);
 	wdt_enable = 0;
 	#endif
-
-	/* Update interval register value and check reboot flag */
-	interval_val = __raw_readl(MTK_WDT_INTERVAL);
-	interval_val &= ~(MAGIC_NUM_MASK);
-	interval_val |= (KERNEL_MAGIC);
-	/* Write back INTERVAL REG */
-	mt_reg_sync_writel(interval_val, MTK_WDT_INTERVAL);
 
 	/* Reset External debug key */
 	mtk_wdt_request_en_set(MTK_WDT_REQ_MODE_SYSRST, WD_REQ_DIS);

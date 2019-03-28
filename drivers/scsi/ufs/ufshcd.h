@@ -179,7 +179,7 @@ struct ufshcd_lrb {
 
 	bool req_abort_skip;
 
-#ifdef CONFIG_MTK_HW_FDE
+#if defined(CONFIG_MTK_HW_FDE) || defined(CONFIG_HIE)
 	u32 crypto_en;
 	u32 crypto_cfgid;
 	u32 crypto_dunl;
@@ -395,6 +395,13 @@ struct ufs_init_prefetch {
 		 UFSHCD_DBG_PRINT_TMRS_EN | UFSHCD_DBG_PRINT_PWR_EN |	   \
 		 UFSHCD_DBG_PRINT_HOST_STATE_EN |	   \
 		 UFSHCD_DBG_PRINT_ABORT_CMD_EN)
+
+enum ufs_crypto_state {
+	UFS_CRYPTO_HW_FDE             = (1 << 0),
+	UFS_CRYPTO_HW_FDE_ENCRYPTED   = (1 << 1),
+	UFS_CRYPTO_HW_FBE             = (1 << 2),
+	UFS_CRYPTO_HW_FBE_ENCRYPTED   = (1 << 3),
+};
 
 /**
  * struct ufs_hba - per adapter private structure
@@ -643,8 +650,10 @@ struct ufs_hba {
 	struct device_attribute rpm_info_attr;
 	struct device_attribute spm_info_attr;
 
-	/* hwfde key index */
-	int hwfde_key_idx;
+	/* crypto */
+	/* hw-fde key index */
+	int crypto_hwfde_key_idx;
+	u32 crypto_feature;
 
 	int req_r_cnt;
 	int req_w_cnt;
@@ -974,7 +983,8 @@ int   ufshcd_get_req_rsp(struct utp_upiu_rsp *ucd_rsp_ptr);
 int   ufshcd_get_rsp_upiu_result(struct utp_upiu_rsp *ucd_rsp_ptr);
 int   ufshcd_get_tr_ocs(struct ufshcd_lrb *lrbp);
 int   ufshcd_make_hba_operational(struct ufs_hba *hba);
-void  ufshcd_print_host_state(struct ufs_hba *hba, u32 mphy_info, struct seq_file *m);
+void  ufshcd_print_host_state(struct ufs_hba *hba, u32 mphy_info,
+							struct seq_file *m, char **buff, unsigned long *size);
 int   ufshcd_query_attr(struct ufs_hba *hba,
 							enum query_opcode opcode,
 							enum attr_idn idn,

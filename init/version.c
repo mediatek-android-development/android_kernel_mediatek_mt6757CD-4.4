@@ -43,6 +43,7 @@ struct uts_namespace init_uts_ns = {
 EXPORT_SYMBOL_GPL(init_uts_ns);
 
 /* FIXED STRINGS! Don't touch! */
+/* Vanzo:maxiaojun on: Mon, 14 Oct 2013 14:44:14 +0800
 const char linux_banner[] =
 	"Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
 	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
@@ -51,3 +52,13 @@ const char linux_proc_banner[] =
 	"%s version %s"
 	" (" LINUX_COMPILE_BY "@" LINUX_COMPILE_HOST ")"
 	" (" LINUX_COMPILER ") %s\n";
+ */
+const char linux_banner[] =
+	"Linux version " UTS_RELEASE " (" "user" "@"
+	"linux-user" ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
+
+const char linux_proc_banner[] =
+	"%s version %s"
+	" (" "user" "@" "linux-user" ")"
+	" (" LINUX_COMPILER ") %s\n";
+// End of Vanzo:maxiaojun

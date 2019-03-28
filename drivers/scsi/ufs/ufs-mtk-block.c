@@ -29,6 +29,11 @@
 #include <mt-plat/mtk_blocktag.h>
 #include "ufs-mtk-block.h"
 
+static void ufs_mtk_bio_ctx_count_usage
+	(struct ufs_mtk_bio_context *ctx, __u64 start, __u64 end);
+static uint64_t ufs_mtk_bio_get_period_busy
+	(struct ufs_mtk_bio_context *ctx);
+
 /* ring trace for debugfs */
 struct mtk_blocktag *ufs_mtk_btag;
 
@@ -260,12 +265,69 @@ void ufs_mtk_biolog_scsi_done_end(unsigned int task_id)
 	ufs_mtk_pr_tsk(tsk, tsk_scsi_done_end);
 }
 
+static void ufs_mtk_bio_ctx_count_usage(struct ufs_mtk_bio_context *ctx,
+	__u64 start, __u64 end)
+{
+	if (start <= ctx->period_start_t) {
+		ctx->period_end_since_start_t = end;
+		ctx->period_start_in_window_t =
+		ctx->period_end_in_window_t =
+		ctx->period_busy = 0;
+	} else {
+		if (ctx->period_end_since_start_t) {
+			if (start < ctx->period_end_since_start_t)
+				ctx->period_end_since_start_t = end;
+			else
+				goto new_window;
+		} else
+			goto new_window;
+	}
+
+	goto out;
+
+new_window:
+
+	if (ctx->period_start_in_window_t) {
+		if (start > ctx->period_end_in_window_t) {
+			ctx->period_busy +=
+				(ctx->period_end_in_window_t - ctx->period_start_in_window_t);
+			ctx->period_start_in_window_t = start;
+		}
+		ctx->period_end_in_window_t = end;
+	} else {
+		ctx->period_start_in_window_t = start;
+		ctx->period_end_in_window_t = end;
+	}
+
+out:
+	return;
+}
+
+static uint64_t ufs_mtk_bio_get_period_busy(struct ufs_mtk_bio_context *ctx)
+{
+	uint64_t busy;
+
+	busy = ctx->period_busy;
+
+	if (ctx->period_end_since_start_t) {
+		busy +=
+			(ctx->period_end_since_start_t - ctx->period_start_t);
+	}
+
+	if (ctx->period_start_in_window_t) {
+		busy +=
+			(ctx->period_end_in_window_t - ctx->period_start_in_window_t);
+	}
+
+	return busy;
+}
+
 /* evaluate throughput and workload of given context */
 static void ufs_mtk_bio_context_eval(struct ufs_mtk_bio_context *ctx)
 {
 	uint64_t period;
 
-	ctx->workload.usage = ctx->period_usage;
+	ctx->workload.usage = ufs_mtk_bio_get_period_busy(ctx);
 
 	if (ctx->workload.period > (ctx->workload.usage * 100)) {
 		ctx->workload.percent = 1;
@@ -309,18 +371,6 @@ out:
 	return tr;
 }
 
-static void ufs_mtk_bio_ctx_count_usage(struct ufs_mtk_bio_context *ctx, __u64 start, __u64 end)
-{
-	__u64 busy_in_period;
-
-	if (start < ctx->period_start_t)
-		busy_in_period = end - ctx->period_start_t;
-	else
-		busy_in_period = end - start;
-
-	ctx->period_usage += busy_in_period;
-}
-
 /* Check requests after set/clear mask. */
 void ufs_mtk_biolog_check(unsigned long req_mask)
 {
@@ -351,7 +401,10 @@ void ufs_mtk_biolog_check(unsigned long req_mask)
 		tr = ufs_mtk_bio_print_trace(ctx);
 		ctx->period_start_t = end_time;
 		ctx->period_end_t = 0;
-		ctx->period_usage = 0;
+		ctx->period_busy = 0;
+		ctx->period_end_since_start_t = 0;
+		ctx->period_end_in_window_t = 0;
+		ctx->period_start_in_window_t = 0;
 		memset(&ctx->throughput, 0, sizeof(struct mtk_btag_throughput));
 		memset(&ctx->workload, 0, sizeof(struct mtk_btag_workload));
 	}
@@ -360,7 +413,24 @@ void ufs_mtk_biolog_check(unsigned long req_mask)
 	mtk_btag_klog(ufs_mtk_btag, tr);
 }
 
-static size_t ufs_mtk_bio_seq_debug_show_info(struct seq_file *seq)
+#define SPREAD_PRINTF(buff, size, evt, fmt, args...) \
+do { \
+	if (buff && size && *(size)) { \
+		unsigned long var = snprintf(*(buff), *(size), fmt, ##args); \
+		if (var > 0) { \
+			*(size) -= var; \
+			*(buff) += var; \
+		} \
+	} \
+	if (evt) \
+		seq_printf(evt, fmt, ##args); \
+	if (!buff && !evt) { \
+		pr_info(fmt, ##args); \
+	} \
+} while (0)
+
+static size_t ufs_mtk_bio_seq_debug_show_info(char **buff, unsigned long *size,
+	struct seq_file *seq)
 {
 	int i;
 	struct ufs_mtk_bio_context *ctx = BTAG_CTX(ufs_mtk_btag);
@@ -371,7 +441,7 @@ static size_t ufs_mtk_bio_seq_debug_show_info(struct seq_file *seq)
 	for (i = 0; i < UFS_BIOLOG_CONTEXTS; i++)	{
 		if (ctx[i].pid == 0)
 			continue;
-		seq_printf(seq, "ctx[%d]=ctx_map[%d],pid:%4d,q:%d\n",
+		SPREAD_PRINTF(buff, size, seq, "ctx[%d]=ctx_map[%d],pid:%4d,q:%d\n",
 			i,
 			ctx[i].id,
 			ctx[i].pid,

@@ -203,7 +203,7 @@ typedef void (*emi_mpu_notifier)(u32 addr, int wr_vio);
 
 extern int emi_mpu_set_region_protection(unsigned long long start_addr,
 unsigned long long end_addr, int region, unsigned int access_permission);
-#if defined(CONFIG_MTKPASR)
+#if defined(CONFIG_MTK_PASR)
 extern void acquire_dram_setting(struct basic_dram_setting *pasrdpd);
 #endif
 extern void emi_wp_get_status(void);

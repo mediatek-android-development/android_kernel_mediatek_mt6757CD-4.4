@@ -270,6 +270,7 @@ int sspm_ipi_recv_registration(int mid, struct ipi_action *act)
 
 	return IPI_REG_OK;
 }
+EXPORT_SYMBOL(sspm_ipi_recv_registration);
 
 int sspm_ipi_recv_registration_ex(int mid, spinlock_t *lock, struct ipi_action *act)
 {
@@ -303,6 +304,24 @@ int sspm_ipi_recv_wait(int mid)
 
 	return 0;
 }
+EXPORT_SYMBOL(sspm_ipi_recv_wait);
+
+void sspm_ipi_recv_complete(int mid)
+{
+	complete(&sema_ipi_task[mid]);
+}
+EXPORT_SYMBOL(sspm_ipi_recv_complete);
+
+int sspm_ipi_recv_unregistration(int mid)
+{
+	struct _pin_recv *pin;
+
+	pin = &(recv_pintable[mid]);
+	pin->act = NULL;
+	return IPI_REG_OK;
+}
+EXPORT_SYMBOL(sspm_ipi_recv_unregistration);
+
 
 static void ipi_do_ack(struct _mbox_info *mbox, unsigned int in_irq, void __iomem *base)
 {
@@ -567,6 +586,7 @@ int sspm_ipi_send_ack(int mid, unsigned int *data)
 
 	return sspm_ipi_send_ack_ex(mid, data, len);
 }
+EXPORT_SYMBOL(sspm_ipi_send_ack);
 
 int sspm_ipi_send_ack_ex(int mid, void *data, int retslot)
 {
@@ -723,6 +743,7 @@ int sspm_ipi_send_sync(int mid, int opts, void *buffer, int slot,
 	sspm_ipi_lock_spm_scenario(0, mid, opts, pin_name[mid]);
 	return ret;
 }
+EXPORT_SYMBOL(sspm_ipi_send_sync);
 
 static unsigned int ipi_isr_cb(unsigned int mbno, void __iomem *base, unsigned int irq)
 {

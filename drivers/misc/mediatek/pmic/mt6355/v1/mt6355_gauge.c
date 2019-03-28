@@ -89,9 +89,21 @@ static signed int REG_to_MV_value(signed int _reg)
 
 static signed int MV_to_REG_value(signed int _mv)
 {
-	int ret = (_mv * ADC_PRECISE) / (VOLTAGE_FULL_RANGE * 10 * R_VAL_TEMP_3);
+	int ret;
+	long long _reg64 = _mv;
+#if defined(__LP64__) || defined(_LP64)
+	_reg64 = (_reg64 * ADC_PRECISE) / (VOLTAGE_FULL_RANGE * 10 * R_VAL_TEMP_3);
+#else
+	_reg64 = div_s64((_reg64 * ADC_PRECISE), (VOLTAGE_FULL_RANGE * 10 * R_VAL_TEMP_3));
+#endif
+	ret = _reg64;
 
-	bm_trace("[MV_to_REG_value] %d => %d\n", _mv, ret);
+	if (ret <= 0) {
+		bm_err("[fg_bat_nafg][MV_to_REG_value] mv=%d,%lld => %d,\n", _mv, _reg64, ret);
+		return ret;
+	}
+
+	bm_trace("[MV_to_REG_value] mv=%d,%lld => %d,\n", _mv, _reg64, ret);
 	return ret;
 }
 
@@ -191,7 +203,7 @@ static void read_fg_hw_info_Iavg(struct gauge_device *gauge_dev, int *is_iavg_va
 	long long fg_iavg_reg = 0;
 	long long fg_iavg_reg_tmp = 0;
 	long long fg_iavg_ma = 0;
-	long long fg_iavg_reg_27_16 = 0;
+	int fg_iavg_reg_27_16 = 0;
 	int fg_iavg_reg_15_00 = 0;
 	int sign_bit = 0;
 	int is_bat_charging;
@@ -203,7 +215,7 @@ static void read_fg_hw_info_Iavg(struct gauge_device *gauge_dev, int *is_iavg_va
 	if (valid_bit == 1) {
 		fg_iavg_reg_27_16 = pmic_get_register_value(PMIC_FG_IAVG_27_16);
 		fg_iavg_reg_15_00 = pmic_get_register_value(PMIC_FG_IAVG_15_00);
-		fg_iavg_reg = (fg_iavg_reg_27_16 << 16) + fg_iavg_reg_15_00;
+		fg_iavg_reg = ((long long)fg_iavg_reg_27_16 << 16) + fg_iavg_reg_15_00;
 		sign_bit = (fg_iavg_reg_27_16 & 0x800) >> 11;
 
 		if (sign_bit) {
@@ -232,7 +244,7 @@ static void read_fg_hw_info_Iavg(struct gauge_device *gauge_dev, int *is_iavg_va
 	}
 
 	bm_debug(
-		"[read_fg_hw_info_Iavg] fg_iavg_reg 0x%llx fg_iavg_reg_tmp 0x%llx 27_16 0x%llx 15_00 0x%x\n",
+		"[read_fg_hw_info_Iavg] fg_iavg_reg 0x%llx fg_iavg_reg_tmp 0x%llx 27_16 0x%x 15_00 0x%x\n",
 			fg_iavg_reg, fg_iavg_reg_tmp, fg_iavg_reg_27_16, fg_iavg_reg_15_00);
 	bm_debug(
 		"[read_fg_hw_info_Iavg] is_bat_charging %d fg_iavg_ma 0x%llx\n",
@@ -246,7 +258,7 @@ static signed int fg_get_current_iavg(struct gauge_device *gauge_dev, int *data)
 	long long fg_iavg_reg = 0;
 	long long fg_iavg_reg_tmp = 0;
 	long long fg_iavg_ma = 0;
-	long long fg_iavg_reg_27_16 = 0;
+	int fg_iavg_reg_27_16 = 0;
 	int fg_iavg_reg_15_00 = 0;
 	int sign_bit = 0;
 	int is_bat_charging;
@@ -267,7 +279,7 @@ static signed int fg_get_current_iavg(struct gauge_device *gauge_dev, int *data)
 	if (pmic_get_register_value(PMIC_FG_IAVG_VLD) == 1) {
 		fg_iavg_reg_27_16 = pmic_get_register_value(PMIC_FG_IAVG_27_16);
 		fg_iavg_reg_15_00 = pmic_get_register_value(PMIC_FG_IAVG_15_00);
-		fg_iavg_reg = (fg_iavg_reg_27_16 << 16) + fg_iavg_reg_15_00;
+		fg_iavg_reg = ((long long)fg_iavg_reg_27_16 << 16) + fg_iavg_reg_15_00;
 		sign_bit = (fg_iavg_reg_27_16 & 0x800) >> 11;
 
 		if (sign_bit) {
@@ -296,7 +308,7 @@ static signed int fg_get_current_iavg(struct gauge_device *gauge_dev, int *data)
 			fg_iavg_ma = 0 - fg_iavg_ma;
 
 		bm_trace(
-			"[fg_get_current_iavg] fg_iavg_ma %lld fg_iavg_reg %lld r_fg_value %d 27_16 0x%llx 15_00 0x%x\n",
+			"[fg_get_current_iavg] fg_iavg_ma %lld fg_iavg_reg %lld r_fg_value %d 27_16 0x%x 15_00 0x%x\n",
 			fg_iavg_ma, fg_iavg_reg, gauge_dev->fg_cust_data->r_fg_value,
 			fg_iavg_reg_27_16, fg_iavg_reg_15_00);
 			gauge_dev->fg_hw_info.current_avg = fg_iavg_ma;
@@ -637,7 +649,7 @@ static int fgauge_get_average_current(struct gauge_device *gauge_dev, int *data,
 	long long fg_iavg_reg = 0;
 	long long fg_iavg_reg_tmp = 0;
 	long long fg_iavg_ma = 0;
-	long long fg_iavg_reg_27_16 = 0;
+	int fg_iavg_reg_27_16 = 0;
 	int fg_iavg_reg_15_00 = 0;
 	int sign_bit = 0;
 	int is_bat_charging;
@@ -658,7 +670,7 @@ static int fgauge_get_average_current(struct gauge_device *gauge_dev, int *data,
 	if (pmic_get_register_value(PMIC_FG_IAVG_VLD) == 1) {
 		fg_iavg_reg_27_16 = pmic_get_register_value(PMIC_FG_IAVG_27_16);
 		fg_iavg_reg_15_00 = pmic_get_register_value(PMIC_FG_IAVG_15_00);
-		fg_iavg_reg = (fg_iavg_reg_27_16 << 16) + fg_iavg_reg_15_00;
+		fg_iavg_reg = ((long long)fg_iavg_reg_27_16 << 16) + fg_iavg_reg_15_00;
 		sign_bit = (fg_iavg_reg_27_16 & 0x800) >> 11;
 
 		if (sign_bit) {
@@ -677,7 +689,7 @@ static int fgauge_get_average_current(struct gauge_device *gauge_dev, int *data,
 			fg_iavg_ma, fg_iavg_reg, fg_iavg_reg_tmp);
 
 		do_div(fg_iavg_ma, 1000000);
-		/* bm_trace("[fg_get_current_iavg] fg_iavg_ma %lld\n", fg_iavg_ma); */
+		bm_trace("[fg_get_current_iavg] fg_iavg_ma %lld\n", fg_iavg_ma);
 
 		do_div(fg_iavg_ma, gauge_dev->fg_cust_data->r_fg_value);
 		bm_trace("[fg_get_current_iavg] fg_iavg_ma %lld\n", fg_iavg_ma);
@@ -687,7 +699,7 @@ static int fgauge_get_average_current(struct gauge_device *gauge_dev, int *data,
 			fg_iavg_ma = 0 - fg_iavg_ma;
 
 		bm_trace(
-			"[fg_get_current_iavg] fg_iavg_ma %lld fg_iavg_reg %lld r_fg_value %d 27_16 0x%llx 15_00 0x%x\n",
+			"[fg_get_current_iavg] fg_iavg_ma %lld fg_iavg_reg %lld r_fg_value %d 27_16 0x%x 15_00 0x%x\n",
 			fg_iavg_ma, fg_iavg_reg, gauge_dev->fg_cust_data->r_fg_value,
 			fg_iavg_reg_27_16, fg_iavg_reg_15_00);
 			gauge_dev->fg_hw_info.current_avg = fg_iavg_ma;
@@ -1110,6 +1122,13 @@ int read_hw_ocv(struct gauge_device *gauge_dev, int *data)
 			_hw_ocv = _sw_ocv;
 			_hw_ocv_src = FROM_SW_OCV;
 		}
+	}
+
+	/* final chance to check hwocv */
+	if (_hw_ocv < 30000) {
+		bm_err("[read_hw_ocv] ERROR, _hw_ocv=%d, force use swocv\n", _hw_ocv);
+		_hw_ocv = _sw_ocv;
+		_hw_ocv_src = FROM_SW_OCV;
 	}
 
 	*data = _hw_ocv;
@@ -2401,9 +2420,8 @@ static int fgauge_enable_car_tune_value_calibration(struct gauge_device *gauge_d
 		bm_err("[444]sum_all %lld temp_sum %lld avg_cnt %d current_from_ADC %lld\n",
 			sum_all, temp_sum, avg_cnt, current_from_ADC);
 
-		if (avg_cnt > 0)
+		if (avg_cnt != 0)
 			do_div(temp_sum, avg_cnt);
-
 		current_from_ADC = temp_sum;
 
 		bm_err("[555]sum_all %lld temp_sum %lld avg_cnt %d current_from_ADC %lld\n",
@@ -2443,7 +2461,6 @@ static int fgauge_enable_car_tune_value_calibration(struct gauge_device *gauge_d
 				cali_car_tune, meta_input_cali_current, current_from_ADC,
 				UNIT_FGCURRENT, gauge_dev->fg_cust_data->r_fg_value);
 		}
-
 		return 0;
 	}
 
