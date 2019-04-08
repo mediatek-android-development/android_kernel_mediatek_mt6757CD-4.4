@@ -867,7 +867,7 @@ static int gf_fasync(int fd, struct file *filp, int mode)
 	return ret;
 }
 #endif
-/*
+
 //xiaowen, add start
 static unsigned int gf_fp_poll(struct file *file, poll_table *wait)
 {
@@ -883,7 +883,7 @@ static unsigned int gf_fp_poll(struct file *file, poll_table *wait)
 	return mask;
 }
 //xiaowen, add end
-*/
+
 static int gf_release(struct inode *inode, struct file *filp)
 {
 	struct gf_dev *gf_dev;
@@ -922,7 +922,7 @@ static const struct file_operations gf_fops = {
 #ifdef GF_FASYNC
 	.fasync = gf_fasync,
 #endif
-       //.poll = gf_fp_poll,
+     .poll = gf_fp_poll,
 };
 
 /* The main reason to have this class is to make mdev/udev create the
@@ -1254,13 +1254,13 @@ static int gf_remove(struct spi_device *spi)
 
 
 	/* make sure ops on existing fds can abort cleanly */
-	if (gf_dev->spi->irq)
+	if (gf_dev->spi->irq) {
 		free_irq(gf_dev->spi->irq, gf_dev);
-
-	if (gf_dev->input != NULL)
-		input_unregister_device(gf_dev->input);
-		input_free_device(gf_dev->input);
-
+    }
+	        if (gf_dev->input != NULL) {
+		        input_unregister_device(gf_dev->input);
+		        input_free_device(gf_dev->input);
+            }
 	/* prevent new opens */
 	mutex_lock(&device_list_lock);
 	list_del(&gf_dev->device_entry);

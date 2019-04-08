@@ -46,9 +46,9 @@ static bool selective_read_eeprom(kal_uint16 addr, BYTE* data)
     if(addr > S5K3P3_MAX_OFFSET)
         return false;
 
-	if(iReadRegI2C(pu_send_cmd, 2, (u8*)data, 1, S5K3P3_EEPROM_WRITE_ID)<0)
-		return false;
-    return true;
+	    if(iReadRegI2C(pu_send_cmd, 2, (u8*)data, 1, S5K3P3_EEPROM_WRITE_ID)<0)
+		    return false;
+        return true;
 }
 
 static bool _read_3P3_eeprom(kal_uint16 addr, BYTE* data, kal_uint32 size ){

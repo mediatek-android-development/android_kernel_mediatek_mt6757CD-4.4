@@ -153,7 +153,7 @@ static bool usb_enable_clock(bool enable)
 		else
 			clk_count = (clk_count == 0) ? 0 : (clk_count-1);
 
-			spin_unlock_irqrestore(&musb_reg_clock_lock, flags);
+		spin_unlock_irqrestore(&musb_reg_clock_lock, flags);
 
 #ifdef USB_CLK_DEBUG
 	if (get_clk_io) {

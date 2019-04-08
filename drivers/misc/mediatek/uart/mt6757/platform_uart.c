@@ -819,10 +819,7 @@ void mtk_uart_dma_vfifo_tx_tasklet(unsigned long arg)
 	unsigned long flags;
 
 	spin_lock_irqsave(&vfifo->iolock, flags);
-	if (atomic_inc_and_test(&vfifo->entry) > 1) {
-		MSG(ERR, "tx entry!!\n");
-		tasklet_schedule(&vfifo->dma->tasklet);
-	} else {
+     {
 		while (UART_READ32(VFF_LEFT_SIZE(base)) >= vfifo->trig) {
 			/* deal with x_char first */
 			if (unlikely(port->x_char)) {
@@ -1097,13 +1094,11 @@ void mtk_uart_dma_vfifo_rx_tasklet(unsigned long arg)
 
 	MSG(DMA, "%d, %x, %x\n", uart->read_allow(uart), UART_READ32(VFF_VALID_SIZE(vfifo->base)), vfifo->trig);
 	spin_lock_irqsave(&vfifo->iolock, flags);
-	if (atomic_inc_and_test(&vfifo->entry) > 1) {
-		MSG(ERR, "rx entry!!\n");
-		tasklet_schedule(&vfifo->dma->tasklet);
-	} else {
-		if (uart->read_allow(uart))
-			mtk_uart_dma_vfifo_rx_tasklet_str(arg);
-	}
+	atomic_inc(&vfifo->entry);
+
+	if (uart->read_allow(uart))
+		mtk_uart_dma_vfifo_rx_tasklet_str(arg);
+
 	atomic_dec(&vfifo->entry);
 	spin_unlock_irqrestore(&vfifo->iolock, flags);
 }
